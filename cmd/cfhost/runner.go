@@ -7,21 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-)
-
-const (
-	hostsBegin = "# >>> CFHOST MANAGED >>>"
-	hostsEnd   = "# <<< CFHOST MANAGED <<<"
 )
 
 type Candidate struct {
@@ -38,9 +30,7 @@ func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
 	_ = os.Remove(resultPath)
 
 	ipFile := getenv("CFST_IP_FILE", "/app/ip.txt")
-	if cfg.CFST.IPv6 {
-		ipFile = getenv("CFST_IPV6_FILE", "/app/ipv6.txt")
-	}
+	if cfg.CFST.IPv6 { ipFile = getenv("CFST_IPV6_FILE", "/app/ipv6.txt") }
 	args := []string{
 		"-n", strconv.Itoa(cfg.CFST.Threads),
 		"-t", strconv.Itoa(cfg.CFST.PingTimes),
@@ -53,248 +43,51 @@ func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
 		"-f", ipFile,
 		"-o", resultPath,
 	}
-	if strings.TrimSpace(cfg.CFST.DownloadURL) != "" {
-		args = append(args, "-url", cfg.CFST.DownloadURL)
-	}
+	if strings.TrimSpace(cfg.CFST.DownloadURL) != "" { args = append(args, "-url", cfg.CFST.DownloadURL) }
 
 	a.appendLog("CFST: %s", strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, a.cfstBin, args...)
 	cmd.Dir = a.dataDir
 	out, err := cmd.CombinedOutput()
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.TrimSpace(line) != "" {
-			a.appendLog("cfst | %s", line)
-		}
+		if strings.TrimSpace(line) != "" { a.appendLog("cfst | %s", line) }
 	}
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("CFST timed out")
-		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) { return nil, fmt.Errorf("CFST timed out") }
 		return nil, fmt.Errorf("CFST failed: %w", err)
 	}
 	candidates, err := parseCandidates(resultPath)
-	if err != nil {
-		return nil, err
-	}
-	if len(candidates) == 0 {
-		return nil, errors.New("CFST returned no candidates")
-	}
+	if err != nil { return nil, err }
+	if len(candidates) == 0 { return nil, errors.New("CFST returned no candidates") }
 	observed := time.Now().Format(time.RFC3339)
-	for i := range candidates {
-		candidates[i].ObservedAt = observed
-	}
-	candidates = rankCandidates(candidates)
+	for i := range candidates { candidates[i].ObservedAt = observed }
+	candidates = rankCandidatesForClass(candidates, "latency")
 	a.appendLog("CFST returned %d candidates", len(candidates))
 	return candidates, nil
 }
 
 func parseCandidates(path string) ([]Candidate, error) {
 	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open CFST result: %w", err)
-	}
+	if err != nil { return nil, fmt.Errorf("open CFST result: %w", err) }
 	defer f.Close()
 	r := csv.NewReader(f)
 	records, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("read CFST result: %w", err)
-	}
-	if len(records) < 2 {
-		return nil, nil
-	}
+	if err != nil { return nil, fmt.Errorf("read CFST result: %w", err) }
+	if len(records) < 2 { return nil, nil }
 	out := make([]Candidate, 0, len(records)-1)
 	for _, row := range records[1:] {
-		if len(row) < 6 {
-			continue
-		}
+		if len(row) < 6 { continue }
 		loss, _ := strconv.ParseFloat(strings.TrimSpace(row[3]), 64)
 		delay, _ := strconv.ParseFloat(strings.TrimSpace(row[4]), 64)
 		speed, _ := strconv.ParseFloat(strings.TrimSpace(row[5]), 64)
 		colo := ""
-		if len(row) > 6 {
-			colo = strings.TrimSpace(row[6])
-		}
+		if len(row) > 6 { colo = strings.TrimSpace(row[6]) }
 		ip := strings.TrimSpace(row[0])
-		if net.ParseIP(ip) == nil {
-			continue
-		}
+		if net.ParseIP(ip) == nil { continue }
 		out = append(out, Candidate{IP: ip, LossRate: loss, DelayMS: delay, SpeedMB: speed, Colo: colo})
 	}
 	return out, nil
 }
 
-func rankCandidates(in []Candidate) []Candidate {
-	out := append([]Candidate(nil), in...)
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].LossRate != out[j].LossRate {
-			return out[i].LossRate < out[j].LossRate
-		}
-		if out[i].DelayMS != out[j].DelayMS {
-			return out[i].DelayMS < out[j].DelayMS
-		}
-		if out[i].SpeedMB != out[j].SpeedMB {
-			return out[i].SpeedMB > out[j].SpeedMB
-		}
-		return out[i].IP < out[j].IP
-	})
-	return out
-}
-
-func freshCandidates(in []Candidate, ttl time.Duration, now time.Time) []Candidate {
-	out := make([]Candidate, 0, len(in))
-	for _, c := range in {
-		observed, err := time.Parse(time.RFC3339, c.ObservedAt)
-		if err != nil || now.Before(observed) || now.Sub(observed) > ttl {
-			continue
-		}
-		out = append(out, c)
-	}
-	return rankCandidates(out)
-}
-
-func orderedCandidates(all []Candidate, preferred, skipIP string) []Candidate {
-	ranked := rankCandidates(all)
-	out := make([]Candidate, 0, len(ranked))
-	if preferred != "" && preferred != skipIP {
-		for _, c := range ranked {
-			if c.IP == preferred {
-				out = append(out, c)
-				break
-			}
-		}
-	}
-	for _, c := range ranked {
-		if c.IP == skipIP || c.IP == preferred {
-			continue
-		}
-		out = append(out, c)
-	}
-	return out
-}
-
-func verifyHTTPDomain(parent context.Context, d Domain, ip string, timeoutSeconds int) (bool, string) {
-	timeout := time.Duration(timeoutSeconds) * time.Second
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	dialer := &net.Dialer{Timeout: timeout}
-	transport := &http.Transport{
-		ForceAttemptHTTP2: true,
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ip, "443"))
-		},
-	}
-	defer transport.CloseIdleConnections()
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	endpoint := d.Endpoint
-	if endpoint == "" {
-		endpoint = "/"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Host+endpoint, nil)
-	if err != nil {
-		return false, "request error"
-	}
-	req.Header.Set("User-Agent", "CFHost/0.2")
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err.Error()
-	}
-	defer resp.Body.Close()
-	_, _ = io.CopyN(io.Discard, resp.Body, 4096)
-
-	if resp.StatusCode < 100 || resp.StatusCode > 599 {
-		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
-	}
-	return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
-}
-
-func (a *App) applyMappings(hostsPath string, mappings map[string]string) error {
-	current, err := os.ReadFile(hostsPath)
-	if err != nil {
-		return fmt.Errorf("read hosts: %w", err)
-	}
-	rendered := renderHosts(string(current), mappings)
-	if rendered == string(current) {
-		a.appendLog("hosts unchanged")
-		return nil
-	}
-
-	backup := filepath.Join(a.dataDir, "hosts-backup-"+time.Now().Format("20060102-150405"))
-	if err := os.WriteFile(backup, current, 0644); err != nil {
-		return fmt.Errorf("backup hosts: %w", err)
-	}
-	f, err := os.OpenFile(hostsPath, os.O_WRONLY|os.O_TRUNC, 0)
-	if err != nil {
-		return fmt.Errorf("open hosts for write: %w", err)
-	}
-	if _, err := io.Copy(f, strings.NewReader(rendered)); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write hosts: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("sync hosts: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	a.appendLog("hosts applied: %d mappings", len(mappings))
-	return nil
-}
-
-func renderHosts(existing string, mappings map[string]string) string {
-	lines := strings.Split(strings.ReplaceAll(existing, "\r\n", "\n"), "\n")
-	out := make([]string, 0, len(lines)+len(mappings)+3)
-	skipping := false
-	hadMarker := false
-	for _, line := range lines {
-		switch strings.TrimSpace(line) {
-		case hostsBegin:
-			hadMarker = true
-			skipping = true
-			continue
-		case hostsEnd:
-			hadMarker = true
-			skipping = false
-			continue
-		}
-		if !skipping {
-			out = append(out, line)
-		}
-	}
-	if len(mappings) == 0 && !hadMarker {
-		return existing
-	}
-	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
-		out = out[:len(out)-1]
-	}
-	if len(mappings) > 0 {
-		out = append(out, "", hostsBegin)
-		hosts := make([]string, 0, len(mappings))
-		for host := range mappings {
-			hosts = append(hosts, host)
-		}
-		sort.Strings(hosts)
-		for _, host := range hosts {
-			out = append(out, mappings[host]+" "+host)
-		}
-		out = append(out, hostsEnd)
-	}
-	out = append(out, "")
-	return strings.Join(out, "\n")
-}
-
-func decodeJSON(b []byte, v any) error {
-	return json.NewDecoder(bytes.NewReader(b)).Decode(v)
-}
-
-func logLine(format string, args ...any) string {
-	return time.Now().Format("15:04:05") + " " + fmt.Sprintf(format, args...)
-}
+func decodeJSON(b []byte, v any) error { return json.NewDecoder(bytes.NewReader(b)).Decode(v) }
+func logLine(format string, args ...any) string { return time.Now().Format("15:04:05") + " " + fmt.Sprintf(format, args...) }

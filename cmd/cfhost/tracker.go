@@ -84,8 +84,11 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 	return out, nil
 }
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
-	if d.Mode != "tracker" || !cfg.Tracker.RealAnnounce {
-		return verifyHTTPDomain(ctx, d, ip, cfg.VerifyTimeoutSeconds)
+	if d.Mode != "tracker" {
+		return verifyHTTPDomain(ctx, d, ip, cfg)
+	}
+	if !cfg.Tracker.RealAnnounce {
+		return verifyHTTPConnectivity(ctx, d, ip, cfg)
 	}
 	sample, ok := samples[d.Host]
 	if !ok {
