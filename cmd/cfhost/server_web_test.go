@@ -127,3 +127,31 @@ func TestDashboardPollingDoesNotRestartCounterAnimation(t *testing.T) {
 		t.Fatal("initial page load should retain dashboard counter animation")
 	}
 }
+
+
+func TestAppearancePopoverSurvivesSidebarToggle(t *testing.T) {
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := webAssets.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsJS := string(events)
+	indexHTML := string(index)
+
+	const toggle = `data-action="open-appearance"`
+	toggles := strings.Count(indexHTML, toggle)
+	if toggles < 2 {
+		t.Fatalf("expected at least 2 appearance toggles in index.html, found %d", toggles)
+	}
+	anchor := strings.Index(indexHTML, `class="popover-anchor"`)
+	firstToggle := strings.Index(indexHTML, toggle)
+	if anchor < 0 || firstToggle < 0 || firstToggle > anchor {
+		t.Fatal("expected an appearance toggle outside .popover-anchor (sidebar footer)")
+	}
+	if !strings.Contains(eventsJS, "action !== 'open-appearance'") {
+		t.Fatal("outside-click must not close the popover opened by an appearance toggle")
+	}
+}
