@@ -292,10 +292,7 @@ func skipBencodeValue(data []byte, pos *int, depth int) bool {
 			return false
 		}
 		number := string(data[start:*pos])
-		if (len(number) > 1 && number[0] == '0') || number == "-0" {
-			return false
-		}
-		if _, err := strconv.ParseInt(number, 10, 64); err != nil {
+		if !validBencodeInteger(number) {
 			return false
 		}
 		(*pos)++
@@ -338,6 +335,30 @@ func skipBencodeValue(data []byte, pos *int, depth int) bool {
 		}
 		return false
 	}
+}
+
+func validBencodeInteger(value string) bool {
+	if value == "0" {
+		return true
+	}
+	if value == "" {
+		return false
+	}
+	start := 0
+	if value[0] == '-' {
+		if len(value) == 1 || value[1] == '0' {
+			return false
+		}
+		start = 1
+	} else if value[0] == '0' {
+		return false
+	}
+	for i := start; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Trackers sometimes echo request parameters back in the failure reason.
