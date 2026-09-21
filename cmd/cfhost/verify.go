@@ -154,16 +154,19 @@ func strictHTTPAttempt(parent context.Context, d Domain, ip string, cfg Config) 
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
 	if readErr != nil { return false, "body read failed: " + readErr.Error() }
-	finalURL := resp.Request.URL.String()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Sprintf("HTTP %d final=%s", resp.StatusCode, finalURL)
+	return evaluateStrictHTTPResponse(resp.StatusCode, body, resp.Request.URL.String(), cfg)
+}
+
+func evaluateStrictHTTPResponse(status int, body []byte, finalURL string, cfg Config) (bool, string) {
+	if status < 200 || status >= 300 {
+		return false, fmt.Sprintf("HTTP %d final=%s", status, finalURL)
 	}
 	pattern, _ := regexp.Compile("(?i)" + cfg.Verify.BlockPatterns)
 	if pattern != nil && pattern.Find(body) != nil {
-		return false, fmt.Sprintf("HTTP %d challenge-or-placeholder final=%s", resp.StatusCode, finalURL)
+		return false, fmt.Sprintf("HTTP %d challenge-or-placeholder final=%s", status, finalURL)
 	}
-	if resp.StatusCode == http.StatusOK && len(body) < cfg.Verify.MinBodyBytes {
+	if status == http.StatusOK && len(body) < cfg.Verify.MinBodyBytes {
 		return false, fmt.Sprintf("HTTP 200 body-too-small=%d final=%s", len(body), finalURL)
 	}
-	return true, fmt.Sprintf("HTTP %d bytes=%d final=%s", resp.StatusCode, len(body), finalURL)
+	return true, fmt.Sprintf("HTTP %d bytes=%d final=%s", status, len(body), finalURL)
 }
