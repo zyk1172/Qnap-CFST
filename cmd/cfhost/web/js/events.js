@@ -240,7 +240,7 @@ async function boot() {
     await loadAll()
     store.page = currentPageFromHash()
     updateNavigation()
-    renderPage(false, false)
+    renderPage(false, true)
     updateShellStatus()
     $('#app').setAttribute('aria-hidden', 'false')
     setTimeout(() => $('#boot-screen').classList.add('is-hidden'), 100)
