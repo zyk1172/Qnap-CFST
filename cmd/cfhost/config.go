@@ -281,7 +281,7 @@ func normalizeConfig(c *Config) error {
 		d.Mode = strings.ToLower(strings.TrimSpace(d.Mode))
 		d.Endpoint = strings.TrimSpace(d.Endpoint)
 		if d.Host == "" || seen[d.Host] { continue }
-		if d.Class != "bandwidth" { d.Class = "latency" }
+		if d.Class != "latency" && d.Class != "bandwidth" && d.Class != "normal" { d.Class = "latency" }
 		if d.Mode != "tracker" { d.Mode = "http" }
 		if d.Endpoint == "" { d.Endpoint = "/" }
 		if !strings.HasPrefix(d.Endpoint, "/") { d.Endpoint = "/" + d.Endpoint }
