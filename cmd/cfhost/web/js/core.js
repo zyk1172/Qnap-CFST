@@ -277,14 +277,31 @@ function updateNavigation() {
 function updateShellStatus() {
   const running = !!store.state?.running
   const error = store.state?.lastError
-  const text = running ? jobLabel(store.state.currentJob) : (error ? '需要注意' : '运行正常')
-  const subtitle = running ? '任务执行中' : (store.state?.lastSuccess ? `最近成功 ${fmtTime(store.state.lastSuccess, true)}` : 'CFHost Service')
+  const counts = statusCounts()
+  const unresolved = counts.failed > 0
+  const text = running
+    ? jobLabel(store.state.currentJob)
+    : error
+      ? '需要注意'
+      : unresolved
+        ? '有域名待处理'
+        : '运行正常'
+  const subtitle = running
+    ? '任务执行中'
+    : error
+      ? String(error)
+      : unresolved
+        ? `${counts.failed} 个域名当前无映射`
+        : store.state?.lastSuccess
+          ? `最近成功 ${fmtTime(store.state.lastSuccess, true)}`
+          : 'CFHost Service'
+  const statusClass = running ? 'is-running' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
   $('#sidebar-status').textContent = text
   $('#sidebar-subtitle').textContent = subtitle
   const sideDot = $('#sidebar-status-dot')
-  sideDot.className = `status-dot ${running ? 'is-running' : error ? 'is-error' : 'is-ok'}`
+  sideDot.className = `status-dot ${statusClass}`
   const top = $('#topbar-service')
-  top.innerHTML = `<span class="status-dot ${running ? 'is-running' : error ? 'is-error' : 'is-ok'}"></span><span>${esc(text)}</span>`
+  top.innerHTML = `<span class="status-dot ${statusClass}"></span><span>${esc(text)}</span>`
   $('#job-progress').classList.toggle('is-active', running)
   const badge = $('#domain-nav-badge')
   if (badge) badge.textContent = String((store.config?.domains || []).filter(domain => domain.enabled).length)
