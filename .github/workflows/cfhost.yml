@@ -16,6 +16,14 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
+      - name: Validate Web UI JavaScript
+        run: |
+          node --check cmd/cfhost/web/js/core.js
+          node --check cmd/cfhost/web/js/dashboard-domains.js
+          node --check cmd/cfhost/web/js/candidates-ops-logs.js
+          node --check cmd/cfhost/web/js/settings.js
+          node --check cmd/cfhost/web/js/interactions.js
+          node --check cmd/cfhost/web/js/events.js
       - run: go test ./cmd/cfhost
       - run: go build ./...
       - run: docker build -t cfhost:test .

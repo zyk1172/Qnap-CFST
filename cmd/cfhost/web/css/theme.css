@@ -1,0 +1,113 @@
+:root {
+  --primary: #8d51f9;
+  --primary-rgb: 141, 81, 249;
+  --primary-soft: rgba(141, 81, 249, .12);
+  --primary-strong: #7540df;
+  --success: #27b67a;
+  --success-rgb: 39, 182, 122;
+  --warning: #e5a63c;
+  --warning-rgb: 229, 166, 60;
+  --danger: #e45454;
+  --danger-rgb: 228, 84, 84;
+  --info: #4d8df7;
+  --info-rgb: 77, 141, 247;
+  --bg: #f4f5fa;
+  --surface: #fff;
+  --surface-soft: #f8f8fc;
+  --surface-raised: #fff;
+  --text: #252632;
+  --text-strong: #171821;
+  --muted: #767887;
+  --muted-2: #a2a4b0;
+  --border: rgba(39, 40, 51, .08);
+  --border-strong: rgba(39, 40, 51, .12);
+  --shadow: 0 3px 16px rgba(32, 34, 49, .06);
+  --shadow-hover: 0 10px 30px rgba(32, 34, 49, .11);
+  --overlay: rgba(23, 24, 33, .42);
+  --sidebar: #fff;
+  --input: #fff;
+  --code: #1b1d28;
+  --topbar-bg: rgba(244, 245, 250, .78);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --sidebar-width: 264px;
+  --sidebar-collapsed: 84px;
+  --topbar-height: 72px;
+  --page-width: 1500px;
+  --motion-page: 180ms;
+  --motion-overlay: 180ms;
+  --motion-shell: 240ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
+}
+
+html[data-theme="dark"] {
+  --bg: #0e1116;
+  --surface: #171a20;
+  --surface-soft: #1c2027;
+  --surface-raised: #20242c;
+  --text: #e8e9ee;
+  --text-strong: #fff;
+  --muted: #9498a3;
+  --muted-2: #686d79;
+  --border: rgba(255, 255, 255, .075);
+  --border-strong: rgba(255, 255, 255, .12);
+  --shadow: 0 4px 18px rgba(0, 0, 0, .22);
+  --shadow-hover: 0 14px 34px rgba(0, 0, 0, .32);
+  --overlay: rgba(0, 0, 0, .58);
+  --sidebar: #14171d;
+  --input: #12151b;
+  --code: #0b0d12;
+  --topbar-bg: rgba(14, 17, 22, .78);
+}
+
+html[data-theme="glass"] {
+  --bg: #0b1322;
+  --surface: rgba(16, 25, 42, .62);
+  --surface-soft: rgba(18, 29, 49, .54);
+  --surface-raised: rgba(22, 33, 54, .74);
+  --text: #e9eef8;
+  --text-strong: #fff;
+  --muted: #9aa8bd;
+  --muted-2: #708099;
+  --border: rgba(255, 255, 255, .09);
+  --border-strong: rgba(255, 255, 255, .16);
+  --shadow: 0 10px 30px rgba(0, 0, 0, .17);
+  --shadow-hover: 0 18px 48px rgba(0, 0, 0, .28);
+  --overlay: rgba(2, 7, 16, .6);
+  --sidebar: rgba(12, 20, 35, .72);
+  --input: rgba(8, 15, 28, .55);
+  --code: rgba(4, 8, 16, .82);
+  --topbar-bg: rgba(11, 19, 34, .54);
+}
+
+html[data-theme="glass"] body {
+  background:
+    radial-gradient(55rem 42rem at -8% -12%, rgba(113, 63, 232, .36), transparent 66%),
+    radial-gradient(46rem 40rem at 108% 18%, rgba(45, 112, 220, .25), transparent 66%),
+    linear-gradient(145deg, #09101d 0%, #0d1728 48%, #0a1321 100%);
+  background-attachment: fixed;
+}
+
+html[data-theme="glass"] .sidebar,
+html[data-theme="glass"] .card,
+html[data-theme="glass"] .topbar,
+html[data-theme="glass"] .modal-panel,
+html[data-theme="glass"] .popover,
+html[data-theme="glass"] .command-panel,
+html[data-theme="glass"] .save-bar {
+  backdrop-filter: blur(24px) saturate(135%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme="glass"] .sidebar,
+  html[data-theme="glass"] .card,
+  html[data-theme="glass"] .topbar,
+  html[data-theme="glass"] .modal-panel,
+  html[data-theme="glass"] .popover,
+  html[data-theme="glass"] .command-panel,
+  html[data-theme="glass"] .save-bar {
+    backdrop-filter: none !important;
+    background: #111a2a !important;
+  }
+}
