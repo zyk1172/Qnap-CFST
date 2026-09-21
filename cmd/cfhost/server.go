@@ -21,6 +21,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/optimize", a.handleJob("optimize"))
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/sync", a.handleSync)
+	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
 
 	webRoot, err := fs.Sub(webAssets, "web")
 	if err != nil {
@@ -142,6 +143,25 @@ func (a *App) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	a.persistState()
 	writeResponse(w, map[string]string{"status": "published"})
+}
+
+func (a *App) handleTrackerSampleDiscovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := a.snapshotConfig()
+	if !cfg.Tracker.AutoDiscover {
+		http.Error(w, "tracker auto-discovery is disabled", http.StatusBadRequest)
+		return
+	}
+	cache, report := a.refreshAutoTrackerSamples(r.Context(), cfg)
+	a.appendLog("tracker manual discovery: transmission=%d qbittorrent=%d cached=%d", report.Transmission, report.QBittorrent, len(cache))
+	writeResponse(w, map[string]any{
+		"status":  "ok",
+		"cached":  len(cache),
+		"report":  report,
+	})
 }
 
 func writeResponse(w http.ResponseWriter, v any) {
