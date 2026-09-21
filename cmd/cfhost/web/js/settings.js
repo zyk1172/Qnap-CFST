@@ -37,6 +37,13 @@ function renderSettings() {
             ${textField('verify.blockPatterns', '挑战页 / 占位页规则', config.verify.blockPatterns, '正则表达式', 'span-2')}
           </div>
           ${switchRow('verify.strictHttp', '严格 HTTP 验证', '要求最终 2xx，并检查正文大小与挑战页特征。', config.verify.strictHttp)}
+          <div class="alert info" style="margin-top:14px">
+            ${icon('info')}
+            <div>
+              <strong>域名策略类别</strong>
+              <span>latency：验证域名后按低延迟优先；bandwidth：验证域名后按高吞吐优先；normal：不做 HTTP/Tracker 有效性验证，直接使用 CFST 已筛选候选中延迟最低的 IP。</span>
+            </div>
+          </div>
         `)}
 
         ${settingsSection('repair', 'Repair 与完整优化', '自动维护默认只修复失效域名；Full Optimize 是显式的全局重新选择操作。', `
