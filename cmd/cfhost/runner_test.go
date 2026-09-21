@@ -371,3 +371,17 @@ func TestUnresolvedDomainsCapsReportedNames(t *testing.T) {
 		t.Fatalf("reported names=%d, want 20", len(names))
 	}
 }
+
+
+func TestResolutionJobClassification(t *testing.T) {
+	for _, kind := range []string{"repair", "optimize"} {
+		if !resolutionJob(kind) {
+			t.Fatalf("%s must surface unresolved domains", kind)
+		}
+	}
+	for _, kind := range []string{"run", "apply", "sync", ""} {
+		if resolutionJob(kind) {
+			t.Fatalf("%s must not be labelled partial because it does not resolve domains", kind)
+		}
+	}
+}
