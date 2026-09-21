@@ -45,7 +45,8 @@ type BandwidthConfig struct {
 }
 
 type OptimizeConfig struct {
-	Enabled         bool `json:"enabled"`
+	Enabled         bool `json:"enabled,omitempty"` // legacy; automatic global optimize is retired by default
+	ScheduledFull   bool `json:"scheduledFull"`
 	IntervalMinutes int  `json:"intervalMinutes"`
 	RetryMinutes    int  `json:"retryMinutes"`
 }
@@ -152,7 +153,8 @@ func defaultConfig() Config {
 			MinSpeedMB:  0.5,
 		},
 		Optimize: OptimizeConfig{
-			Enabled:         true,
+			Enabled:         false,
+			ScheduledFull:   false,
 			IntervalMinutes: 1440,
 			RetryMinutes:    60,
 		},
@@ -229,6 +231,10 @@ func normalizeConfig(c *Config) error {
 	if c.Bandwidth.MaxDelayMS < 1 { c.Bandwidth.MaxDelayMS = 180 }
 	if c.Bandwidth.MinSpeedMB < 0 { c.Bandwidth.MinSpeedMB = 0.5 }
 
+	// v0.x used optimize.enabled=true to schedule a global remap every 24h.
+	// Keep the field readable for old config files, but do not migrate it into
+	// ScheduledFull: automatic maintenance is per-domain repair by default.
+	c.Optimize.Enabled = false
 	if c.Optimize.IntervalMinutes < 1 { c.Optimize.IntervalMinutes = 1440 }
 	if c.Optimize.RetryMinutes < 1 { c.Optimize.RetryMinutes = 60 }
 
