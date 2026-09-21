@@ -224,3 +224,53 @@ func TestSearchInputsPatchResultsInsteadOfRerendering(t *testing.T) {
 		}
 	}
 }
+
+// A run can report success while individual domains stay unresolved, so both
+// the dashboard and the history table must surface that instead of showing a
+// clean success the operator would never look into.
+func TestUnresolvedDomainsAreSurfacedInUI(t *testing.T) {
+	for file, needles := range map[string][]string{
+		"web/js/dashboard-domains.js": {
+			"function unresolvedDomainsNow(",
+			"function unresolvedNotice(",
+			"item.unresolvedCount",
+			"item.unresolvedDomains",
+		},
+		"web/js/candidates-ops-logs.js": {
+			"function historyRow(",
+			"item.unresolvedCount",
+			"部分完成",
+		},
+	} {
+		content, err := webAssets.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range needles {
+			if !strings.Contains(string(content), needle) {
+				t.Fatalf("%s missing %q", file, needle)
+			}
+		}
+	}
+}
+
+
+func TestShellStatusSurfacesUnresolvedDomains(t *testing.T) {
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreJS := string(core)
+	if !strings.Contains(coreJS, "const unresolved = counts.failed > 0") ||
+		!strings.Contains(coreJS, "'有域名待处理'") ||
+		!strings.Contains(coreJS, "'is-warning'") {
+		t.Fatal("shell status must surface unresolved enabled domains")
+	}
+	if !strings.Contains(string(css), ".status-dot.is-warning") {
+		t.Fatal("warning shell status must have a dedicated status-dot style")
+	}
+}
