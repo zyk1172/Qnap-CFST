@@ -83,7 +83,8 @@ func TestOrderedCandidatesPreferredAndSkip(t *testing.T) {
 		{IP: "2.2.2.2", DelayMS: 20},
 		{IP: "3.3.3.3", DelayMS: 30},
 	}
-	got := orderedCandidates(in, "3.3.3.3", "1.1.1.1")
+	cfg := defaultConfig()
+	got := orderedCandidates(in, Domain{Class: "latency"}, "3.3.3.3", "1.1.1.1", cfg)
 	if len(got) != 2 || got[0].IP != "3.3.3.3" || got[1].IP != "2.2.2.2" {
 		t.Fatalf("unexpected candidate order: %#v", got)
 	}
