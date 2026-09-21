@@ -253,3 +253,24 @@ func TestUnresolvedDomainsAreSurfacedInUI(t *testing.T) {
 		}
 	}
 }
+
+
+func TestShellStatusSurfacesUnresolvedDomains(t *testing.T) {
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreJS := string(core)
+	if !strings.Contains(coreJS, "const unresolved = counts.failed > 0") ||
+		!strings.Contains(coreJS, "'有域名待处理'") ||
+		!strings.Contains(coreJS, "'is-warning'") {
+		t.Fatal("shell status must surface unresolved enabled domains")
+	}
+	if !strings.Contains(string(css), ".status-dot.is-warning") {
+		t.Fatal("warning shell status must have a dedicated status-dot style")
+	}
+}
