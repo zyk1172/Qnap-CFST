@@ -178,3 +178,49 @@ func TestSingleColumnGridTracksClampMinimum(t *testing.T) {
 		t.Fatal("bare 1fr single-column tracks can overflow narrow viewports")
 	}
 }
+
+
+func TestSearchInputsPatchResultsInsteadOfRerendering(t *testing.T) {
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsJS := string(events)
+	for id, updater := range map[string]string{
+		"domain-search": "updateDomainResults()",
+		"log-search":    "updateLogResults()",
+	} {
+		if !strings.Contains(eventsJS, updater) {
+			t.Fatalf("%s must patch results instead of re-rendering", id)
+		}
+	}
+	start := strings.Index(eventsJS, "document.addEventListener('input'")
+	end := strings.Index(eventsJS, "event.target.id === 'command-input'")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("search input handler not found in events.js")
+	}
+	handler := eventsJS[start:end]
+	if strings.Contains(handler, "renderPage(") {
+		t.Fatal("search input must not re-render the page and destroy its own focus")
+	}
+	if strings.Contains(handler, "requestAnimationFrame") {
+		t.Fatal("deferred search focus restore drops fast keystrokes")
+	}
+
+	// The partial updaters and the full renderers must share their markup
+	// builders, otherwise the two paths silently drift apart.
+	for file, builders := range map[string][]string{
+		"web/js/dashboard-domains.js":   {"function domainRowsHTML(", "${domainRowsHTML(domains, filtered)}", "rows.innerHTML = domainRowsHTML(domains, filtered)"},
+		"web/js/candidates-ops-logs.js": {"function logLinesHTML(", "${logLinesHTML(filtered)}", "content.innerHTML = logLinesHTML(filtered)"},
+	} {
+		content, err := webAssets.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range builders {
+			if !strings.Contains(string(content), needle) {
+				t.Fatalf("%s missing %q", file, needle)
+			}
+		}
+	}
+}
