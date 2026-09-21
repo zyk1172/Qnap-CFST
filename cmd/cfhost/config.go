@@ -158,7 +158,7 @@ func normalizeConfig(c *Config) error {
 		c.Repair.RefreshCooldownMinutes = 60
 	}
 	if c.Repair.RefreshMaxBackoffMinutes < c.Repair.RefreshCooldownMinutes {
-		c.Repair.RefreshMaxBackoffMinutes = 720
+		c.Repair.RefreshMaxBackoffMinutes = c.Repair.RefreshCooldownMinutes
 	}
 
 	trackerUnset := c.Tracker.SamplesPath == "" && c.Tracker.Retries == 0 &&
