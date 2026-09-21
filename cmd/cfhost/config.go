@@ -245,6 +245,17 @@ func normalizeConfig(c *Config) error {
 	c.Tracker.Transmission.Username = strings.TrimSpace(c.Tracker.Transmission.Username)
 	c.Tracker.QBittorrent.URL = strings.TrimSpace(c.Tracker.QBittorrent.URL)
 	c.Tracker.QBittorrent.Username = strings.TrimSpace(c.Tracker.QBittorrent.Username)
+	if c.Tracker.AutoSamplesPath == c.Tracker.SamplesPath {
+		return errors.New("tracker autoSamplesPath must differ from samplesPath")
+	}
+	if c.Tracker.Transmission.Enabled {
+		if c.Tracker.Transmission.URL == "" { return errors.New("Transmission URL is required when tracker discovery is enabled") }
+		if _, err := normalizeTransmissionURL(c.Tracker.Transmission.URL); err != nil { return err }
+	}
+	if c.Tracker.QBittorrent.Enabled {
+		if c.Tracker.QBittorrent.URL == "" { return errors.New("qBittorrent URL is required when tracker discovery is enabled") }
+		if _, err := normalizeBaseURL(c.Tracker.QBittorrent.URL, "qBittorrent"); err != nil { return err }
+	}
 	if c.Tracker.Retries < 1 { c.Tracker.Retries = 2 }
 	if c.Tracker.UserAgent == "" { c.Tracker.UserAgent = "Transmission/4.1.3" }
 	if c.Tracker.PeerIDPrefix == "" { c.Tracker.PeerIDPrefix = "-TR4130-" }
