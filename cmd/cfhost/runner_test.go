@@ -116,15 +116,47 @@ func TestRefreshDecisionBackoff(t *testing.T) {
 	}
 }
 
-func TestTrackerResponseOK(t *testing.T) {
-	if ok, _ := trackerResponseOK([]byte("d8:intervali1800e5:peers0:e")); !ok {
-		t.Fatal("valid announce response rejected")
+func TestEvaluateTrackerResponseTreatsTrackerErrorsAsReachable(t *testing.T) {
+	bencodeFailure := func(reason string) string {
+		return fmt.Sprintf("d14:failure reason%d:%se", len(reason), reason)
 	}
-	if ok, _ := trackerResponseOK([]byte("d14:failure reason11:not allowede")); ok {
-		t.Fatal("failure reason accepted")
+	cases := []struct {
+		name      string
+		body      string
+		reachable bool
+		accepted  bool
+	}{
+		{"accepted announce", "d8:intervali1800e5:peers0:e", true, true},
+		{"accepted peers only", "d5:peers6:abcdefe", true, true},
+		{"PTT anti-abuse error still proves connectivity", bencodeFailure("PTT:多IP汇报同一资源，等缓存过期或修改qb高级里的网络接口"), true, false},
+		{"missing peer id still proves connectivity", bencodeFailure("Missing key peer_id"), true, false},
+		{"even IP-ban business error proves tracker connectivity", bencodeFailure("your ip is banned"), true, false},
+		{"other valid tracker dictionary proves connectivity", "d5:hello3:youe", true, false},
+		{"html challenge is not tracker response", "<html>ok</html>", false, false},
+		{"empty response", "", false, false},
+		{"truncated dictionary", "d14:failure reason9:abce", false, false},
+		{"trailing garbage", "d5:peers0:ejunk", false, false},
 	}
-	if ok, _ := trackerResponseOK([]byte("<html>ok</html>")); ok {
-		t.Fatal("non-bencode response accepted")
+	for _, tc := range cases {
+		verdict := evaluateTrackerResponse([]byte(tc.body))
+		if verdict.Reachable != tc.reachable || verdict.Accepted != tc.accepted {
+			t.Fatalf("%s: reachable=%v accepted=%v, want reachable=%v accepted=%v detail=%q",
+				tc.name, verdict.Reachable, verdict.Accepted, tc.reachable, tc.accepted, verdict.Detail)
+		}
+	}
+}
+
+func TestTrackerFailureReasonIsSanitized(t *testing.T) {
+	reason := "invalid passkey=deadbeef1234 for announce"
+	verdict := evaluateTrackerResponse([]byte(fmt.Sprintf("d14:failure reason%d:%se", len(reason), reason)))
+	if !verdict.Reachable {
+		t.Fatalf("business rejection must still be reachable: %q", verdict.Detail)
+	}
+	if strings.Contains(verdict.Detail, "deadbeef1234") {
+		t.Fatalf("credential leaked into detail: %q", verdict.Detail)
+	}
+	if verdict.Reason == "" {
+		t.Fatal("failure reason should remain visible after sanitization")
 	}
 }
 
