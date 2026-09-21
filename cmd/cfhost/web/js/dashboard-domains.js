@@ -35,7 +35,7 @@ function renderDashboard() {
           <div class="quick-grid">
             ${quickAction('run', '强制测速', '重新生成 CFST 候选', 'bolt')}
             ${quickAction('repair', '智能 Repair', '验证并修复失效映射', 'repair')}
-            ${quickAction('optimize', '完整优化', '重测并重新选择最优 IP', 'optimize')}
+            ${quickAction('optimize', '手动完整优化', '全局重测并重新选择所有域名', 'optimize')}
             ${quickAction('apply', '应用 Hosts', '写入当前已验证映射', 'host')}
             ${quickAction('sync', '同步 GitHub', '发布 hosts-map 与状态', 'sync')}
             ${quickAction('settings', '打开设置', '调整测速与策略', 'settings', true)}
@@ -56,7 +56,7 @@ function renderDashboard() {
         <div class="card-head"><div><h2 class="card-title">服务与同步</h2><div class="card-subtitle">调度器、Hosts 与 GitHub 状态</div></div></div>
         <div class="card-body metric-stack">
           ${infoLine('自动 Repair', store.config.autoRepair ? `每 ${store.config.repairIntervalMinutes} 分钟` : '关闭', store.config.autoRepair ? 'success' : '')}
-          ${infoLine('完整优化', store.config.optimize.enabled ? `每 ${store.config.optimize.intervalMinutes} 分钟` : '关闭', store.config.optimize.enabled ? 'success' : '')}
+          ${infoLine('周期全局优化', store.config.optimize.scheduledFull ? `每 ${store.config.optimize.intervalMinutes} 分钟` : '关闭（Repair 只修坏域名）', store.config.optimize.scheduledFull ? 'warning' : 'success')}
           ${infoLine('Hosts 自动应用', store.config.autoApply ? '启用' : '关闭', store.config.autoApply ? 'success' : '')}
           ${infoLine('GitHub 同步', syncSummary(), store.state.sync?.lastError ? 'danger' : store.state.sync?.lastSuccess ? 'success' : '')}
           ${store.state.migrationStatus ? infoLine('迁移状态', store.state.migrationStatus, 'info') : ''}

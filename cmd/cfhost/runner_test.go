@@ -229,10 +229,23 @@ func TestMappingsFromLegacyBlocks(t *testing.T) {
 	if got["tracker.example.com"]!="1.1.1.1"{t.Fatalf("migration failed: %#v",got)}
 }
 
-func TestOptimizeDueUsesRefreshAsInitialBaseline(t *testing.T) {
+func TestOptimizeDueRequiresExplicitScheduledFull(t *testing.T) {
 	now:=time.Date(2026,9,22,1,0,0,0,time.UTC)
-	cfg:=OptimizeConfig{Enabled:true,IntervalMinutes:1440,RetryMinutes:60}
-	if optimizeDue(now,"","",now.Add(-2*time.Hour).Format(time.RFC3339),cfg){t.Fatal("recent refresh should defer first optimize")}
-	if !optimizeDue(now,"","",now.Add(-25*time.Hour).Format(time.RFC3339),cfg){t.Fatal("stale refresh should trigger optimize")}
+	cfg:=OptimizeConfig{Enabled:true,ScheduledFull:false,IntervalMinutes:1440,RetryMinutes:60}
+	if optimizeDue(now,"","",now.Add(-25*time.Hour).Format(time.RFC3339),cfg){
+		t.Fatal("legacy enabled=true must not schedule a global remap")
+	}
+	cfg.ScheduledFull=true
+	if optimizeDue(now,"","",now.Add(-2*time.Hour).Format(time.RFC3339),cfg){t.Fatal("recent refresh should defer first scheduled full optimize")}
+	if !optimizeDue(now,"","",now.Add(-25*time.Hour).Format(time.RFC3339),cfg){t.Fatal("stale refresh should trigger explicitly enabled scheduled full optimize")}
 	if optimizeDue(now,"",now.Add(-30*time.Minute).Format(time.RFC3339),now.Add(-25*time.Hour).Format(time.RFC3339),cfg){t.Fatal("recent failed optimize attempt should defer retry")}
+}
+
+func TestNormalizeConfigRetiresLegacyAutomaticOptimize(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Optimize.Enabled=true
+	cfg.Optimize.ScheduledFull=false
+	if err:=normalizeConfig(&cfg);err!=nil{t.Fatal(err)}
+	if cfg.Optimize.Enabled{t.Fatal("legacy optimize.enabled must be retired")}
+	if cfg.Optimize.ScheduledFull{t.Fatal("scheduled global optimize must remain opt-in")}
 }

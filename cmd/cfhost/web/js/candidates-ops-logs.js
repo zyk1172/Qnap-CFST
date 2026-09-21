@@ -73,7 +73,7 @@ function renderOperations() {
     ${pageHeader('任务与历史', '手动运行维护任务，查看调度、同步和最近执行记录。')}
     <div class="grid cols-4">
       ${operationCard('repair', '智能 Repair', '验证当前映射，仅在需要时使用候选或完整测速。', 'repair')}
-      ${operationCard('optimize', '完整优化', '强制测速并重新选择每个域名的最优可用 IP。', 'optimize')}
+      ${operationCard('optimize', '手动完整优化', '显式全局操作：强制测速并重新选择每个域名的最优可用 IP。', 'optimize')}
       ${operationCard('apply', '应用 Hosts', '将当前已验证映射写入宿主机受管 Marker。', 'host')}
       ${operationCard('sync', '同步 GitHub', '原子发布 hosts-map.tsv 与 status.json。', 'sync')}
     </div>
@@ -82,7 +82,7 @@ function renderOperations() {
         <div class="card-head"><div><h2 class="card-title">调度器</h2><div class="card-subtitle">自动任务计划</div></div></div>
         <div class="card-body metric-stack">
           ${infoLine('Smart Repair', store.config.autoRepair ? `启用 · ${store.config.repairIntervalMinutes} 分钟` : '关闭', store.config.autoRepair ? 'success' : '')}
-          ${infoLine('Full Optimize', store.config.optimize.enabled ? `启用 · ${store.config.optimize.intervalMinutes} 分钟` : '关闭', store.config.optimize.enabled ? 'success' : '')}
+          ${infoLine('周期 Full Optimize', store.config.optimize.scheduledFull ? `启用 · ${store.config.optimize.intervalMinutes} 分钟` : '关闭 · 自动维护仅 Repair', store.config.optimize.scheduledFull ? 'warning' : 'success')}
           ${infoLine('下次允许 Refresh', fmtTime(store.state.nextRefresh))}
           ${infoLine('最近 Optimize', fmtTime(store.state.lastOptimize))}
           ${infoLine('最近任务', fmtTime(store.state.lastRun))}

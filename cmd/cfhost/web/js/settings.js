@@ -39,7 +39,7 @@ function renderSettings() {
           ${switchRow('verify.strictHttp', '严格 HTTP 验证', '要求最终 2xx，并检查正文大小与挑战页特征。', config.verify.strictHttp)}
         `)}
 
-        ${settingsSection('repair', 'Repair 与完整优化', 'Smart Repair 低扰动修复失效映射；Full Optimize 周期性重新测速并择优。', `
+        ${settingsSection('repair', 'Repair 与完整优化', '自动维护默认只修复失效域名；Full Optimize 是显式的全局重新选择操作。', `
           <div class="form-grid">
             ${numberField('repairIntervalMinutes', 'Repair 间隔', config.repairIntervalMinutes, '分钟')}
             ${numberField('repair.candidateTTLMinutes', '候选缓存 TTL', config.repair.candidateTTLMinutes, '分钟')}
@@ -52,8 +52,15 @@ function renderSettings() {
             ${numberField('bandwidth.maxLossRate', 'Bandwidth 最大丢包率', config.bandwidth.maxLossRate, '0 ~ 1', '0.01')}
             ${numberField('bandwidth.minSpeedMB', 'Bandwidth 最低速度', config.bandwidth.minSpeedMB, 'MB/s', '0.1')}
           </div>
-          ${switchRow('autoRepair', '自动 Smart Repair', '按 Repair 间隔自动验证当前映射。', config.autoRepair)}
-          ${switchRow('optimize.enabled', '周期 Full Optimize', '按完整优化周期强制重新测速并重新选择。', config.optimize.enabled)}
+          ${switchRow('autoRepair', '自动 Smart Repair', '按 Repair 间隔检查当前映射；正常域名保持原 IP，仅修复失效域名。', config.autoRepair)}
+          ${switchRow('optimize.scheduledFull', '允许周期性全局优化', '开启后才会按完整优化周期重新选择所有域名。默认关闭；手动“完整优化”不受此开关影响。', config.optimize.scheduledFull)}
+          <div class="alert info" style="margin-top:14px">
+            ${icon('info')}
+            <div>
+              <strong>自动维护采用逐域名修复</strong>
+              <span>某个域名失效时，只为该域名寻找替代 IP。健康域名不会因为其他域名故障而更换当前映射。</span>
+            </div>
+          </div>
         `)}
 
         ${settingsSection('hosts', 'Hosts 与 Tracker', '控制宿主机 Hosts、真实 Tracker announce，以及从 Transmission / qBittorrent 自动发现测试种子。', `
