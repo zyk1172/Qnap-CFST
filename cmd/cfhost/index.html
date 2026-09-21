@@ -18,6 +18,7 @@
       <button onclick="job('run')">强制 CFST 测速</button>
       <button class="primary" onclick="job('repair')">智能 Repair</button>
       <button onclick="applyHosts()">应用 Hosts</button>
+      <button onclick="syncGitHub()">同步 GitHub</button>
     </div>
   </div>
 
@@ -52,12 +53,16 @@
       <div class="field switch"><input id="autoRepair" type="checkbox"><label for="autoRepair">自动 Repair</label></div>
       <div class="field switch"><input id="autoApply" type="checkbox"><label for="autoApply">Repair 后自动写 Hosts</label></div>
       <div class="field switch"><input id="ipv6" type="checkbox"><label for="ipv6">使用 IPv6 IP 池</label></div>
+      <div class="field switch"><input id="syncEnabled" type="checkbox"><label for="syncEnabled">GitHub 自动同步</label></div>
+      <div class="field wide"><label>同步仓库</label><input id="syncRepo"></div>
+      <div class="field"><label>同步分支</label><input id="syncBranch"></div>
+      <div class="field wide"><label>GitHub Token 文件</label><input id="syncTokenFile"></div>
     </div>
   </section>
 
   <section class="card">
     <div class="section-head"><div><h2>域名</h2><div class="muted tiny">Repair 先验证当前 IP，再尝试有效期内的候选缓存。Tracker 开启真实 announce 后，缺少样本不会触发无意义的 CFST 重测速。</div></div><button onclick="addDomain()">添加</button></div>
-    <div class="scroll"><table><thead><tr><th>启用</th><th>域名</th><th>组</th><th>类型</th><th>路径</th><th></th></tr></thead><tbody id="domains"></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>启用</th><th>域名</th><th>站点组</th><th>类别</th><th>类型</th><th>路径</th><th></th></tr></thead><tbody id="domains"></tbody></table></div>
   </section>
 
   <section class="card">
@@ -68,6 +73,17 @@
   <section class="card">
     <div class="section-head"><h2>CFST 候选结果</h2></div>
     <div class="scroll"><table><thead><tr><th>IP</th><th>丢包率</th><th>延迟 ms</th><th>速度 MB/s</th><th>地区</th><th>采样时间</th></tr></thead><tbody id="candidates"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head"><h2>GitHub 同步</h2></div>
+    <div id="syncState" class="tiny">-</div>
+    <div class="muted tiny">最近 commit：<span id="syncCommit">-</span></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head"><h2>运行历史</h2></div>
+    <div class="scroll"><table><thead><tr><th>任务</th><th>开始</th><th>耗时</th><th>结果</th><th>完整 CFST</th><th>映射</th><th>候选</th></tr></thead><tbody id="history"></tbody></table></div>
   </section>
 
   <section class="card"><div class="section-head"><h2>日志</h2></div><pre id="logs"></pre></section>
@@ -99,13 +115,15 @@ function render(){
   $('refreshMaxBackoff').value=config.repair.refreshMaxBackoffMinutes;$('hostsPath').value=config.hostsPath;
   $('trackerSamples').value=config.tracker.samplesPath;$('trackerRetries').value=config.tracker.retries;$('realAnnounce').checked=config.tracker.realAnnounce;
   $('autoRepair').checked=config.autoRepair;$('autoApply').checked=config.autoApply;$('ipv6').checked=config.cfst.ipv6;
-  renderDomains();renderMappings();renderCandidates();$('logs').textContent=(state.logs||[]).join('\n');
+  $('syncEnabled').checked=config.sync.enabled;$('syncRepo').value=config.sync.repository;$('syncBranch').value=config.sync.branch;$('syncTokenFile').value=config.sync.tokenFile;
+  renderDomains();renderMappings();renderCandidates();renderOps();renderHistory();$('logs').textContent=(state.logs||[]).join('\n');
 }
 function renderDomains(){
   $('domains').innerHTML=(config.domains||[]).map((d,i)=>`<tr>
     <td><input style="width:auto" type="checkbox" data-k="enabled" data-i="${i}" ${d.enabled?'checked':''}></td>
     <td><input data-k="host" data-i="${i}" value="${esc(d.host)}"></td>
     <td><input data-k="group" data-i="${i}" value="${esc(d.group)}"></td>
+    <td><select data-k="class" data-i="${i}"><option value="latency" ${d.class!=='bandwidth'?'selected':''}>latency</option><option value="bandwidth" ${d.class==='bandwidth'?'selected':''}>bandwidth</option></select></td>
     <td><select data-k="mode" data-i="${i}"><option value="http" ${d.mode==='http'?'selected':''}>HTTP</option><option value="tracker" ${d.mode==='tracker'?'selected':''}>Tracker</option></select></td>
     <td><input data-k="endpoint" data-i="${i}" value="${esc(d.endpoint)}"></td>
     <td><button class="danger" onclick="removeDomain(${i})">删除</button></td></tr>`).join('');
@@ -124,7 +142,7 @@ function syncDomainInputs(){
     config.domains[i][k]=el.type==='checkbox'?el.checked:el.value;
   });
 }
-function addDomain(){syncDomainInputs();config.domains.push({host:'',group:'',mode:'http',endpoint:'/',enabled:true});renderDomains()}
+function addDomain(){syncDomainInputs();config.domains.push({host:'',group:'',class:'latency',mode:'http',endpoint:'/',enabled:true});renderDomains()}
 function removeDomain(i){syncDomainInputs();config.domains.splice(i,1);renderDomains()}
 async function saveConfig(){
   try{
@@ -136,6 +154,7 @@ async function saveConfig(){
     config.repair.failureThreshold=Number($('failureThreshold').value);config.repair.refreshCooldownMinutes=Number($('refreshCooldown').value);
     config.repair.refreshMaxBackoffMinutes=Number($('refreshMaxBackoff').value);config.hostsPath=$('hostsPath').value;
     config.tracker.samplesPath=$('trackerSamples').value;config.tracker.retries=Number($('trackerRetries').value);config.tracker.realAnnounce=$('realAnnounce').checked;
+    config.sync.enabled=$('syncEnabled').checked;config.sync.repository=$('syncRepo').value;config.sync.branch=$('syncBranch').value;config.sync.tokenFile=$('syncTokenFile').value;
     config.autoRepair=$('autoRepair').checked;config.autoApply=$('autoApply').checked;config.cfst.ipv6=$('ipv6').checked;
     config=await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)});
     await refresh();
@@ -143,6 +162,15 @@ async function saveConfig(){
 }
 async function job(k){try{await api('/api/'+k,{method:'POST'});await refresh()}catch(e){alert(e.message)}}
 async function applyHosts(){try{await api('/api/apply',{method:'POST'});await refresh()}catch(e){alert(e.message)}}
+async function syncGitHub(){try{await api('/api/sync',{method:'POST'});await refresh()}catch(e){alert(e.message)}}
+function renderOps(){
+  const s=state.sync||{};
+  $('syncState').textContent=s.lastError?('失败：'+s.lastError):(s.lastSuccess?('最近成功：'+s.lastSuccess):'尚未同步');
+  $('syncCommit').textContent=s.lastCommit||'-';
+}
+function renderHistory(){
+  $('history').innerHTML=[...(state.history||[])].reverse().slice(0,30).map(r=>`<tr><td>${esc(r.kind)}</td><td>${esc(r.startedAt)}</td><td>${r.durationMs} ms</td><td>${r.success?'成功':'失败'}</td><td>${r.fullRefresh?'是':'否'}</td><td>${r.mappingsBefore} → ${r.mappingsAfter}</td><td>${r.candidateCount}</td></tr>`).join('');
+}
 refresh();setInterval(async()=>{try{state=await api('/api/status');render()}catch{}},3000);
 </script>
 </body>

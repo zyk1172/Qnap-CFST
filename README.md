@@ -216,6 +216,77 @@ Docker 镜像构建两个程序：
 3. 更完整的运行历史/统计
 4. QNAP 实机部署后的兼容性修正
 
+## v0.3 第三批
+
+### GitHub 原子同步
+
+CFHost 可以继续发布兼容现有 macOS / Windows 客户端的 10 列 `hosts-map.tsv`，并同时生成 `status.json`。
+
+与旧 Shell 不同，v0.3 不再对两个文件分别调用 Contents API。现在使用 GitHub Git Data API：
+
+```text
+hosts-map.tsv ─→ blob ┐
+status.json    ─→ blob ├→ one tree → one commit → update branch ref
+                       ┘
+```
+
+因此客户端不会再看到“map 已更新但 status 还是旧版本”或相反的瞬时状态。
+
+只有映射、策略类别或候选指标发生变化时才自动发布；普通 Repair 仅重新确认同一映射不会制造新的 Git commit。WebUI 的“立即同步”可以强制发布一次。
+
+默认同步目标：
+
+```text
+zyk1172/cloudflare-hosts-sync
+branch: main
+token file: /data/github-token
+```
+
+也支持容器环境变量 `GITHUB_TOKEN`。
+
+### siteGroup 与 class
+
+v0.3 明确区分：
+
+- `group`：同一 PT 站点的共享组，例如 `mteam`、`ptcafe`
+- `class`：同步/测速策略类别，仅为 `latency` 或 `bandwidth`
+
+旧配置没有 `class` 时自动迁移为 `latency`，因此不会破坏 v0.2 配置。
+
+### 运行历史
+
+`state.json` 保留最近 200 次任务记录，包括：
+
+- run / repair 类型
+- 开始和结束时间
+- 耗时
+- 成功 / 失败
+- 是否触发完整 CFST
+- 映射数量变化
+- 候选 IP 数量
+
+WebUI 直接显示最近运行历史与 GitHub 同步状态。
+
+### QNAP / Container Station
+
+主 Compose 支持通过环境变量覆盖：
+
+```text
+CFHOST_PORT
+CFHOST_DATA_DIR
+CFHOST_HOSTS_FILE
+```
+
+例如 QNAP：
+
+```bash
+CFHOST_DATA_DIR=/share/Container/cfhost/data docker compose up -d
+```
+
+容器增加 `/healthz`、Docker healthcheck、SIGTERM graceful shutdown 和 15 秒停止宽限期。Hosts 仍通过单文件 bind mount 原地写入，保持宿主机文件 inode。
+
+仓库同时提供 `deploy/qnap/compose.yaml`。打 `cfhost-v*` tag 后，镜像工作流可以发布 amd64/arm64 镜像到 GHCR。
+
 ## License
 
 本项目继承上游 CloudflareSpeedTest，使用 GNU GPL v3。

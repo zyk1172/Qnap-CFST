@@ -29,17 +29,26 @@ type RepairConfig struct {
 }
 
 type TrackerConfig struct {
-	RealAnnounce  bool   `json:"realAnnounce"`
-	SamplesPath   string `json:"samplesPath"`
-	Retries       int    `json:"retries"`
-	UserAgent     string `json:"userAgent"`
-	PeerIDPrefix  string `json:"peerIdPrefix"`
-	AnnouncePort  int    `json:"announcePort"`
+	RealAnnounce bool   `json:"realAnnounce"`
+	SamplesPath  string `json:"samplesPath"`
+	Retries      int    `json:"retries"`
+	UserAgent    string `json:"userAgent"`
+	PeerIDPrefix string `json:"peerIdPrefix"`
+	AnnouncePort int    `json:"announcePort"`
+}
+
+type SyncConfig struct {
+	Enabled       bool   `json:"enabled"`
+	Repository    string `json:"repository"`
+	Branch        string `json:"branch"`
+	TokenFile     string `json:"tokenFile"`
+	CommitMessage string `json:"commitMessage"`
 }
 
 type Domain struct {
 	Host     string `json:"host"`
 	Group    string `json:"group"`
+	Class    string `json:"class"`
 	Mode     string `json:"mode"`
 	Endpoint string `json:"endpoint"`
 	Enabled  bool   `json:"enabled"`
@@ -55,6 +64,7 @@ type Config struct {
 	CFST                  CFSTConfig    `json:"cfst"`
 	Repair                RepairConfig  `json:"repair"`
 	Tracker               TrackerConfig `json:"tracker"`
+	Sync                  SyncConfig    `json:"sync"`
 	Domains               []Domain      `json:"domains"`
 }
 
@@ -91,6 +101,13 @@ func defaultConfig() Config {
 			UserAgent:    "Transmission/4.1.3",
 			PeerIDPrefix: "-TR4130-",
 			AnnouncePort: 51413,
+		},
+		Sync: SyncConfig{
+			Enabled:       false,
+			Repository:    "zyk1172/cloudflare-hosts-sync",
+			Branch:        "main",
+			TokenFile:     "/data/github-token",
+			CommitMessage: "CFHost: update hosts map",
 		},
 		Domains: []Domain{
 			{Host: "tracker.m-team.cc", Group: "mteam", Mode: "tracker", Endpoint: "/announce", Enabled: true},
@@ -185,6 +202,19 @@ func normalizeConfig(c *Config) error {
 		c.Tracker.AnnouncePort = 51413
 	}
 
+	if strings.TrimSpace(c.Sync.Repository) == "" {
+		c.Sync.Repository = "zyk1172/cloudflare-hosts-sync"
+	}
+	if strings.TrimSpace(c.Sync.Branch) == "" {
+		c.Sync.Branch = "main"
+	}
+	if strings.TrimSpace(c.Sync.TokenFile) == "" {
+		c.Sync.TokenFile = "/data/github-token"
+	}
+	if strings.TrimSpace(c.Sync.CommitMessage) == "" {
+		c.Sync.CommitMessage = "CFHost: update hosts map"
+	}
+
 	seen := make(map[string]bool)
 	clean := make([]Domain, 0, len(c.Domains))
 	for _, d := range c.Domains {
@@ -194,6 +224,9 @@ func normalizeConfig(c *Config) error {
 		d.Endpoint = strings.TrimSpace(d.Endpoint)
 		if d.Host == "" || seen[d.Host] {
 			continue
+		}
+		if d.Class != "bandwidth" {
+			d.Class = "latency"
 		}
 		if d.Mode != "tracker" {
 			d.Mode = "http"
@@ -216,6 +249,9 @@ func loadConfig(dataDir string) (Config, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		c := defaultConfig()
+		if err := normalizeConfig(&c); err != nil {
+			return Config{}, err
+		}
 		if err := saveConfig(dataDir, c); err != nil {
 			return Config{}, err
 		}

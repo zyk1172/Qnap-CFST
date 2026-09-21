@@ -156,3 +156,14 @@ func TestLoadTrackerSamplesKeepsValidRows(t *testing.T) {
 		t.Fatalf("valid sample should survive invalid sibling row: %#v", samples)
 	}
 }
+
+func TestNormalizeLegacyDomainClass(t *testing.T) {
+	c := defaultConfig()
+	c.Domains = []Domain{{Host: "example.com", Group: "site", Mode: "http", Enabled: true}}
+	if err := normalizeConfig(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Domains[0].Class != "latency" {
+		t.Fatalf("legacy domain should migrate to latency class: %#v", c.Domains[0])
+	}
+}
