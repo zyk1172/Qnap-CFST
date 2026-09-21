@@ -155,3 +155,26 @@ func TestAppearancePopoverSurvivesSidebarToggle(t *testing.T) {
 		t.Fatal("outside-click must not close the popover opened by an appearance toggle")
 	}
 }
+
+
+func TestSingleColumnGridTracksClampMinimum(t *testing.T) {
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssText := string(css)
+	for _, selector := range []string{
+		".split-main",
+		".grid.cols-4, .grid.cols-3, .grid.cols-2",
+		".settings-layout",
+		".form-grid",
+	} {
+		want := selector + " { grid-template-columns: minmax(0, 1fr); }"
+		if !strings.Contains(cssText, want) {
+			t.Fatalf("single-column override must clamp the track minimum: %q", want)
+		}
+	}
+	if strings.Contains(cssText, "grid-template-columns: 1fr;") {
+		t.Fatal("bare 1fr single-column tracks can overflow narrow viewports")
+	}
+}

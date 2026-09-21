@@ -687,7 +687,7 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
 
 @media (max-width: 1180px) {
   .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .split-main { grid-template-columns: 1fr; }
+  .split-main { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 960px) {
@@ -712,7 +712,7 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
   html.sidebar-open .sidebar-scrim { opacity: 1; visibility: visible; }
   .search-trigger { width: 42px; padding: 0; justify-content: center; }
   .search-trigger span:nth-child(2), .search-trigger kbd { display: none; }
-  .settings-layout { grid-template-columns: 1fr; }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
   .settings-nav { position: static; display: flex; overflow: auto; padding: 5px; }
   .settings-nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }
 }
@@ -723,8 +723,8 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
   .page-header { align-items: stretch; flex-direction: column; }
   .page-actions { width: 100%; }
   .page-actions .btn { flex: 1; }
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
-  .form-grid { grid-template-columns: 1fr; }
+  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: minmax(0, 1fr); }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid .span-2 { grid-column: auto; }
   .quick-grid { grid-template-columns: repeat(2, 1fr); }
   .service-pill { width: 40px; padding: 0; justify-content: center; }
