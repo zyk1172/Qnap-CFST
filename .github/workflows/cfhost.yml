@@ -26,4 +26,7 @@ jobs:
           node --check cmd/cfhost/web/js/events.js
       - run: go test ./cmd/cfhost
       - run: go build ./...
-      - run: docker build -t cfhost:test .
+      - name: Validate QNAP AMD64 Compose
+        run: docker compose -f deploy/qnap/compose-amd64.yaml config
+      - name: Build AMD64 image
+        run: docker build --platform linux/amd64 -t cfhost:test .

@@ -1,0 +1,24 @@
+services:
+  cfhost:
+    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64}
+    platform: linux/amd64
+    container_name: cfhost
+    hostname: cfhost
+    restart: unless-stopped
+
+    ports:
+      - "${CFHOST_PORT:-9876}:8080"
+
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATA_DIR: /data
+      CFST_BIN: /app/cfst
+      CFST_IP_FILE: /app/ip.txt
+      CFST_IPV6_FILE: /app/ipv6.txt
+      HOSTS_PATH: /host/etc/hosts
+
+    volumes:
+      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
+      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
+
+    stop_grace_period: 15s

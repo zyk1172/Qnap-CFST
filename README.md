@@ -381,3 +381,13 @@ TRACKER_REAL_ANNOUNCE_REQUIRED_SUCCESSES=1
 ```
 
 所以 v0.4 保持“一次有效真实 announce 即证明候选可用”，没有错误地改成必须连续成功两次。
+
+## QNAP amd64 image
+
+A dedicated QNAP/x86_64 image is published as:
+
+```text
+ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+```
+
+The image manifest contains only `linux/amd64`. The QNAP compose file pins the same platform explicitly and bind-mounts the NAS host `/etc/hosts` at `/host/etc/hosts`.
