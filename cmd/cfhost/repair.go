@@ -35,14 +35,17 @@ func (a *App) runSmartRepair(ctx context.Context, cfg Config) error {
 	samples := map[string]TrackerSample{}
 	if cfg.Tracker.RealAnnounce {
 		loaded, err := loadTrackerSamples(cfg.Tracker.SamplesPath)
+		if loaded != nil {
+			samples = loaded
+		}
 		if err != nil {
 			if os.IsNotExist(err) {
 				a.appendLog("tracker samples unavailable: %s", cfg.Tracker.SamplesPath)
 			} else {
-				a.appendLog("tracker samples invalid: %v", err)
+				a.appendLog("tracker samples warning: %v", err)
 			}
-		} else {
-			samples = loaded
+		}
+		if len(samples) > 0 {
 			a.appendLog("tracker samples loaded: %d", len(samples))
 		}
 	}
@@ -220,7 +223,7 @@ func (a *App) resolvePending(
 	statuses map[string]string,
 	groupIP map[string]string,
 ) []pendingDomain {
-	if len(candidates) == 0 || len(pending) == 0 {
+	if len(pending) == 0 {
 		return pending
 	}
 	remaining := make([]pendingDomain, 0, len(pending))
@@ -229,10 +232,27 @@ func (a *App) resolvePending(
 			remaining = append(remaining, p)
 			continue
 		}
-		order := orderedCandidates(candidates, groupIP[p.Domain.Group], p.FailedCurrent)
+		preferred := groupIP[p.Domain.Group]
 		resolved := false
 		lastDetail := "no candidate"
+		if preferred != "" && preferred != p.FailedCurrent {
+			ok, detail := verifyConfiguredDomain(ctx, p.Domain, preferred, cfg, samples)
+			lastDetail = detail
+			if ok {
+				mappings[p.Domain.Host] = preferred
+				statuses[p.Domain.Host] = "verified shared · " + preferred + " · " + detail
+				a.appendLog("%s -> %s (shared group IP · %s)", p.Domain.Host, preferred, detail)
+				resolved = true
+			}
+		}
+		if resolved {
+			continue
+		}
+		order := orderedCandidates(candidates, "", p.FailedCurrent)
 		for _, c := range order {
+			if c.IP == preferred {
+				continue
+			}
 			ok, detail := verifyConfiguredDomain(ctx, p.Domain, c.IP, cfg, samples)
 			lastDetail = detail
 			if !ok {
