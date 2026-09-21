@@ -1,0 +1,21 @@
+name: CFHost
+
+on:
+  push:
+    branches:
+      - master
+      - "cfhost/**"
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - run: go test ./cmd/cfhost
+      - run: go build ./...
+      - run: docker build -t cfhost:test .
