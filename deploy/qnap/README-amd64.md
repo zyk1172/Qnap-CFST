@@ -210,3 +210,77 @@ docker pull ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 然后重新创建 Compose 应用即可。
 
 `/data` 和宿主机 `/etc/hosts` 都是 bind mount，所以重建容器不会丢配置。
+
+
+## Tracker 测试种子自动发现
+
+CFHost 可以直接从 Transmission 或 qBittorrent 读取一个已完成种子，自动生成 Tracker 真实 announce 所需的测试样本。
+
+不需要再手工维护每个 Tracker 的 `info_hash` 和完整 announce URL。
+
+WebUI 路径：
+
+```text
+设置 → Hosts 与 Tracker
+```
+
+可以分别配置：
+
+- Transmission RPC 地址、用户名、密码
+- qBittorrent WebUI 地址、用户名、密码
+- 自动发现开关
+- 自动样本缓存路径
+- qB Tracker 补查上限
+
+默认自动样本文件：
+
+```text
+/data/tracker-samples.auto.tsv
+```
+
+宿主机对应：
+
+```text
+/share/Container/cfhost/data/tracker-samples.auto.tsv
+```
+
+自动发现只读取下载器信息：
+
+- Transmission：`torrent-get`
+- qBittorrent：`torrents/info` 和必要时的 `torrents/trackers`
+
+不会暂停、启动、删除、reannounce 或修改下载器任务。
+
+CFHost 只使用 **已完成种子**，并从中选择与受管 Tracker 域名匹配的 HTTPS announce URL 和 40 位 v1 info-hash。
+
+手工文件：
+
+```text
+/data/tracker-samples.tsv
+```
+
+仍然保留，并且优先级高于自动发现结果。
+
+### 同一台 QNAP 上的下载器地址
+
+CFHost 默认运行在 Docker bridge 网络，因此：
+
+```text
+127.0.0.1
+```
+
+指向的是 CFHost 容器自己，不是 QNAP 宿主机。
+
+如果 Transmission / qBittorrent 也运行在同一台 QNAP 上，通常应填写 QNAP 的局域网地址，例如：
+
+```text
+Transmission:
+http://192.168.1.10:9091/transmission/rpc
+
+qBittorrent:
+http://192.168.1.10:8080
+```
+
+端口按实际 WebUI / RPC 端口填写。
+
+此功能不需要新增 Docker volume，也不要求 `network_mode: host`。
