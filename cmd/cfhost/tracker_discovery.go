@@ -184,6 +184,118 @@ func parseTransmissionTorrentList(body []byte, modern bool) ([]transmissionTorre
 	return out, nil
 }
 
+type qbitTorrent struct {
+	Hash         string  `json:"hash"`
+	Name         string  `json:"name"`
+	AmountLeft   int64   `json:"amount_left"`
+	Progress     float64 `json:"progress"`
+	State        string  `json:"state"`
+	Tracker      string  `json:"tracker"`
+	LastActivity int64   `json:"last_activity"`
+}
+
+type qbitTracker struct {
+	URL    string `json:"url"`
+	Status int    `json:"status"`
+	Tier   int    `json:"tier"`
+}
+
+type rankedTrackerSample struct {
+	Sample TrackerSample
+	Score  int64
+}
+
+func trackerTargetDomains(cfg Config) map[string]bool {
+	out := make(map[string]bool)
+	for _, d := range cfg.Domains {
+		if d.Enabled && d.Mode == "tracker" {
+			out[strings.ToLower(strings.TrimSpace(d.Host))] = true
+		}
+	}
+	return out
+}
+
+func sampleFromAnnounce(hashHex, rawURL string, targets map[string]bool) (TrackerSample, bool) {
+	hashHex = strings.ToLower(strings.TrimSpace(hashHex))
+	if len(hashHex) != 40 {
+		return TrackerSample{}, false
+	}
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme != "https" {
+		return TrackerSample{}, false
+	}
+	domain := strings.ToLower(u.Hostname())
+	if domain == "" || !targets[domain] {
+		return TrackerSample{}, false
+	}
+	hashBytes, err := decodeInfoHash(hashHex)
+	if err != nil {
+		return TrackerSample{}, false
+	}
+	pathValue := u.Path
+	if pathValue == "" {
+		pathValue = "/"
+	}
+	return TrackerSample{
+		Domain:  domain,
+		Path:    pathValue,
+		HashHex: hashHex,
+		Hash:    hashBytes,
+		URL:     u.String(),
+	}, true
+}
+
+func decodeInfoHash(hashHex string) ([]byte, error) {
+	if len(hashHex) != 40 {
+		return nil, fmt.Errorf("info hash must be 40 hex chars")
+	}
+	out := make([]byte, 20)
+	for i := 0; i < 20; i++ {
+		var v byte
+		for j := 0; j < 2; j++ {
+			ch := hashHex[i*2+j]
+			v <<= 4
+			switch {
+			case ch >= '0' && ch <= '9':
+				v |= ch - '0'
+			case ch >= 'a' && ch <= 'f':
+				v |= ch - 'a' + 10
+			case ch >= 'A' && ch <= 'F':
+				v |= ch - 'A' + 10
+			default:
+				return nil, fmt.Errorf("invalid info hash")
+			}
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+func missingTargets(targets map[string]bool, found map[string]rankedTrackerSample) int {
+	n := 0
+	for domain := range targets {
+		if _, ok := found[domain]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+func chooseSample(found map[string]rankedTrackerSample, sample TrackerSample, score int64) {
+	old, ok := found[sample.Domain]
+	if !ok || score > old.Score {
+		found[sample.Domain] = rankedTrackerSample{Sample: sample, Score: score}
+	}
+}
+
+func flattenRankedSamples(found map[string]rankedTrackerSample) map[string]TrackerSample {
+	out := make(map[string]TrackerSample, len(found))
+	for domain, item := range found {
+		out[domain] = item.Sample
+	}
+	return out
+}
+
 type transmissionTrackerRow struct {
 	ID       int
 	Trackers []transmissionTracker
