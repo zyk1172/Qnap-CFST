@@ -353,23 +353,30 @@ bandwidth 还会额外应用默认阈值：
 
 CFST 本身仍负责生成带真实下载速度的候选；CFHost 不修改上游测速核心。
 
-### 每日 Full Optimize
+### 逐域名 Repair 与 Full Optimize
 
-Smart Repair 与 Full Optimize 现在明确分工：
+自动维护默认采用“哪个域名坏了就修哪个”的策略：
 
 ```text
 Smart Repair:
-当前 IP 可用 -> 保留
-当前 IP 失败 -> 缓存候选 -> 必要时 CFST
-
-Full Optimize:
-强制 CFST -> 按最新 latency/bandwidth 策略重新排序
--> 每个域名重新验证 -> 选择当前最优可用 IP
+A 域名当前 IP 可用 -> A 保持原 IP
+B 域名当前 IP 失败 -> 只给 B 尝试共享 IP / 缓存候选 / 必要时 CFST
+C 域名当前 IP 可用 -> C 保持原 IP
 ```
 
-默认开启 24 小时一次完整优化。升级已有 v0.3 state 时，第一次优化会参考最近一次 CFST 时间，不会无条件在容器重启后立刻重复跑。完整优化失败默认 60 分钟后再尝试。
+即使某个失效域名最终触发了完整 CFST，新的候选池也只用于解决当前 unresolved 域名；本轮验证正常的域名不会因为它而重新选 IP。
 
-WebUI 可手动点击“完整优化”，也可调整或关闭周期优化。
+`Full Optimize` 是不同的显式全局操作：
+
+```text
+手动 Full Optimize:
+强制 CFST -> 按最新 latency/bandwidth 策略重新排序
+-> 每个域名重新验证 -> 允许所有域名重新选择当前最优 IP
+```
+
+周期性全局优化现在默认关闭。旧版本中的 `optimize.enabled=true` 不会自动迁移成周期全局换 IP，避免升级后继续改变健康域名。
+
+如果确实需要定期全局重选，可在 WebUI 中主动开启“允许周期性全局优化”；手动点击“完整优化”始终保留。
 
 ### Tracker
 
