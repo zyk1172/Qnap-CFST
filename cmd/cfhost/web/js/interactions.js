@@ -349,3 +349,28 @@ function createRipple(event) {
   button.appendChild(span)
   setTimeout(() => span.remove(), 480)
 }
+
+
+async function discoverTrackerSamplesNow() {
+  if (store.dirty) {
+    toast('请先保存设置', '下载器地址或凭据有未保存修改。', 'error')
+    return
+  }
+  try {
+    const result = await api('/api/tracker-samples/discover', { method: 'POST' })
+    const report = result?.report || {}
+    const domains = report.domains || []
+    const source = []
+    if (report.transmission) source.push(`Transmission ${report.transmission}`)
+    if (report.qbittorrent) source.push(`qBittorrent ${report.qbittorrent}`)
+    if (domains.length) {
+      toast('Tracker 样本发现完成', `${domains.length} 个域名 · ${source.join(' · ') || '已更新缓存'}`, 'success')
+    } else if (report.errors?.length) {
+      toast('没有发现 Tracker 样本', report.errors.join('；'), 'error')
+    } else {
+      toast('没有发现 Tracker 样本', '请确认下载器中存在这些 Tracker 的已完成种子。')
+    }
+  } catch (error) {
+    toast('自动发现失败', error.message, 'error')
+  }
+}

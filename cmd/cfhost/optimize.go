@@ -12,7 +12,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	candidates,err:=a.runCFST(ctx,cfg)
 	if err!=nil{return err}
 	a.storeCandidates(candidates)
-	samples:=a.loadSamples(cfg)
+	samples:=a.loadSamples(ctx,cfg)
 
 	a.mu.RLock(); current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); a.mu.RUnlock()
 	mappings:=make(map[string]string); statuses:=make(map[string]string); groupIP:=make(map[string]string)

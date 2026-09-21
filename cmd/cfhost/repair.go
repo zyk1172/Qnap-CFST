@@ -30,20 +30,35 @@ func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 	}
 }
 
-func (a *App) loadSamples(cfg Config) map[string]TrackerSample {
+func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSample {
 	samples:=map[string]TrackerSample{}
 	if !cfg.Tracker.RealAnnounce { return samples }
-	loaded,err:=loadTrackerSamples(cfg.Tracker.SamplesPath)
-	if loaded!=nil { samples=loaded }
-	if err!=nil {
-		if os.IsNotExist(err) { a.appendLog("tracker samples unavailable: %s",cfg.Tracker.SamplesPath) } else { a.appendLog("tracker samples warning: %v",err) }
+
+	manual,err:=loadTrackerSamples(cfg.Tracker.SamplesPath)
+	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
+	if err!=nil && !os.IsNotExist(err) { a.appendLog("tracker manual samples warning: %v",err) }
+
+	autoCache,autoErr:=loadTrackerSamples(cfg.Tracker.AutoSamplesPath)
+	if autoCache!=nil { mergeTrackerSamples(samples,autoCache,false) }
+	if autoErr!=nil && !os.IsNotExist(autoErr) { a.appendLog("tracker auto samples warning: %v",autoErr) }
+
+	if cfg.Tracker.AutoDiscover && (cfg.Tracker.Transmission.Enabled || cfg.Tracker.QBittorrent.Enabled) {
+		cache,report:=a.refreshAutoTrackerSamples(ctx,cfg)
+		for _,msg:=range report.Errors { a.appendLog("tracker auto-discovery: %s",msg) }
+		if len(report.Domains)>0 {
+			a.appendLog("tracker auto-discovery: transmission=%d qbittorrent=%d domains=%d",report.Transmission,report.QBittorrent,len(report.Domains))
+		}
+		mergeTrackerSamples(samples,cache,false)
 	}
-	if len(samples)>0 { a.appendLog("tracker samples loaded: %d",len(samples)) }
+
+	// Manually managed samples always take precedence over discovered/cache samples.
+	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
+	if len(samples)>0 { a.appendLog("tracker samples ready: %d",len(samples)) }
 	return samples
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
-	now:=time.Now(); samples:=a.loadSamples(cfg)
+	now:=time.Now(); samples:=a.loadSamples(ctx,cfg)
 	a.mu.RLock()
 	current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); cachedState:=append([]Candidate(nil),a.state.Candidates...); lastRefresh:=a.state.LastRefresh
 	a.mu.RUnlock()
