@@ -170,12 +170,15 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 			verifiedAt = now.Format(time.RFC3339)
 		}
 		httpCode := "-"
-		if match := httpCodePattern.FindStringSubmatch(statuses[host]); len(match) == 2 {
+		recordStatus := "VERIFIED"
+		if class == "normal" {
+			recordStatus = "SELECTED"
+		} else if match := httpCodePattern.FindStringSubmatch(statuses[host]); len(match) == 2 {
 			httpCode = match[1]
 		} else if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 			httpCode = "200"
 		}
-		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, "VERIFIED"}, "\t"))
+		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, recordStatus}, "\t"))
 		mapBuilder.WriteByte('\n')
 		signatureParts = append(signatureParts, strings.Join([]string{host, ip, class, delay, speed, loss, colo}, "\t"))
 	}
