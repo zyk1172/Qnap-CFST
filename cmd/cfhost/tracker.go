@@ -84,6 +84,9 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 	return out, nil
 }
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
+	if d.Class == "normal" {
+		return true, "verification skipped · normal"
+	}
 	if d.Mode != "tracker" {
 		return verifyHTTPDomain(ctx, d, ip, cfg)
 	}
@@ -98,6 +101,9 @@ func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config
 }
 
 func domainRefreshable(d Domain, cfg Config, samples map[string]TrackerSample) bool {
+	if d.Class == "normal" {
+		return true
+	}
 	if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 		_, ok := samples[d.Host]
 		return ok
