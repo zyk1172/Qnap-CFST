@@ -89,7 +89,7 @@ function renderSettings() {
           <div class="form-grid">
             ${textField('tracker.autoSamplesPath', '自动样本缓存', config.tracker.autoSamplesPath, '', 'span-2')}
             ${numberField('tracker.discoveryTimeoutSeconds', '自动发现超时', config.tracker.discoveryTimeoutSeconds, '秒')}
-            ${numberField('tracker.maxTrackerLookups', 'qB Tracker 补查上限', config.tracker.maxTrackerLookups, '个完成任务')}
+            ${numberField('tracker.maxTrackerLookups', '下载器 Tracker 补查上限', config.tracker.maxTrackerLookups, '个完成任务（每个 Tracker 找到 1 个样本即停止）')}
           </div>
 
           <div class="grid cols-2 section">

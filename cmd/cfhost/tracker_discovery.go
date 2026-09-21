@@ -23,16 +23,165 @@ type TrackerDiscoveryReport struct {
 	Errors       []string `json:"errors,omitempty"`
 }
 
-type transmissionTorrent struct {
-	HashString    string `json:"hashString"`
-	Name          string `json:"name"`
-	LeftUntilDone int64  `json:"leftUntilDone"`
-	Status        int    `json:"status"`
-	ActivityDate  int64  `json:"activityDate"`
-	Trackers      []struct {
-		Announce string `json:"announce"`
-		Tier     int    `json:"tier"`
-	} `json:"trackers"`
+type transmissionTorrentSummary struct {
+	ID            int
+	HashString    string
+	LeftUntilDone int64
+	IsFinished    bool
+	Status        int
+	ActivityDate  int64
+}
+
+type transmissionTracker struct {
+	Announce string `json:"announce"`
+	Tier     int    `json:"tier"`
+}
+
+type transmissionRPCClient struct {
+	endpoint      string
+	cfg           DownloaderClientConfig
+	client        *http.Client
+	sessionID     string
+	modern        bool
+	protocolKnown bool
+}
+
+func transmissionRPCVersionIsModern(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return false
+	}
+	var major int
+	_, err := fmt.Sscanf(version, "%d", &major)
+	return err == nil && major >= 6
+}
+
+func (c *transmissionRPCClient) call(ctx context.Context, legacyMethod, modernMethod string, legacyArgs, modernParams map[string]any) ([]byte, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		var payload []byte
+		if c.modern {
+			payload, _ = json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  modernMethod,
+				"params":  modernParams,
+				"id":      1,
+			})
+		} else {
+			payload, _ = json.Marshal(map[string]any{
+				"method":    legacyMethod,
+				"arguments": legacyArgs,
+			})
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.sessionID != "" {
+			req.Header.Set("X-Transmission-Session-Id", c.sessionID)
+		}
+		if c.cfg.Username != "" || c.cfg.Password != "" {
+			req.SetBasicAuth(c.cfg.Username, c.cfg.Password)
+		}
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("Transmission request: %w", err)
+		}
+		if resp.StatusCode == http.StatusConflict {
+			c.sessionID = resp.Header.Get("X-Transmission-Session-Id")
+			if !c.protocolKnown {
+				if version := resp.Header.Get("X-Transmission-Rpc-Version"); version != "" {
+					c.modern = transmissionRPCVersionIsModern(version)
+					c.protocolKnown = true
+				}
+			}
+			_ = resp.Body.Close()
+			if c.sessionID == "" {
+				return nil, fmt.Errorf("Transmission did not return X-Transmission-Session-Id")
+			}
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("Transmission HTTP %d", resp.StatusCode)
+		}
+		return body, nil
+	}
+	return nil, fmt.Errorf("Transmission RPC session negotiation failed")
+}
+
+func parseTransmissionTorrentList(body []byte, modern bool) ([]transmissionTorrentSummary, error) {
+	var rows []json.RawMessage
+	if modern {
+		var response struct {
+			Result struct {
+				Torrents []json.RawMessage `json:"torrents"`
+			} `json:"result"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, fmt.Errorf("Transmission JSON-RPC response: %w", err)
+		}
+		if response.Error != nil {
+			return nil, fmt.Errorf("Transmission JSON-RPC: %s", response.Error.Message)
+		}
+		rows = response.Result.Torrents
+	} else {
+		var response struct {
+			Result    string `json:"result"`
+			Arguments struct {
+				Torrents []json.RawMessage `json:"torrents"`
+			} `json:"arguments"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, fmt.Errorf("Transmission response: %w", err)
+		}
+		if response.Result != "" && response.Result != "success" {
+			return nil, fmt.Errorf("Transmission RPC: %s", response.Result)
+		}
+		rows = response.Arguments.Torrents
+	}
+
+	out := make([]transmissionTorrentSummary, 0, len(rows))
+	for _, row := range rows {
+		if modern {
+			var v struct {
+				ID            int    `json:"id"`
+				HashString    string `json:"hash_string"`
+				LeftUntilDone int64  `json:"left_until_done"`
+				IsFinished    bool   `json:"is_finished"`
+				Status        int    `json:"status"`
+				ActivityDate  int64  `json:"activity_date"`
+			}
+			if json.Unmarshal(row, &v) != nil {
+				continue
+			}
+			out = append(out, transmissionTorrentSummary{v.ID, v.HashString, v.LeftUntilDone, v.IsFinished, v.Status, v.ActivityDate})
+		} else {
+			var v struct {
+				ID            int    `json:"id"`
+				HashString    string `json:"hashString"`
+				LeftUntilDone int64  `json:"leftUntilDone"`
+				IsFinished    bool   `json:"isFinished"`
+				Status        int    `json:"status"`
+				ActivityDate  int64  `json:"activityDate"`
+			}
+			if json.Unmarshal(row, &v) != nil {
+				continue
+			}
+			out = append(out, transmissionTorrentSummary{v.ID, v.HashString, v.LeftUntilDone, v.IsFinished, v.Status, v.ActivityDate})
+		}
+	}
+	return out, nil
 }
 
 type qbitTorrent struct {
@@ -83,12 +232,7 @@ func sampleFromAnnounce(hashHex, rawURL string, targets map[string]bool) (Tracke
 	if err != nil {
 		return TrackerSample{}, false
 	}
-	pathValue := u.EscapedPath()
-	if pathValue == "" {
-		pathValue = "/"
-	}
-	// Existing TrackerSample parser compares URL.Path, not EscapedPath.
-	pathValue = u.Path
+	pathValue := u.Path
 	if pathValue == "" {
 		pathValue = "/"
 	}
@@ -109,15 +253,15 @@ func decodeInfoHash(hashHex string) ([]byte, error) {
 	for i := 0; i < 20; i++ {
 		var v byte
 		for j := 0; j < 2; j++ {
-			c := hashHex[i*2+j]
+			ch := hashHex[i*2+j]
 			v <<= 4
 			switch {
-			case c >= '0' && c <= '9':
-				v |= c - '0'
-			case c >= 'a' && c <= 'f':
-				v |= c - 'a' + 10
-			case c >= 'A' && c <= 'F':
-				v |= c - 'A' + 10
+			case ch >= '0' && ch <= '9':
+				v |= ch - '0'
+			case ch >= 'a' && ch <= 'f':
+				v |= ch - 'a' + 10
+			case ch >= 'A' && ch <= 'F':
+				v |= ch - 'A' + 10
 			default:
 				return nil, fmt.Errorf("invalid info hash")
 			}
@@ -152,7 +296,60 @@ func flattenRankedSamples(found map[string]rankedTrackerSample) map[string]Track
 	return out
 }
 
-func discoverTransmissionSamples(ctx context.Context, cfg DownloaderClientConfig, targets map[string]bool) (map[string]TrackerSample, error) {
+type transmissionTrackerRow struct {
+	ID       int
+	Trackers []transmissionTracker
+}
+
+func parseTransmissionTrackers(body []byte, modern bool) ([]transmissionTrackerRow, error) {
+	if modern {
+		var response struct {
+			Result struct {
+				Torrents []struct {
+					ID       int                   `json:"id"`
+					Trackers []transmissionTracker `json:"trackers"`
+				} `json:"torrents"`
+			} `json:"result"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, err
+		}
+		if response.Error != nil {
+			return nil, fmt.Errorf("Transmission JSON-RPC: %s", response.Error.Message)
+		}
+		out := make([]transmissionTrackerRow, 0, len(response.Result.Torrents))
+		for _, row := range response.Result.Torrents {
+			out = append(out, transmissionTrackerRow{ID: row.ID, Trackers: row.Trackers})
+		}
+		return out, nil
+	}
+
+	var response struct {
+		Result    string `json:"result"`
+		Arguments struct {
+			Torrents []struct {
+				ID       int                   `json:"id"`
+				Trackers []transmissionTracker `json:"trackers"`
+			} `json:"torrents"`
+		} `json:"arguments"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	if response.Result != "" && response.Result != "success" {
+		return nil, fmt.Errorf("Transmission RPC: %s", response.Result)
+	}
+	out := make([]transmissionTrackerRow, 0, len(response.Arguments.Torrents))
+	for _, row := range response.Arguments.Torrents {
+		out = append(out, transmissionTrackerRow{ID: row.ID, Trackers: row.Trackers})
+	}
+	return out, nil
+}
+
+func discoverTransmissionSamples(ctx context.Context, cfg DownloaderClientConfig, targets map[string]bool, maxTrackerLookups int) (map[string]TrackerSample, error) {
 	if !cfg.Enabled {
 		return map[string]TrackerSample{}, nil
 	}
@@ -160,86 +357,121 @@ func discoverTransmissionSamples(ctx context.Context, cfg DownloaderClientConfig
 	if err != nil {
 		return nil, err
 	}
+	if maxTrackerLookups < 1 {
+		maxTrackerLookups = 200
+	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"method": "torrent-get",
-		"arguments": map[string]any{
-			"fields": []string{"hashString", "name", "leftUntilDone", "status", "activityDate", "trackers"},
-		},
+	rpc := &transmissionRPCClient{
+		endpoint: endpoint,
+		cfg:      cfg,
+		client:   &http.Client{},
+	}
+
+	// Stage 1: fetch only lightweight torrent metadata. Do not pull tracker
+	// arrays for every torrent; large PT libraries can make that response huge.
+	body, err := rpc.call(
+		ctx,
+		"torrent-get",
+		"torrent_get",
+		map[string]any{"fields": []string{"id", "hashString", "leftUntilDone", "isFinished", "status", "activityDate"}},
+		map[string]any{"fields": []string{"id", "hash_string", "left_until_done", "is_finished", "status", "activity_date"}},
+	)
+	if err != nil {
+		return nil, err
+	}
+	torrents, err := parseTransmissionTorrentList(body, rpc.modern)
+	if err != nil {
+		return nil, err
+	}
+
+	eligible := torrents[:0]
+	for _, torrent := range torrents {
+		if len(torrent.HashString) != 40 {
+			continue
+		}
+		if torrent.LeftUntilDone != 0 && !torrent.IsFinished {
+			continue
+		}
+		eligible = append(eligible, torrent)
+	}
+	sort.SliceStable(eligible, func(i, j int) bool {
+		iSeed := eligible[i].Status == 6
+		jSeed := eligible[j].Status == 6
+		if iSeed != jSeed {
+			return iSeed
+		}
+		return eligible[i].ActivityDate > eligible[j].ActivityDate
 	})
 
-	client := &http.Client{}
-	sessionID := ""
-	var body []byte
-	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if sessionID != "" {
-			req.Header.Set("X-Transmission-Session-Id", sessionID)
-		}
-		if cfg.Username != "" || cfg.Password != "" {
-			req.SetBasicAuth(cfg.Username, cfg.Password)
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("Transmission request: %w", err)
-		}
-		if resp.StatusCode == http.StatusConflict && attempt == 0 {
-			sessionID = resp.Header.Get("X-Transmission-Session-Id")
-			_ = resp.Body.Close()
-			if sessionID == "" {
-				return nil, fmt.Errorf("Transmission did not return X-Transmission-Session-Id")
-			}
-			continue
-		}
-		body, err = io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("Transmission HTTP %d", resp.StatusCode)
-		}
-		break
-	}
-	if body == nil {
-		return nil, fmt.Errorf("Transmission RPC session negotiation failed")
-	}
-
-	var response struct {
-		Result    string `json:"result"`
-		Arguments struct {
-			Torrents []transmissionTorrent `json:"torrents"`
-		} `json:"arguments"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("Transmission response: %w", err)
-	}
-	if response.Result != "" && response.Result != "success" {
-		return nil, fmt.Errorf("Transmission RPC: %s", response.Result)
-	}
-
+	// Stage 2: ask for trackers only for recent completed/seeding torrents.
+	// One sample per target Tracker domain is enough; after a domain is found,
+	// later torrents for that domain are ignored.
 	found := make(map[string]rankedTrackerSample)
-	for _, torrent := range response.Arguments.Torrents {
-		if torrent.LeftUntilDone != 0 || len(torrent.HashString) != 40 {
-			continue
+	byID := make(map[int]transmissionTorrentSummary, len(eligible))
+	for _, torrent := range eligible {
+		byID[torrent.ID] = torrent
+	}
+
+	const batchSize = 16
+	lookups := 0
+	for offset := 0; offset < len(eligible) && missingTargets(targets, found) > 0 && lookups < maxTrackerLookups; {
+		remaining := maxTrackerLookups - lookups
+		size := batchSize
+		if remaining < size {
+			size = remaining
 		}
-		score := torrent.ActivityDate
-		// Transmission status 6 is seeding; prefer a live seeding task over
-		// an equally recent stopped/queued completed task.
-		if torrent.Status == 6 {
-			score += 1 << 40
+		if len(eligible)-offset < size {
+			size = len(eligible) - offset
 		}
-		for _, tracker := range torrent.Trackers {
-			sample, ok := sampleFromAnnounce(torrent.HashString, tracker.Announce, targets)
-			if ok {
-				chooseSample(found, sample, score-int64(tracker.Tier))
+		ids := make([]int, 0, size)
+		for _, torrent := range eligible[offset : offset+size] {
+			ids = append(ids, torrent.ID)
+		}
+		offset += size
+		lookups += size
+
+		body, err := rpc.call(
+			ctx,
+			"torrent-get",
+			"torrent_get",
+			map[string]any{
+				"ids":    ids,
+				"fields": []string{"id", "trackers"},
+			},
+			map[string]any{
+				"ids":    ids,
+				"fields": []string{"id", "trackers"},
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := parseTransmissionTrackers(body, rpc.modern)
+		if err != nil {
+			return nil, fmt.Errorf("Transmission tracker batch: %w", err)
+		}
+		for _, row := range rows {
+			torrent, ok := byID[row.ID]
+			if !ok {
+				continue
+			}
+			for _, tracker := range row.Trackers {
+				sample, ok := sampleFromAnnounce(torrent.HashString, tracker.Announce, targets)
+				if !ok {
+					continue
+				}
+				if _, exists := found[sample.Domain]; exists {
+					continue
+				}
+				found[sample.Domain] = rankedTrackerSample{Sample: sample, Score: torrent.ActivityDate}
 			}
 		}
+	}
+	if len(found) == 0 {
+		if len(eligible) == 0 {
+			return map[string]TrackerSample{}, fmt.Errorf("Transmission connected: %d torrents returned, no completed v1 torrent is eligible", len(torrents))
+		}
+		return map[string]TrackerSample{}, fmt.Errorf("Transmission connected: checked %d completed torrents, no matching HTTPS Tracker sample found", lookups)
 	}
 	return flattenRankedSamples(found), nil
 }
@@ -409,7 +641,7 @@ func discoverTrackerSamples(ctx context.Context, cfg Config) (map[string]Tracker
 	defer cancel()
 
 	if cfg.Tracker.Transmission.Enabled {
-		samples, err := discoverTransmissionSamples(discoveryCtx, cfg.Tracker.Transmission, targets)
+		samples, err := discoverTransmissionSamples(discoveryCtx, cfg.Tracker.Transmission, targets, cfg.Tracker.MaxTrackerLookups)
 		if err != nil {
 			report.Errors = append(report.Errors, "Transmission: "+err.Error())
 		} else {
