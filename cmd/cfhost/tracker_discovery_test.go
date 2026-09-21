@@ -54,18 +54,17 @@ func TestDiscoverTransmissionSamplesModernRPCStopsAfterOneSample(t *testing.T) {
 			return
 		}
 		trackerLookups.Add(1)
-		switch req.Params.IDs[0] {
-		case 11:
-			_, _ = w.Write([]byte(`{
-				"jsonrpc":"2.0",
-				"result":{"torrents":[{"trackers":[{"announce":"https://tracker.m-team.cc/announce?passkey=modern-secret","tier":0}]}]},
-				"id":1
-			}`))
-		case 12:
-			t.Fatal("second torrent must not be inspected after one sample for the only target domain was found")
-		default:
-			t.Fatalf("unexpected torrent id %d", req.Params.IDs[0])
+		if req.Params.IDs[0] != 11 {
+			t.Fatalf("unexpected first torrent id %d", req.Params.IDs[0])
 		}
+		_, _ = w.Write([]byte(`{
+			"jsonrpc":"2.0",
+			"result":{"torrents":[
+				{"id":11,"trackers":[{"announce":"https://tracker.m-team.cc/announce?passkey=modern-secret","tier":0}]},
+				{"id":12,"trackers":[{"announce":"https://tracker.m-team.cc/announce?passkey=unused-second-sample","tier":0}]}
+			]},
+			"id":1
+		}`))
 	}))
 	defer srv.Close()
 
@@ -107,7 +106,7 @@ func TestDiscoverTransmissionSamplesLegacyRPC(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{
 			"result":"success",
-			"arguments":{"torrents":[{"trackers":[{"announce":"https://tracker.hdtime.org/announce.php?passkey=legacy-secret","tier":0}]}]}
+			"arguments":{"torrents":[{"id":21,"trackers":[{"announce":"https://tracker.hdtime.org/announce.php?passkey=legacy-secret","tier":0}]}]}
 		}`))
 	}))
 	defer srv.Close()
