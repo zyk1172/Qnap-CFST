@@ -87,6 +87,7 @@ const store = {
   commandItems: [],
   modalResolver: null,
   polling: null,
+  renderSignature: '',
 }
 
 const $ = selector => document.querySelector(selector)
@@ -153,7 +154,10 @@ async function refreshStatus({ quiet = false } = {}) {
   try {
     store.state = await api('/api/status')
     updateShellStatus()
-    if (!quiet && canAutoRender()) renderPage(false)
+    const nextSignature = pageRefreshSignature()
+    if (!quiet && canAutoRender() && nextSignature !== store.renderSignature) {
+      renderPage(false, false)
+    }
   } catch (error) {
     updateConnectionError(error)
   }
@@ -165,6 +169,64 @@ function canAutoRender() {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return false
   if (store.page === 'settings' && store.dirty) return false
   return true
+}
+
+function pageRefreshSignature(page = store.page, state = store.state) {
+  if (!state) return ''
+
+  let snapshot
+  switch (page) {
+  case 'dashboard':
+    snapshot = {
+      running: state.running,
+      currentJob: state.currentJob,
+      lastError: state.lastError,
+      lastSuccess: state.lastSuccess,
+      lastOptimize: state.lastOptimize,
+      mappings: state.mappings,
+      domainStatus: state.domainStatus,
+      history: state.history,
+      candidates: state.candidates,
+      sync: state.sync,
+      migrationStatus: state.migrationStatus,
+    }
+    break
+  case 'domains':
+    snapshot = {
+      mappings: state.mappings,
+      domainStatus: state.domainStatus,
+      domainHealth: state.domainHealth,
+    }
+    break
+  case 'candidates':
+    snapshot = {
+      candidates: state.candidates,
+      lastRefresh: state.lastRefresh,
+    }
+    break
+  case 'operations':
+    snapshot = {
+      running: state.running,
+      currentJob: state.currentJob,
+      lastRun: state.lastRun,
+      lastOptimize: state.lastOptimize,
+      nextRefresh: state.nextRefresh,
+      history: state.history,
+      sync: state.sync,
+    }
+    break
+  case 'logs':
+    snapshot = {
+      running: state.running,
+      currentJob: state.currentJob,
+      logs: state.logs,
+    }
+    break
+  default:
+    snapshot = null
+  }
+
+  return JSON.stringify(snapshot)
 }
 
 function currentPageFromHash() {
@@ -247,7 +309,7 @@ function pageHeader(title, description, actions = '') {
   `
 }
 
-function renderPage(animate = true) {
+function renderPage(animate = true, animateDashboardNumbers = animate) {
   if (!store.config || !store.state) return
   const renderers = {
     dashboard: renderDashboard,
@@ -260,7 +322,7 @@ function renderPage(animate = true) {
   $('#page-host').innerHTML = `<div class="page-route ${animate ? 'is-entering' : ''}">${renderers[store.page]()}</div>`
   hydrateIcons()
   updateShellStatus()
-  if (store.page === 'dashboard') animateNumbers()
+  if (store.page === 'dashboard' && animateDashboardNumbers) animateNumbers()
   if (store.page === 'settings') updateSaveBar()
   if (store.page === 'logs' && !store.logPaused) {
     requestAnimationFrame(() => {
@@ -268,6 +330,7 @@ function renderPage(animate = true) {
       if (content) content.scrollTop = content.scrollHeight
     })
   }
+  store.renderSignature = pageRefreshSignature()
 }
 
 function statusCounts() {
