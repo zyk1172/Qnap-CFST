@@ -17,6 +17,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/config", a.handleConfig)
 	mux.HandleFunc("/api/run", a.handleJob("run"))
 	mux.HandleFunc("/api/repair", a.handleJob("repair"))
+	mux.HandleFunc("/api/optimize", a.handleJob("optimize"))
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	return mux
@@ -101,7 +102,7 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	mappings := copyMappings(a.state.Mappings)
 	a.mu.RUnlock()
-	if err := a.applyMappings(cfg.HostsPath, mappings); err != nil {
+	if err := a.applyMappings(cfg, mappings); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

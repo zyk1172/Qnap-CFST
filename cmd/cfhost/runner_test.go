@@ -26,7 +26,8 @@ func TestParseCandidates(t *testing.T) {
 
 func TestRenderHostsPreservesUnmanagedContent(t *testing.T) {
 	in := "127.0.0.1 localhost\n10.0.0.2 custom.local\n# >>> CFHOST MANAGED >>>\n1.1.1.1 old.example\n# <<< CFHOST MANAGED <<<\n"
-	out := renderHosts(in, map[string]string{"a.example": "104.16.0.1", "b.example": "104.16.0.2"})
+	out, err := renderHosts(in, map[string]string{"a.example": "104.16.0.1", "b.example": "104.16.0.2"})
+	if err != nil { t.Fatal(err) }
 	if !strings.Contains(out, "10.0.0.2 custom.local") {
 		t.Fatal("unmanaged line was removed")
 	}
@@ -40,7 +41,8 @@ func TestRenderHostsPreservesUnmanagedContent(t *testing.T) {
 
 func TestRenderHostsEmptyClearsManagedBlock(t *testing.T) {
 	in := "127.0.0.1 localhost\n# >>> CFHOST MANAGED >>>\n1.1.1.1 old.example\n# <<< CFHOST MANAGED <<<\n"
-	out := renderHosts(in, map[string]string{})
+	out, err := renderHosts(in, map[string]string{})
+	if err != nil { t.Fatal(err) }
 	if strings.Contains(out, "old.example") || strings.Contains(out, hostsBegin) {
 		t.Fatalf("managed block was not cleared: %q", out)
 	}
@@ -166,4 +168,70 @@ func TestNormalizeLegacyDomainClass(t *testing.T) {
 	if c.Domains[0].Class != "latency" {
 		t.Fatalf("legacy domain should migrate to latency class: %#v", c.Domains[0])
 	}
+}
+
+func TestBandwidthRanking(t *testing.T) {
+	in := []Candidate{
+		{IP:"1.1.1.1",LossRate:0,DelayMS:20,SpeedMB:10},
+		{IP:"2.2.2.2",LossRate:0,DelayMS:60,SpeedMB:30},
+		{IP:"3.3.3.3",LossRate:0,DelayMS:10,SpeedMB:20},
+	}
+	got := rankCandidatesForClass(in,"bandwidth")
+	if got[0].IP!="2.2.2.2" || got[1].IP!="3.3.3.3" { t.Fatalf("unexpected bandwidth order: %#v",got) }
+}
+
+func TestOrderedCandidatesAppliesBandwidthPolicyAndLimit(t *testing.T) {
+	cfg:=defaultConfig(); cfg.Verify.CandidateLimit=2
+	cfg.Bandwidth.MaxLossRate=0; cfg.Bandwidth.MaxDelayMS=180; cfg.Bandwidth.MinSpeedMB=0.5
+	d:=Domain{Class:"bandwidth"}
+	in:=[]Candidate{
+		{IP:"1.1.1.1",LossRate:0,DelayMS:40,SpeedMB:5},
+		{IP:"2.2.2.2",LossRate:0,DelayMS:30,SpeedMB:9},
+		{IP:"3.3.3.3",LossRate:0.1,DelayMS:10,SpeedMB:99},
+		{IP:"4.4.4.4",LossRate:0,DelayMS:20,SpeedMB:8},
+	}
+	got:=orderedCandidates(in,d,"","",cfg)
+	if len(got)!=2 || got[0].IP!="2.2.2.2" || got[1].IP!="4.4.4.4" { t.Fatalf("unexpected filtered order: %#v",got) }
+}
+
+func TestRenderHostsRejectsBrokenMarkers(t *testing.T) {
+	_,err:=renderHosts("127.0.0.1 localhost\n"+hostsBegin+"\n1.1.1.1 a.example\n",map[string]string{"a.example":"1.1.1.1"})
+	if err==nil { t.Fatal("expected broken marker rejection") }
+}
+
+func TestRenderHostsMigratesLegacyMarkers(t *testing.T) {
+	in:="127.0.0.1 localhost\n"+legacyLatencyBegin+"\n1.1.1.1 old.example\n"+legacyLatencyEnd+"\n"
+	out,err:=renderHosts(in,map[string]string{"new.example":"2.2.2.2"})
+	if err!=nil{t.Fatal(err)}
+	if strings.Contains(out,legacyLatencyBegin)||strings.Contains(out,"old.example"){t.Fatalf("legacy marker remained: %s",out)}
+	if !strings.Contains(out,"2.2.2.2 new.example"){t.Fatal("new mapping missing")}
+}
+
+func TestStageApplyRollback(t *testing.T) {
+	dir:=t.TempDir(); hosts:=filepath.Join(dir,"hosts")
+	original:="127.0.0.1 localhost\n"
+	if err:=os.WriteFile(hosts,[]byte(original),0644);err!=nil{t.Fatal(err)}
+	a:=&App{dataDir:dir}
+	cfg:=defaultConfig();cfg.HostsPath=hosts
+	stage,err:=a.stageApplyMappings(cfg,map[string]string{"a.example":"1.1.1.1"})
+	if err!=nil{t.Fatal(err)}
+	if !stage.Changed{t.Fatal("expected changed stage")}
+	if err:=stage.Rollback();err!=nil{t.Fatal(err)}
+	got,_:=os.ReadFile(hosts)
+	if string(got)!=original{t.Fatalf("rollback mismatch: %q",string(got))}
+}
+
+func TestMappingsFromLegacyBlocks(t *testing.T) {
+	content:=legacyLatencyBegin+"\n1.1.1.1 tracker.example.com\n"+legacyLatencyEnd+"\n"
+	got,err:=mappingsFromManagedBlocks(content,map[string]bool{"tracker.example.com":true})
+	if err!=nil{t.Fatal(err)}
+	if got["tracker.example.com"]!="1.1.1.1"{t.Fatalf("migration failed: %#v",got)}
+}
+
+func TestOptimizeDueUsesRefreshAsInitialBaseline(t *testing.T) {
+	now:=time.Date(2026,9,22,1,0,0,0,time.UTC)
+	cfg:=OptimizeConfig{Enabled:true,IntervalMinutes:1440,RetryMinutes:60}
+	if optimizeDue(now,"","",now.Add(-2*time.Hour).Format(time.RFC3339),cfg){t.Fatal("recent refresh should defer first optimize")}
+	if !optimizeDue(now,"","",now.Add(-25*time.Hour).Format(time.RFC3339),cfg){t.Fatal("stale refresh should trigger optimize")}
+	if optimizeDue(now,"",now.Add(-30*time.Minute).Format(time.RFC3339),now.Add(-25*time.Hour).Format(time.RFC3339),cfg){t.Fatal("recent failed optimize attempt should defer retry")}
 }

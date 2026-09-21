@@ -4,7 +4,7 @@ CFHost 是一个面向 NAS / QNAP 的 Cloudflare 优选与 Hosts 管理服务。
 
 项目基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的成熟测速核心，在其上增加 WebUI、Docker、域名级验证、智能 Repair 和宿主机 Hosts 管理。
 
-> 当前开发版本为 v0.2。CFST 测速核心仍保持独立，QNAP / PT / Hosts 逻辑全部位于 `cmd/cfhost/`。
+> 当前开发版本为 v0.4。CFST 测速核心仍保持独立，QNAP / PT / Hosts 逻辑全部位于 `cmd/cfhost/`。
 
 ## v0.2 第二批
 
@@ -290,3 +290,94 @@ CFHOST_DATA_DIR=/share/Container/cfhost/data docker compose up -d
 ## License
 
 本项目继承上游 CloudflareSpeedTest，使用 GNU GPL v3。
+
+
+## v0.4 第四批
+
+### 严格 HTTP 验证
+
+普通网站默认恢复严格验证，不再把“能收到任意 HTTP 响应”直接视为成功：
+
+- 指定候选 IP 连接原域名
+- 最多重试 2 次
+- 跟随最多 3 次跳转
+- 跳转到其它域名后恢复正常 DNS，不错误地继续绑定候选 IP
+- 最终必须是 2xx
+- HTTP 200 正文默认至少 512 bytes
+- 拒绝 Cloudflare challenge、nginx/宝塔默认页、parked domain 等常见占位内容
+
+这些参数都可以在 WebUI 修改。
+
+### Hosts 事务与迁移
+
+Hosts 写入现在会：
+
+1. 校验 CFHost 和旧 CF-YX Marker 是否完整、唯一且不嵌套。
+2. 生成新 Hosts 后确认非受管内容没有变化。
+3. 先备份，再原地写入并重新读取校验，继续保持 inode。
+4. 如果写入失败，立即恢复原内容。
+5. Repair/Optimize 写 Hosts 后如果 state.json 提交失败，再把 Hosts 回滚到旧版本。
+
+备份默认只保留最近 10 份。
+
+首次启动且 CFHost state 为空时，会自动从宿主机现有 CFHost/CF-YX Marker 导入映射；也会读取可选的 `/data/legacy-hosts-map.tsv`。导入映射只作为“待验证 current IP”，下一次 Repair 会重新验证。首次成功应用新 Hosts 后，旧的：
+
+```text
+# CF-YX-LATENCY-BEGIN
+# CF-YX-LATENCY-END
+# CF-YX-BANDWIDTH-BEGIN
+# CF-YX-BANDWIDTH-END
+```
+
+会被移除并收敛到一个 CFHost Marker。
+
+### 真正的 latency / bandwidth 选择策略
+
+每个域名的 `class` 现在实际参与候选选择：
+
+```text
+latency:
+loss -> delay -> speed -> IP
+
+bandwidth:
+loss -> speed -> delay -> IP
+```
+
+bandwidth 还会额外应用默认阈值：
+
+- loss <= 0
+- delay <= 180 ms
+- speed >= 0.5 MB/s
+
+每个域名默认最多验证 Top 10 个候选。
+
+CFST 本身仍负责生成带真实下载速度的候选；CFHost 不修改上游测速核心。
+
+### 每日 Full Optimize
+
+Smart Repair 与 Full Optimize 现在明确分工：
+
+```text
+Smart Repair:
+当前 IP 可用 -> 保留
+当前 IP 失败 -> 缓存候选 -> 必要时 CFST
+
+Full Optimize:
+强制 CFST -> 按最新 latency/bandwidth 策略重新排序
+-> 每个域名重新验证 -> 选择当前最优可用 IP
+```
+
+默认开启 24 小时一次完整优化。升级已有 v0.3 state 时，第一次优化会参考最近一次 CFST 时间，不会无条件在容器重启后立刻重复跑。完整优化失败默认 60 分钟后再尝试。
+
+WebUI 可手动点击“完整优化”，也可调整或关闭周期优化。
+
+### Tracker
+
+旧生产配置实际为：
+
+```text
+TRACKER_REAL_ANNOUNCE_RETRIES=2
+TRACKER_REAL_ANNOUNCE_REQUIRED_SUCCESSES=1
+```
+
+所以 v0.4 保持“一次有效真实 announce 即证明候选可用”，没有错误地改成必须连续成功两次。

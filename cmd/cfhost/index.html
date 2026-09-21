@@ -17,6 +17,7 @@
     <div class="actions">
       <button onclick="job('run')">强制 CFST 测速</button>
       <button class="primary" onclick="job('repair')">智能 Repair</button>
+      <button onclick="job('optimize')">完整优化</button>
       <button onclick="applyHosts()">应用 Hosts</button>
       <button onclick="syncGitHub()">同步 GitHub</button>
     </div>
@@ -26,7 +27,7 @@
     <div class="card"><div class="muted">运行状态</div><div id="runState" class="metric">-</div></div>
     <div class="card"><div class="muted">缓存候选 IP</div><div id="candidateCount" class="metric">0</div></div>
     <div class="card"><div class="muted">已解析域名</div><div id="mappingCount" class="metric">0</div></div>
-    <div class="card"><div class="muted">最近完整测速</div><div id="lastRefresh" class="metric tiny">-</div><div id="nextRefresh" class="muted tiny"></div></div>
+    <div class="card"><div class="muted">最近完整测速</div><div id="lastRefresh" class="metric tiny">-</div><div id="nextRefresh" class="muted tiny"></div><div id="lastOptimize" class="muted tiny"></div></div>
   </div>
 
   <section class="card">
@@ -40,6 +41,10 @@
       <div class="field"><label>Ping 次数</label><input id="pingTimes" type="number"></div>
       <div class="field"><label>单 IP 下载秒数</label><input id="downloadSeconds" type="number"></div>
       <div class="field"><label>验证超时秒数</label><input id="verifyTimeout" type="number"></div>
+      <div class="field"><label>HTTP 验证重试</label><input id="httpRetries" type="number"></div>
+      <div class="field"><label>每域名最多候选</label><input id="candidateLimit" type="number"></div>
+      <div class="field"><label>HTTP 200 最小正文 bytes</label><input id="minBodyBytes" type="number"></div>
+      <div class="field"><label>最大跳转次数</label><input id="maxRedirects" type="number"></div>
       <div class="field wide"><label>下载测速 URL</label><input id="downloadUrl"></div>
       <div class="field"><label>Repair 间隔（分钟）</label><input id="repairInterval" type="number"></div>
       <div class="field"><label>候选缓存 TTL（分钟）</label><input id="candidateTTL" type="number"></div>
@@ -47,9 +52,18 @@
       <div class="field"><label>完整测速基础冷却（分钟）</label><input id="refreshCooldown" type="number"></div>
       <div class="field"><label>完整测速最大退避（分钟）</label><input id="refreshMaxBackoff" type="number"></div>
       <div class="field"><label>Hosts 路径</label><input id="hostsPath"></div>
+      <div class="field"><label>Hosts 备份保留数量</label><input id="backupRetention" type="number"></div>
+      <div class="field wide"><label>旧 hosts-map.tsv 导入路径</label><input id="legacyStateMap"></div>
+      <div class="field"><label>Bandwidth 最大延迟 ms</label><input id="bwMaxDelay" type="number"></div>
+      <div class="field"><label>Bandwidth 最大丢包率</label><input id="bwMaxLoss" type="number" step="0.01"></div>
+      <div class="field"><label>Bandwidth 最低速度 MB/s</label><input id="bwMinSpeed" type="number" step="0.1"></div>
+      <div class="field"><label>完整优化间隔（分钟）</label><input id="optimizeInterval" type="number"></div>
+      <div class="field"><label>优化失败重试（分钟）</label><input id="optimizeRetry" type="number"></div>
       <div class="field wide"><label>Tracker 样本文件</label><input id="trackerSamples"></div>
       <div class="field"><label>Tracker announce 重试</label><input id="trackerRetries" type="number"></div>
       <div class="field switch"><input id="realAnnounce" type="checkbox"><label for="realAnnounce">Tracker 真实 announce</label></div>
+      <div class="field switch"><input id="strictHttp" type="checkbox"><label for="strictHttp">普通 HTTP 严格验证</label></div>
+      <div class="field switch"><input id="autoOptimize" type="checkbox"><label for="autoOptimize">每日完整优化</label></div>
       <div class="field switch"><input id="autoRepair" type="checkbox"><label for="autoRepair">自动 Repair</label></div>
       <div class="field switch"><input id="autoApply" type="checkbox"><label for="autoApply">Repair 后自动写 Hosts</label></div>
       <div class="field switch"><input id="ipv6" type="checkbox"><label for="ipv6">使用 IPv6 IP 池</label></div>
@@ -105,14 +119,19 @@ function render(){
   $('candidateCount').textContent=(state.candidates||[]).length;
   $('mappingCount').textContent=Object.keys(state.mappings||{}).length;
   $('lastRefresh').textContent=state.lastRefresh||'-';
+  $('lastOptimize').textContent=state.lastOptimize?('最近优化：'+state.lastOptimize):'';
   $('nextRefresh').textContent=state.nextRefresh?('下次最早：'+state.nextRefresh):'';
   $('lastError').textContent=state.lastError||'';
   $('maxDelay').value=config.cfst.maxDelayMs;$('minSpeed').value=config.cfst.minSpeedMB;$('maxLoss').value=config.cfst.maxLossRate;
   $('downloadCount').value=config.cfst.downloadCount;$('threads').value=config.cfst.threads;$('pingTimes').value=config.cfst.pingTimes;
   $('downloadSeconds').value=config.cfst.downloadSeconds;$('verifyTimeout').value=config.verifyTimeoutSeconds;$('downloadUrl').value=config.cfst.downloadUrl;
+  $('httpRetries').value=config.verify.httpRetries;$('candidateLimit').value=config.verify.candidateLimit;$('minBodyBytes').value=config.verify.minBodyBytes;$('maxRedirects').value=config.verify.maxRedirects;$('strictHttp').checked=config.verify.strictHttp;
   $('repairInterval').value=config.repairIntervalMinutes;$('candidateTTL').value=config.repair.candidateTTLMinutes;
   $('failureThreshold').value=config.repair.failureThreshold;$('refreshCooldown').value=config.repair.refreshCooldownMinutes;
   $('refreshMaxBackoff').value=config.repair.refreshMaxBackoffMinutes;$('hostsPath').value=config.hostsPath;
+  $('backupRetention').value=config.hosts.backupRetention;$('legacyStateMap').value=config.hosts.legacyStateMapPath;
+  $('bwMaxDelay').value=config.bandwidth.maxDelayMs;$('bwMaxLoss').value=config.bandwidth.maxLossRate;$('bwMinSpeed').value=config.bandwidth.minSpeedMB;
+  $('autoOptimize').checked=config.optimize.enabled;$('optimizeInterval').value=config.optimize.intervalMinutes;$('optimizeRetry').value=config.optimize.retryMinutes;
   $('trackerSamples').value=config.tracker.samplesPath;$('trackerRetries').value=config.tracker.retries;$('realAnnounce').checked=config.tracker.realAnnounce;
   $('autoRepair').checked=config.autoRepair;$('autoApply').checked=config.autoApply;$('ipv6').checked=config.cfst.ipv6;
   $('syncEnabled').checked=config.sync.enabled;$('syncRepo').value=config.sync.repository;$('syncBranch').value=config.sync.branch;$('syncTokenFile').value=config.sync.tokenFile;
@@ -150,9 +169,13 @@ async function saveConfig(){
     config.cfst.maxDelayMs=Number($('maxDelay').value);config.cfst.minSpeedMB=Number($('minSpeed').value);config.cfst.maxLossRate=Number($('maxLoss').value);
     config.cfst.downloadCount=Number($('downloadCount').value);config.cfst.threads=Number($('threads').value);config.cfst.pingTimes=Number($('pingTimes').value);
     config.cfst.downloadSeconds=Number($('downloadSeconds').value);config.verifyTimeoutSeconds=Number($('verifyTimeout').value);config.cfst.downloadUrl=$('downloadUrl').value;
+    config.verify.httpRetries=Number($('httpRetries').value);config.verify.candidateLimit=Number($('candidateLimit').value);config.verify.minBodyBytes=Number($('minBodyBytes').value);config.verify.maxRedirects=Number($('maxRedirects').value);config.verify.strictHttp=$('strictHttp').checked;
     config.repairIntervalMinutes=Number($('repairInterval').value);config.repair.candidateTTLMinutes=Number($('candidateTTL').value);
     config.repair.failureThreshold=Number($('failureThreshold').value);config.repair.refreshCooldownMinutes=Number($('refreshCooldown').value);
     config.repair.refreshMaxBackoffMinutes=Number($('refreshMaxBackoff').value);config.hostsPath=$('hostsPath').value;
+    config.hosts.backupRetention=Number($('backupRetention').value);config.hosts.legacyStateMapPath=$('legacyStateMap').value;
+    config.bandwidth.maxDelayMs=Number($('bwMaxDelay').value);config.bandwidth.maxLossRate=Number($('bwMaxLoss').value);config.bandwidth.minSpeedMB=Number($('bwMinSpeed').value);
+    config.optimize.enabled=$('autoOptimize').checked;config.optimize.intervalMinutes=Number($('optimizeInterval').value);config.optimize.retryMinutes=Number($('optimizeRetry').value);
     config.tracker.samplesPath=$('trackerSamples').value;config.tracker.retries=Number($('trackerRetries').value);config.tracker.realAnnounce=$('realAnnounce').checked;
     config.sync.enabled=$('syncEnabled').checked;config.sync.repository=$('syncRepo').value;config.sync.branch=$('syncBranch').value;config.sync.tokenFile=$('syncTokenFile').value;
     config.autoRepair=$('autoRepair').checked;config.autoApply=$('autoApply').checked;config.cfst.ipv6=$('ipv6').checked;
