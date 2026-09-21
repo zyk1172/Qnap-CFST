@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#F4F5FA">
+  <meta name="color-scheme" content="light dark">
+  <title>CFHost</title>
+  <script>
+    (() => {
+      const mode = localStorage.getItem('cfhost-theme') || 'system'
+      const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      document.documentElement.dataset.themeMode = mode
+      document.documentElement.dataset.theme = mode === 'system' ? (dark ? 'dark' : 'light') : mode
+    })()
+  </script>
+  <link rel="stylesheet" href="/css/theme.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="boot-screen" class="boot-screen">
+    <div class="boot-logo" aria-hidden="true"><span></span><span></span></div>
+    <div class="boot-wordmark">CFHOST</div>
+    <div class="boot-progress"><i></i></div>
+  </div>
+
+  <div id="app" class="app-shell" aria-hidden="true">
+    <aside id="sidebar" class="sidebar" aria-label="主导航">
+      <div class="sidebar-brand">
+        <button class="brand-link" data-nav="dashboard" aria-label="返回概览">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+          <span class="brand-copy"><strong>CFHOST</strong><small>Cloudflare Manager</small></span>
+        </button>
+        <button class="icon-button sidebar-collapse" data-action="toggle-sidebar" aria-label="收起侧栏"><span data-icon="sidebar"></span></button>
+      </div>
+      <nav id="nav-groups" class="nav-groups"></nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-runtime">
+          <span id="sidebar-status-dot" class="status-dot"></span>
+          <span class="sidebar-runtime-copy"><strong id="sidebar-status">正在连接</strong><small id="sidebar-subtitle">CFHost Service</small></span>
+        </div>
+        <button class="icon-button" data-action="open-appearance" aria-label="外观设置"><span data-icon="palette"></span></button>
+      </div>
+    </aside>
+
+    <button id="sidebar-scrim" class="sidebar-scrim" data-action="close-sidebar" aria-label="关闭导航"></button>
+
+    <div class="workspace">
+      <header id="topbar" class="topbar">
+        <div class="topbar-inner">
+          <button class="icon-button mobile-menu" data-action="open-sidebar" aria-label="打开导航"><span data-icon="menu"></span></button>
+          <div class="page-context">
+            <span id="page-eyebrow" class="page-eyebrow">CFHost</span>
+            <strong id="page-title">概览</strong>
+          </div>
+          <div class="topbar-spacer"></div>
+          <button class="search-trigger" data-action="open-command" aria-label="搜索与快捷操作">
+            <span data-icon="search"></span><span>搜索或运行操作</span><kbd>⌘ K</kbd>
+          </button>
+          <button class="icon-button topbar-icon" data-action="refresh" aria-label="刷新"><span data-icon="refresh"></span></button>
+          <div class="popover-anchor">
+            <button class="icon-button topbar-icon" data-action="open-appearance" aria-label="切换主题"><span data-icon="theme"></span></button>
+            <div id="appearance-popover" class="popover appearance-popover" role="menu"></div>
+          </div>
+          <div id="topbar-service" class="service-pill"><span class="status-dot"></span><span>连接中</span></div>
+        </div>
+        <div id="job-progress" class="job-progress"><i></i></div>
+      </header>
+
+      <main id="page-host" class="page-host" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div id="command-overlay" class="overlay command-overlay" aria-hidden="true">
+    <div class="command-panel" role="dialog" aria-modal="true" aria-label="搜索与快捷操作">
+      <div class="command-input-wrap">
+        <span data-icon="search"></span>
+        <input id="command-input" type="search" autocomplete="off" placeholder="搜索页面、域名或操作…">
+        <kbd>ESC</kbd>
+      </div>
+      <div id="command-results" class="command-results"></div>
+    </div>
+  </div>
+
+  <div id="modal-overlay" class="overlay modal-overlay" aria-hidden="true">
+    <div id="modal-panel" class="modal-panel" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/js/core.js" defer></script>
+  <script src="/js/dashboard-domains.js" defer></script>
+  <script src="/js/candidates-ops-logs.js" defer></script>
+  <script src="/js/settings.js" defer></script>
+  <script src="/js/interactions.js" defer></script>
+  <script src="/js/events.js" defer></script>
+</body>
+</html>

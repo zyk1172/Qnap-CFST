@@ -1,0 +1,351 @@
+function renderAppearance() {
+  const root = $('#appearance-popover')
+  const mode = localStorage.getItem('cfhost-theme') || 'system'
+  const options = [
+    ['system', '跟随系统', 'monitor'],
+    ['light', '浅色', 'sun'],
+    ['dark', '深色', 'moon'],
+    ['glass', '玻璃', 'glass'],
+  ]
+  root.innerHTML = `
+    <div class="popover-title">外观</div>
+    ${options.map(([id, label, iconName]) => `
+      <button class="theme-option ${mode === id ? 'is-active' : ''}" data-theme-choice="${id}">
+        ${icon(iconName)}<span>${label}</span><span class="theme-check">${icon('check')}</span>
+      </button>
+    `).join('')}
+    <div class="popover-separator"></div>
+    <button class="theme-option" data-action="toggle-sidebar">${icon('sidebar')}<span>切换侧栏宽度</span></button>
+  `
+}
+
+function setTheme(mode) {
+  localStorage.setItem('cfhost-theme', mode)
+  document.documentElement.dataset.themeMode = mode
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches
+  const resolved = mode === 'system' ? (dark ? 'dark' : 'light') : mode
+  document.documentElement.dataset.theme = resolved
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'light' ? '#F4F5FA' : resolved === 'glass' ? '#0B1322' : '#0E1116')
+  renderAppearance()
+}
+
+function openAppearance() {
+  renderAppearance()
+  $('#appearance-popover').classList.toggle('is-open')
+}
+
+function closeAppearance() {
+  $('#appearance-popover')?.classList.remove('is-open')
+}
+
+function renderCommands(query = '') {
+  const normalized = query.trim().toLowerCase()
+  const navCommands = NAV_GROUPS.flatMap(group => group.items.map(item => ({
+    type: '页面',
+    label: item.label,
+    description: item.hint,
+    icon: item.icon,
+    action: () => navigate(item.id),
+  })))
+  const actions = [
+    { type: '操作', label: '强制 CFST 测速', description: '重新生成 Cloudflare 候选 IP', icon: 'bolt', action: () => runJob('run') },
+    { type: '操作', label: '智能 Repair', description: '验证并修复当前映射', icon: 'repair', action: () => runJob('repair') },
+    { type: '操作', label: '完整优化', description: '重新测速并择优全部域名', icon: 'optimize', action: () => runJob('optimize') },
+    { type: '操作', label: '应用 Hosts', description: '写入当前已验证映射', icon: 'host', action: () => applyHosts() },
+    { type: '操作', label: '同步 GitHub', description: '原子发布当前映射与状态', icon: 'sync', action: () => syncGitHub() },
+  ]
+  const domainCommands = (store.config?.domains || []).map(domain => ({
+    type: '域名',
+    label: domain.host,
+    description: `${domain.mode.toUpperCase()} · ${domain.class} · ${domain.group || '无分组'}`,
+    icon: 'globe',
+    action: () => {
+      store.domainQuery = domain.host
+      navigate('domains')
+    },
+  }))
+  const all = [...navCommands, ...actions, ...domainCommands].filter(item => {
+    if (!normalized) return true
+    return `${item.label} ${item.description} ${item.type}`.toLowerCase().includes(normalized)
+  })
+  store.commandItems = all
+  store.commandIndex = Math.min(store.commandIndex, Math.max(all.length - 1, 0))
+  const grouped = all.reduce((result, item, index) => {
+    ;(result[item.type] ||= []).push({ ...item, index })
+    return result
+  }, {})
+  $('#command-results').innerHTML = all.length ? Object.entries(grouped).map(([group, items]) => `
+    <div class="command-group-label">${esc(group)}</div>
+    ${items.map(item => `
+      <button class="command-item ${item.index === store.commandIndex ? 'is-selected' : ''}" data-command-index="${item.index}">
+        <span class="command-item-icon">${icon(item.icon)}</span>
+        <span class="command-item-copy"><strong>${esc(item.label)}</strong><small>${esc(item.description)}</small></span>
+        ${icon('chevron')}
+      </button>
+    `).join('')}
+  `).join('') : emptyState('没有匹配结果')
+}
+
+function openCommand() {
+  closeAppearance()
+  const overlay = $('#command-overlay')
+  overlay.classList.add('is-open')
+  overlay.setAttribute('aria-hidden', 'false')
+  const input = $('#command-input')
+  input.value = ''
+  store.commandIndex = 0
+  renderCommands()
+  setTimeout(() => input.focus(), 40)
+}
+
+function closeCommand() {
+  const overlay = $('#command-overlay')
+  overlay.classList.remove('is-open')
+  overlay.setAttribute('aria-hidden', 'true')
+}
+
+function executeCommand(index) {
+  const item = store.commandItems[index]
+  if (!item) return
+  closeCommand()
+  Promise.resolve(item.action()).catch(error => toast('操作失败', error.message, 'error'))
+}
+
+function modalTemplate(title, description, body, actions) {
+  return `
+    <div class="modal-head">
+      <div class="modal-head-copy"><h2>${esc(title)}</h2>${description ? `<p>${esc(description)}</p>` : ''}</div>
+      <button class="icon-button" data-action="close-modal" aria-label="关闭">${icon('close')}</button>
+    </div>
+    <div class="modal-body">${body}</div>
+    <div class="modal-actions">${actions}</div>
+  `
+}
+
+function openModal(html) {
+  $('#modal-panel').innerHTML = html
+  const overlay = $('#modal-overlay')
+  overlay.classList.add('is-open')
+  overlay.setAttribute('aria-hidden', 'false')
+  hydrateIcons($('#modal-panel'))
+}
+
+function closeModal(result = false) {
+  const overlay = $('#modal-overlay')
+  overlay.classList.remove('is-open')
+  overlay.setAttribute('aria-hidden', 'true')
+  const resolver = store.modalResolver
+  store.modalResolver = null
+  if (resolver) resolver(result)
+}
+
+function confirmAction(title, description, confirmText = '确认', danger = false) {
+  return new Promise(resolve => {
+    store.modalResolver = resolve
+    openModal(modalTemplate(
+      title,
+      description,
+      `<div class="alert info">${icon('info')}<div><strong>请确认操作</strong><span>${esc(description)}</span></div></div>`,
+      `<button class="btn secondary" data-action="close-modal">取消</button><button class="btn ${danger ? 'danger' : ''}" data-action="confirm-modal">${esc(confirmText)}</button>`,
+    ))
+  })
+}
+
+function openDomainEditor(index = null) {
+  const current = index === null
+    ? { host: '', group: '', class: 'latency', mode: 'http', endpoint: '/', enabled: true }
+    : store.config.domains[index]
+  const title = index === null ? '添加域名' : '编辑域名'
+  const body = `
+    <form id="domain-form" class="form-grid">
+      <div class="field span-2"><label>域名</label><input name="host" required value="${esc(current.host)}" placeholder="tracker.example.com"></div>
+      <div class="field"><label>站点组</label><input name="group" value="${esc(current.group || '')}" placeholder="mteam"></div>
+      <div class="field"><label>路径</label><input name="endpoint" value="${esc(current.endpoint || '/')}" placeholder="/"></div>
+      <div class="field"><label>策略类别</label><select name="class"><option value="latency" ${current.class !== 'bandwidth' ? 'selected' : ''}>latency</option><option value="bandwidth" ${current.class === 'bandwidth' ? 'selected' : ''}>bandwidth</option></select></div>
+      <div class="field"><label>验证类型</label><select name="mode"><option value="http" ${current.mode === 'http' ? 'selected' : ''}>HTTP</option><option value="tracker" ${current.mode === 'tracker' ? 'selected' : ''}>Tracker</option></select></div>
+      <div class="field span-2">
+        <div class="switch-row"><div class="switch-copy"><strong>启用域名</strong><small>关闭后不会参与 Repair 或 Optimize。</small></div><label class="switch"><input name="enabled" type="checkbox" ${current.enabled ? 'checked' : ''}><span></span></label></div>
+      </div>
+    </form>
+  `
+  openModal(modalTemplate(
+    title,
+    '域名保存后会立即更新配置。',
+    body,
+    `<button class="btn secondary" data-action="close-modal">取消</button><button class="btn" data-save-domain="${index === null ? 'new' : index}">${icon('check')}保存</button>`,
+  ))
+  setTimeout(() => $('#domain-form input[name="host"]')?.focus(), 40)
+}
+
+async function saveDomain(indexToken) {
+  const form = $('#domain-form')
+  if (!form.reportValidity()) return
+  const data = new FormData(form)
+  const domain = {
+    host: String(data.get('host') || '').trim().toLowerCase(),
+    group: String(data.get('group') || '').trim(),
+    class: String(data.get('class') || 'latency'),
+    mode: String(data.get('mode') || 'http'),
+    endpoint: String(data.get('endpoint') || '/').trim() || '/',
+    enabled: form.elements.enabled.checked,
+  }
+  const next = deepClone(store.config)
+  if (indexToken === 'new') next.domains.push(domain)
+  else next.domains[Number(indexToken)] = domain
+  await persistConfig(next)
+  closeModal()
+  toast('域名已保存', domain.host, 'success')
+  renderPage(false)
+}
+
+async function deleteDomain(index) {
+  const domain = store.config.domains[index]
+  if (!domain) return
+  if (!await confirmAction('删除域名', `将从 CFHost 配置中移除 ${domain.host}。`, '删除', true)) return
+  const next = deepClone(store.config)
+  next.domains.splice(index, 1)
+  await persistConfig(next)
+  toast('域名已删除', domain.host, 'success')
+  renderPage(false)
+}
+
+async function toggleDomain(index) {
+  const next = deepClone(store.config)
+  const domain = next.domains[index]
+  if (!domain) return
+  domain.enabled = !domain.enabled
+  await persistConfig(next)
+  toast(domain.enabled ? '域名已启用' : '域名已停用', domain.host, 'success')
+  renderPage(false)
+}
+
+async function persistConfig(next) {
+  const saved = await api('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(next),
+  })
+  store.config = saved
+  store.configDraft = deepClone(saved)
+  store.dirty = false
+  updateShellStatus()
+}
+
+async function saveSettings() {
+  try {
+    await persistConfig(store.configDraft)
+    toast('设置已保存', '新的配置已写入 CFHost。', 'success')
+    renderPage(false)
+  } catch (error) {
+    toast('保存失败', error.message, 'error')
+  }
+}
+
+function discardSettings() {
+  store.configDraft = deepClone(store.config)
+  store.dirty = false
+  renderPage(false)
+  toast('已放弃更改', '设置恢复为当前已保存值。')
+}
+
+function updateSaveBar() {
+  $('#save-bar')?.classList.toggle('is-visible', store.dirty)
+}
+
+async function runJob(kind) {
+  if (store.state?.running) {
+    toast('已有任务运行中', jobLabel(store.state.currentJob), 'error')
+    return
+  }
+  if (kind === 'optimize') {
+    const ok = await confirmAction('执行完整优化', '将运行完整 CFST，并重新验证和选择全部域名的候选 IP。', '开始优化')
+    if (!ok) return
+  }
+  try {
+    await api(`/api/${kind}`, { method: 'POST' })
+    toast('任务已启动', jobLabel(kind), 'success')
+    await refreshStatus({ quiet: true })
+    renderPage(false)
+  } catch (error) {
+    toast('任务启动失败', error.message, 'error')
+  }
+}
+
+async function applyHosts() {
+  const ok = await confirmAction('应用 Hosts', `将当前已验证映射写入 ${store.config.hostsPath} 的 CFHost Marker。`, '应用 Hosts')
+  if (!ok) return
+  try {
+    const result = await api('/api/apply', { method: 'POST' })
+    toast('Hosts 已应用', result?.sync ? `同步：${result.sync}` : '宿主机 Hosts 已更新。', 'success')
+    await refreshStatus({ quiet: true })
+    renderPage(false)
+  } catch (error) {
+    toast('Hosts 应用失败', error.message, 'error')
+  }
+}
+
+async function syncGitHub() {
+  try {
+    await api('/api/sync', { method: 'POST' })
+    toast('GitHub 同步完成', 'hosts-map.tsv 与 status.json 已原子发布。', 'success')
+    await refreshStatus({ quiet: true })
+    renderPage(false)
+  } catch (error) {
+    toast('GitHub 同步失败', error.message, 'error')
+  }
+}
+
+function toast(title, message = '', type = '') {
+  const stack = $('#toast-stack')
+  const element = document.createElement('div')
+  element.className = `toast ${type}`
+  element.innerHTML = `<span class="toast-icon">${icon(type === 'success' ? 'check' : type === 'error' ? 'warning' : 'info')}</span><span class="toast-copy"><strong>${esc(title)}</strong>${message ? `<span>${esc(message)}</span>` : ''}</span>`
+  stack.appendChild(element)
+  requestAnimationFrame(() => element.classList.add('is-visible'))
+  setTimeout(() => {
+    element.classList.add('is-leaving')
+    setTimeout(() => element.remove(), 200)
+  }, type === 'error' ? 5200 : 3200)
+}
+
+function openSidebar() {
+  document.documentElement.classList.add('sidebar-open')
+}
+
+function closeSidebar() {
+  document.documentElement.classList.remove('sidebar-open')
+}
+
+function toggleSidebar() {
+  if (innerWidth <= 960) {
+    openSidebar()
+    return
+  }
+  document.documentElement.classList.toggle('sidebar-collapsed')
+  localStorage.setItem('cfhost-sidebar-collapsed', document.documentElement.classList.contains('sidebar-collapsed') ? '1' : '0')
+}
+
+function updateSettingsNav() {
+  if (store.page !== 'settings') return
+  const sections = $$('.settings-section')
+  if (!sections.length) return
+  let best = sections[0].id.replace('settings-', '')
+  for (const section of sections) {
+    if (section.getBoundingClientRect().top <= 155) best = section.id.replace('settings-', '')
+  }
+  $$('[data-settings-nav]').forEach(button => button.classList.toggle('is-active', button.dataset.settingsNav === best))
+}
+
+function createRipple(event) {
+  const button = event.target.closest('.btn, .quick-action')
+  if (!button) return
+  const rect = button.getBoundingClientRect()
+  const size = Math.max(rect.width, rect.height)
+  const span = document.createElement('span')
+  span.className = 'ripple'
+  span.style.width = span.style.height = `${size}px`
+  span.style.left = `${event.clientX - rect.left}px`
+  span.style.top = `${event.clientY - rect.top}px`
+  button.appendChild(span)
+  setTimeout(() => span.remove(), 480)
+}
