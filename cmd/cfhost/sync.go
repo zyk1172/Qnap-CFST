@@ -138,15 +138,17 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 	signatureParts := []string{cfg.Sync.Repository, cfg.Sync.Branch}
 	latencyCount := 0
 	bandwidthCount := 0
+	normalCount := 0
 	for _, host := range hosts {
 		d := domains[host]
 		class := d.Class
-		if class != "bandwidth" {
-			class = "latency"
-		}
-		if class == "bandwidth" {
+		switch class {
+		case "bandwidth":
 			bandwidthCount++
-		} else {
+		case "normal":
+			normalCount++
+		default:
+			class = "latency"
 			latencyCount++
 		}
 		ip := mappings[host]
@@ -168,12 +170,15 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 			verifiedAt = now.Format(time.RFC3339)
 		}
 		httpCode := "-"
-		if match := httpCodePattern.FindStringSubmatch(statuses[host]); len(match) == 2 {
+		recordStatus := "VERIFIED"
+		if class == "normal" {
+			recordStatus = "SELECTED"
+		} else if match := httpCodePattern.FindStringSubmatch(statuses[host]); len(match) == 2 {
 			httpCode = match[1]
 		} else if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 			httpCode = "200"
 		}
-		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, "VERIFIED"}, "\t"))
+		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, recordStatus}, "\t"))
 		mapBuilder.WriteByte('\n')
 		signatureParts = append(signatureParts, strings.Join([]string{host, ip, class, delay, speed, loss, colo}, "\t"))
 	}
@@ -181,13 +186,14 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 	sum := sha256.Sum256([]byte(strings.Join(signatureParts, "\n")))
 	signature := hex.EncodeToString(sum[:])
 	statusDoc := map[string]any{
-		"schema":          2,
+		"schema":          3,
 		"generated_at":    now.Format(time.RFC3339),
 		"source":          "CFHost",
 		"map_file":        "hosts-map.tsv",
 		"domain_count":    len(hosts),
 		"latency_count":   latencyCount,
 		"bandwidth_count": bandwidthCount,
+		"normal_count":    normalCount,
 		"last_run":        lastRun,
 		"last_refresh":    lastRefresh,
 		"signature":       signature,

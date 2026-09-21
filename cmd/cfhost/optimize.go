@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -20,6 +21,21 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { statuses[d.Host]="disabled"; continue }
+		if d.Class=="normal" {
+			order:=orderedCandidates(candidates,d,"","",cfg)
+			h:=health[d.Host]
+			if len(order)==0 {
+				h.FailureStreak++;h.LastFailure=now;health[d.Host]=h
+				statuses[d.Host]="normal optimize unresolved · no CFST candidate"
+				continue
+			}
+			chosen:=order[0]
+			mappings[d.Host]=chosen.IP
+			statuses[d.Host]=fmt.Sprintf("normal optimized · lowest latency · %s · %.2f ms · verification skipped",chosen.IP,chosen.DelayMS)
+			h.FailureStreak=0;h.LastSuccess=now;health[d.Host]=h
+			a.appendLog("%s -> %s (normal full optimize · %.2f ms · verification skipped)",d.Host,chosen.IP,chosen.DelayMS)
+			continue
+		}
 		if !domainRefreshable(d,cfg,samples) { statuses[d.Host]="tracker sample missing"; h:=health[d.Host];h.FailureStreak++;h.LastFailure=now;health[d.Host]=h;continue }
 		preferred:=groupIP[groupKey(d)]
 		order:=orderedCandidates(candidates,d,preferred,"",cfg)

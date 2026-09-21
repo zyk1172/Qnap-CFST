@@ -68,9 +68,31 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	mappings:=make(map[string]string); statuses:=make(map[string]string); groupIP:=make(map[string]string); pending:=make([]pendingDomain,0)
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { statuses[d.Host]="disabled"; continue }
-		refreshable:=domainRefreshable(d,cfg,samples)
-		if !refreshable { statuses[d.Host]="tracker sample missing"; pending=append(pending,pendingDomain{d,current[d.Host],false}); continue }
 		currentIP:=current[d.Host]
+
+		if d.Class=="normal" {
+			order:=orderedCandidates(cached,d,"","",cfg)
+			if len(order)>0 {
+				chosen:=order[0]
+				mappings[d.Host]=chosen.IP
+				statuses[d.Host]=fmt.Sprintf("normal · lowest latency · %s · %.2f ms · verification skipped",chosen.IP,chosen.DelayMS)
+				if currentIP!=chosen.IP {
+					a.appendLog("%s -> %s (normal strategy · %.2f ms · verification skipped)",d.Host,chosen.IP,chosen.DelayMS)
+				}
+				continue
+			}
+			if currentIP!="" {
+				mappings[d.Host]=currentIP
+				statuses[d.Host]="normal retained · no fresh CFST candidates · verification skipped"
+				continue
+			}
+			statuses[d.Host]="normal waiting for CFST candidates · verification skipped"
+			pending=append(pending,pendingDomain{d,"",true})
+			continue
+		}
+
+		refreshable:=domainRefreshable(d,cfg,samples)
+		if !refreshable { statuses[d.Host]="tracker sample missing"; pending=append(pending,pendingDomain{d,currentIP,false}); continue }
 		if currentIP!="" {
 			ok,detail:=verifyConfiguredDomain(ctx,d,currentIP,cfg,samples)
 			if ok {
@@ -89,7 +111,14 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if !p.Refreshable { continue }
 		refreshablePending++; streak:=health[p.Domain.Host].FailureStreak+1; if streak>maxProspective{maxProspective=streak}
 	}
-	bootstrap:=refreshablePending>0 && len(current)==0 && len(cached)==0
+	normalNeedsBootstrap:=false
+	for _,p:=range pending {
+		if p.Domain.Class=="normal" && current[p.Domain.Host]=="" {
+			normalNeedsBootstrap=true
+			break
+		}
+	}
+	bootstrap:=refreshablePending>0 && len(cached)==0 && (len(current)==0 || normalNeedsBootstrap)
 	refreshNow,nextRefresh,backoff:=refreshDecision(now,lastRefresh,maxProspective,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,bootstrap)
 	var refreshErr error
 	if refreshablePending>0 && refreshNow {
@@ -126,6 +155,19 @@ func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]T
 	remaining:=make([]pendingDomain,0,len(pending))
 	for _,p:=range pending {
 		if !p.Refreshable { remaining=append(remaining,p); continue }
+		if p.Domain.Class=="normal" {
+			order:=orderedCandidates(candidates,p.Domain,"","",cfg)
+			if len(order)==0 {
+				statuses[p.Domain.Host]="normal unresolved · no CFST candidate"
+				remaining=append(remaining,p)
+				continue
+			}
+			chosen:=order[0]
+			mappings[p.Domain.Host]=chosen.IP
+			statuses[p.Domain.Host]=fmt.Sprintf("normal · lowest latency · %s · %.2f ms · verification skipped",chosen.IP,chosen.DelayMS)
+			a.appendLog("%s -> %s (normal strategy · %.2f ms · verification skipped)",p.Domain.Host,chosen.IP,chosen.DelayMS)
+			continue
+		}
 		preferred:=groupIP[groupKey(p.Domain)]; resolved:=false; lastDetail:="no candidate"
 		if preferred!="" && preferred!=p.FailedCurrent {
 			ok,detail:=verifyConfiguredDomain(ctx,p.Domain,preferred,cfg,samples); lastDetail=detail

@@ -161,7 +161,7 @@ function renderDomains() {
                   <tr>
                     <td><strong>${esc(domain.host)}</strong><div class="card-subtitle">${esc(domain.endpoint || '/')}</div></td>
                     <td><span class="chip ${domain.mode === 'tracker' ? 'primary' : ''}">${esc(domain.mode.toUpperCase())}</span></td>
-                    <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : 'info'}">${esc(domain.class)}</span></td>
+                    <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'}">${esc(domain.class)}</span></td>
                     <td>${domain.group ? `<span class="chip">${esc(domain.group)}</span>` : '—'}</td>
                     <td class="mono">${ip ? esc(ip) : '—'}</td>
                     <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>

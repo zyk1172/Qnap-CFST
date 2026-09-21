@@ -161,7 +161,7 @@ function openDomainEditor(index = null) {
       <div class="field span-2"><label>域名</label><input name="host" required value="${esc(current.host)}" placeholder="tracker.example.com"></div>
       <div class="field"><label>站点组</label><input name="group" value="${esc(current.group || '')}" placeholder="mteam"></div>
       <div class="field"><label>路径</label><input name="endpoint" value="${esc(current.endpoint || '/')}" placeholder="/"></div>
-      <div class="field"><label>策略类别</label><select name="class"><option value="latency" ${current.class !== 'bandwidth' ? 'selected' : ''}>latency</option><option value="bandwidth" ${current.class === 'bandwidth' ? 'selected' : ''}>bandwidth</option></select></div>
+      <div class="field"><label>策略类别</label><select name="class"><option value="latency" ${current.class === 'latency' || !current.class ? 'selected' : ''}>latency · 延迟优先（验证域名）</option><option value="bandwidth" ${current.class === 'bandwidth' ? 'selected' : ''}>bandwidth · 带宽优先（验证域名）</option><option value="normal" ${current.class === 'normal' ? 'selected' : ''}>normal · 普通（不验证域名）</option></select></div>
       <div class="field"><label>验证类型</label><select name="mode"><option value="http" ${current.mode === 'http' ? 'selected' : ''}>HTTP</option><option value="tracker" ${current.mode === 'tracker' ? 'selected' : ''}>Tracker</option></select></div>
       <div class="field span-2">
         <div class="switch-row"><div class="switch-copy"><strong>启用域名</strong><small>关闭后不会参与 Repair 或 Optimize。</small></div><label class="switch"><input name="enabled" type="checkbox" ${current.enabled ? 'checked' : ''}><span></span></label></div>

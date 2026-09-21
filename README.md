@@ -9,7 +9,7 @@ CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeed
 ```text
 CFST 找候选
    ↓
-按 latency / bandwidth 策略排序
+按 latency / bandwidth / normal 策略排序
    ↓
 逐域名验证实际可用性
    ↓
@@ -29,9 +29,10 @@ Tracker 可选真实 announce
 - **CFST 优选**：复用 CloudflareSpeedTest 的成熟测速核心。
 - **Smart Repair**：优先验证当前 IP，失效后再尝试缓存候选，必要时才重新跑完整 CFST。
 - **Full Optimize**：显式全局优化；手动执行时重新测速并允许全部域名重选 IP，周期执行默认关闭。
-- **两类选择策略**
-  - `latency`：loss → delay → speed
-  - `bandwidth`：loss → speed → delay
+- **三类选择策略**
+  - `latency`：验证域名后按 loss → delay → speed
+  - `bandwidth`：验证域名后按 loss → speed → delay
+  - `normal`：不做 HTTP/Tracker 有效性验证，直接取 CFST 候选中延迟最低的 IP
 - **严格 HTTP 验证**：支持重试、跳转、正文大小、Challenge / 占位页识别。
 - **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
@@ -397,7 +398,7 @@ Full Optimize 是明确的**全局重选**操作：
 
 ---
 
-# latency / bandwidth
+# latency / bandwidth / normal
 
 ## latency
 
@@ -423,7 +424,28 @@ delay <= 180 ms
 speed >= 0.5 MB/s
 ```
 
-每个域名默认最多验证 Top 10 候选。
+## normal
+
+普通策略不做域名级 HTTP 或 Tracker announce 验证。
+
+它直接使用 CFST 已经完成测速和全局阈值筛选后的候选，并按照：
+
+```text
+delay → loss → speed → IP
+```
+
+选择延迟最低的 IP。
+
+行为：
+
+- HTTP 域名不发起 HTTP 有效性验证。
+- Tracker 域名不要求测试种子，也不执行真实 announce。
+- 不使用站点组共享 IP 来覆盖最低延迟排序。
+- Smart Repair 有新鲜 CFST 候选时直接应用最低延迟 IP。
+- 如果暂时没有新鲜候选但已有映射，先保留旧映射，不会因为“不验证”而删除 Hosts。
+- Full Optimize 会重新运行 CFST，并直接为 normal 域名应用最低延迟候选。
+
+每个需要验证的 latency / bandwidth 域名默认最多验证 Top 10 候选；normal 不做这一步。
 
 ---
 

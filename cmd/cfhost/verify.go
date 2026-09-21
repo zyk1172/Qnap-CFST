@@ -19,6 +19,12 @@ func rankCandidates(in []Candidate) []Candidate {
 func rankCandidatesForClass(in []Candidate, class string) []Candidate {
 	out := append([]Candidate(nil), in...)
 	sort.SliceStable(out, func(i, j int) bool {
+		if class == "normal" {
+			if out[i].DelayMS != out[j].DelayMS { return out[i].DelayMS < out[j].DelayMS }
+			if out[i].LossRate != out[j].LossRate { return out[i].LossRate < out[j].LossRate }
+			if out[i].SpeedMB != out[j].SpeedMB { return out[i].SpeedMB > out[j].SpeedMB }
+			return out[i].IP < out[j].IP
+		}
 		if out[i].LossRate != out[j].LossRate { return out[i].LossRate < out[j].LossRate }
 		if class == "bandwidth" {
 			if out[i].SpeedMB != out[j].SpeedMB { return out[i].SpeedMB > out[j].SpeedMB }
@@ -50,6 +56,7 @@ func candidateEligible(c Candidate, d Domain, cfg Config) bool {
 }
 
 func orderedCandidates(all []Candidate, d Domain, preferred, skipIP string, cfg Config) []Candidate {
+	if d.Class == "normal" { preferred = "" }
 	filtered := make([]Candidate, 0, len(all))
 	for _, c := range all {
 		if c.IP == skipIP || !candidateEligible(c, d, cfg) { continue }

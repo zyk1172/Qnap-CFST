@@ -249,3 +249,94 @@ func TestNormalizeConfigRetiresLegacyAutomaticOptimize(t *testing.T) {
 	if cfg.Optimize.Enabled{t.Fatal("legacy optimize.enabled must be retired")}
 	if cfg.Optimize.ScheduledFull{t.Fatal("scheduled global optimize must remain opt-in")}
 }
+
+
+func TestNormalizeNormalDomainClass(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Domains=[]Domain{{Host:"plain.example.com",Class:"normal",Mode:"tracker",Enabled:true}}
+	if err:=normalizeConfig(&cfg);err!=nil{t.Fatal(err)}
+	if cfg.Domains[0].Class!="normal"{t.Fatalf("normal class was not preserved: %#v",cfg.Domains[0])}
+}
+
+func TestNormalRankingUsesLowestDelayFirst(t *testing.T) {
+	in:=[]Candidate{
+		{IP:"1.1.1.1",LossRate:0,DelayMS:25,SpeedMB:100},
+		{IP:"2.2.2.2",LossRate:0.1,DelayMS:10,SpeedMB:5},
+		{IP:"3.3.3.3",LossRate:0,DelayMS:15,SpeedMB:20},
+	}
+	got:=rankCandidatesForClass(in,"normal")
+	if len(got)!=3 || got[0].IP!="2.2.2.2" || got[1].IP!="3.3.3.3" {
+		t.Fatalf("normal strategy must rank by latency first: %#v",got)
+	}
+}
+
+func TestOrderedNormalCandidatesIgnoreGroupPreferred(t *testing.T) {
+	cfg:=defaultConfig()
+	in:=[]Candidate{
+		{IP:"1.1.1.1",DelayMS:30},
+		{IP:"2.2.2.2",DelayMS:10},
+		{IP:"3.3.3.3",DelayMS:20},
+	}
+	got:=orderedCandidates(in,Domain{Class:"normal"},"1.1.1.1","",cfg)
+	if len(got)==0 || got[0].IP!="2.2.2.2" {
+		t.Fatalf("normal strategy must ignore group preferred IP and use lowest latency: %#v",got)
+	}
+}
+
+func TestNormalTrackerDoesNotRequireSample(t *testing.T) {
+	cfg:=defaultConfig()
+	d:=Domain{Host:"tracker.example.com",Class:"normal",Mode:"tracker",Enabled:true}
+	if !domainRefreshable(d,cfg,map[string]TrackerSample{}) {
+		t.Fatal("normal tracker must not require a tracker sample")
+	}
+	ok,detail:=verifyConfiguredDomain(t.Context(),d,"104.16.0.1",cfg,map[string]TrackerSample{})
+	if !ok || !strings.Contains(detail,"verification skipped") {
+		t.Fatalf("normal strategy should bypass domain verification: ok=%v detail=%q",ok,detail)
+	}
+}
+
+func TestResolvePendingNormalUsesLowestLatencyWithoutVerification(t *testing.T) {
+	cfg:=defaultConfig()
+	a:=&App{}
+	d:=Domain{Host:"tracker.example.com",Class:"normal",Mode:"tracker",Enabled:true}
+	pending:=[]pendingDomain{{Domain:d,Refreshable:true}}
+	mappings:=map[string]string{}
+	statuses:=map[string]string{}
+	remaining:=a.resolvePending(
+		t.Context(),
+		cfg,
+		map[string]TrackerSample{},
+		[]Candidate{
+			{IP:"104.16.0.1",DelayMS:45},
+			{IP:"104.16.0.2",DelayMS:12},
+		},
+		pending,
+		mappings,
+		statuses,
+		map[string]string{},
+	)
+	if len(remaining)!=0 {
+		t.Fatalf("normal domain should resolve directly: %#v",remaining)
+	}
+	if mappings[d.Host]!="104.16.0.2" {
+		t.Fatalf("normal domain did not receive lowest latency IP: %#v",mappings)
+	}
+	if !strings.Contains(statuses[d.Host],"verification skipped") {
+		t.Fatalf("normal status must state verification was skipped: %q",statuses[d.Host])
+	}
+}
+
+func TestTrackerDiscoverySkipsNormalDomains(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Domains=[]Domain{
+		{Host:"tracker.normal.example",Class:"normal",Mode:"tracker",Enabled:true},
+		{Host:"tracker.verified.example",Class:"latency",Mode:"tracker",Enabled:true},
+	}
+	targets:=trackerTargetDomains(cfg)
+	if targets["tracker.normal.example"] {
+		t.Fatal("normal tracker must not trigger sample discovery")
+	}
+	if !targets["tracker.verified.example"] {
+		t.Fatal("verified tracker should remain a discovery target")
+	}
+}
