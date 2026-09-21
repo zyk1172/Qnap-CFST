@@ -123,10 +123,31 @@ function operationCard(action, title, description, iconName) {
   `
 }
 
-function renderLogs() {
-  const logs = store.logPaused ? store.frozenLogs : (store.state.logs || [])
+function filteredLogs() {
+  const logs = store.logPaused ? (store.frozenLogs || []) : (store.state.logs || [])
   const query = store.logQuery.trim().toLowerCase()
-  const filtered = logs.filter(line => !query || String(line).toLowerCase().includes(query))
+  return { logs, filtered: logs.filter(line => !query || String(line).toLowerCase().includes(query)) }
+}
+
+function logLinesHTML(filtered) {
+  return filtered.length ? filtered.map(formatLogLine).join('') : '<span class="log-line">暂无日志</span>'
+}
+
+// Patch only the result region. Re-rendering the whole page would replace the
+// focused search input and lose keystrokes typed while it is detached.
+function updateLogResults() {
+  const { logs, filtered } = filteredLogs()
+  const content = $('#log-content')
+  if (content) {
+    content.innerHTML = logLinesHTML(filtered)
+    if (!store.logPaused) content.scrollTop = content.scrollHeight
+  }
+  const count = $('#log-count')
+  if (count) count.textContent = `${filtered.length} / ${logs.length}`
+}
+
+function renderLogs() {
+  const { logs, filtered } = filteredLogs()
   return `
     ${pageHeader('日志', '实时查看 CFST、Repair、Tracker、Hosts 与同步运行日志.',
       `<button class="btn secondary" data-action="copy-logs">${icon('copy')}复制</button>
@@ -135,11 +156,11 @@ function renderLogs() {
       <div class="search-field">${icon('search')}<input id="log-search" type="search" value="${esc(store.logQuery)}" placeholder="筛选日志内容"></div>
       <span class="toolbar-spacer"></span>
       <span class="chip ${store.state.running ? 'primary' : 'success'}"><span class="dot"></span>${store.state.running ? jobLabel(store.state.currentJob) : '空闲'}</span>
-      <span class="chip">${filtered.length} / ${logs.length}</span>
+      <span id="log-count" class="chip">${filtered.length} / ${logs.length}</span>
     </div>
     <div class="log-shell">
       <div class="log-toolbar"><span class="log-dots"><i></i><i></i><i></i></span><span class="log-title">CFHost runtime · ${store.logPaused ? 'PAUSED' : 'LIVE'}</span></div>
-      <div id="log-content" class="log-content">${filtered.length ? filtered.map(formatLogLine).join('') : '<span class="log-line">暂无日志</span>'}</div>
+      <div id="log-content" class="log-content">${logLinesHTML(filtered)}</div>
     </div>
   `
 }

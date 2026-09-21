@@ -115,26 +115,20 @@ document.addEventListener('click', async event => {
   if (action !== 'open-appearance' && !event.target.closest('.popover-anchor')) closeAppearance()
 })
 
+// Search inputs only patch the result region. Re-rendering the whole page used
+// to replace the focused <input>, which left the document unfocused for ~80ms
+// per keystroke and silently dropped every character typed faster than roughly
+// 12 keys per second.
 document.addEventListener('input', event => {
   if (event.target.id === 'domain-search') {
     store.domainQuery = event.target.value
-    renderPage(false, false)
-    requestAnimationFrame(() => {
-      const input = $('#domain-search')
-      input?.focus()
-      input?.setSelectionRange(store.domainQuery.length, store.domainQuery.length)
-    })
+    updateDomainResults()
     return
   }
 
   if (event.target.id === 'log-search') {
     store.logQuery = event.target.value
-    renderPage(false, false)
-    requestAnimationFrame(() => {
-      const input = $('#log-search')
-      input?.focus()
-      input?.setSelectionRange(store.logQuery.length, store.logQuery.length)
-    })
+    updateLogResults()
     return
   }
 

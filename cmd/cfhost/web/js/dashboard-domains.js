@@ -122,7 +122,7 @@ function historyTimelineItem(item) {
   `
 }
 
-function renderDomains() {
+function filteredDomains() {
   const domains = store.config.domains || []
   const query = store.domainQuery.trim().toLowerCase()
   const filtered = domains.filter(domain => {
@@ -131,9 +131,48 @@ function renderDomains() {
     if (!query) return true
     return [domain.host, domain.group, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
   })
+  return { domains, filtered }
+}
+
+function domainRowsHTML(domains, filtered) {
   const mappings = store.state.mappings || {}
   const statuses = store.state.domainStatus || {}
   const health = store.state.domainHealth || {}
+  return filtered.length ? filtered.map(domain => {
+    const realIndex = domains.indexOf(domain)
+    const ip = mappings[domain.host]
+    const streak = health[domain.host]?.failureStreak || 0
+    return `
+      <tr>
+        <td><strong>${esc(domain.host)}</strong><div class="card-subtitle">${esc(domain.endpoint || '/')}</div></td>
+        <td><span class="chip ${domain.mode === 'tracker' ? 'primary' : ''}">${esc(domain.mode.toUpperCase())}</span></td>
+        <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'}">${esc(domain.class)}</span></td>
+        <td>${domain.group ? `<span class="chip">${esc(domain.group)}</span>` : '—'}</td>
+        <td class="mono">${ip ? esc(ip) : '—'}</td>
+        <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>
+        <td>${streak ? `<span class="chip danger">${streak}</span>` : '<span class="chip">0</span>'}</td>
+        <td><div class="table-actions">
+          <button class="icon-button" data-edit-domain="${realIndex}" aria-label="编辑">${icon('edit')}</button>
+          <button class="icon-button" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
+          <button class="icon-button" data-delete-domain="${realIndex}" aria-label="删除">${icon('trash')}</button>
+        </div></td>
+      </tr>
+    `
+  }).join('') : '<tr><td colspan="8" class="table-empty">没有符合条件的域名</td></tr>'
+}
+
+// Patch only the result region. Re-rendering the whole page would replace the
+// focused search input and lose keystrokes typed while it is detached.
+function updateDomainResults() {
+  const { domains, filtered } = filteredDomains()
+  const rows = $('#domain-rows')
+  if (rows) rows.innerHTML = domainRowsHTML(domains, filtered)
+  const count = $('#domain-count')
+  if (count) count.textContent = `${filtered.length} / ${domains.length}`
+}
+
+function renderDomains() {
+  const { domains, filtered } = filteredDomains()
 
   return `
     ${pageHeader('域名', '管理需要 Cloudflare 优选的站点、Tracker、策略类别与共享分组。', `<button class="btn" data-action="add-domain">${icon('plus')}添加域名</button>`)}
@@ -147,33 +186,13 @@ function renderDomains() {
             <button data-domain-filter="failed" class="${store.domainFilter === 'failed' ? 'is-active' : ''}">待处理</button>
           </div>
           <span class="toolbar-spacer"></span>
-          <span class="chip info">${filtered.length} / ${domains.length}</span>
+          <span id="domain-count" class="chip info">${filtered.length} / ${domains.length}</span>
         </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>域名</th><th>类型</th><th>策略</th><th>站点组</th><th>当前 IP</th><th>健康</th><th>连续失败</th><th></th></tr></thead>
-            <tbody>
-              ${filtered.length ? filtered.map(domain => {
-                const realIndex = domains.indexOf(domain)
-                const ip = mappings[domain.host]
-                const streak = health[domain.host]?.failureStreak || 0
-                return `
-                  <tr>
-                    <td><strong>${esc(domain.host)}</strong><div class="card-subtitle">${esc(domain.endpoint || '/')}</div></td>
-                    <td><span class="chip ${domain.mode === 'tracker' ? 'primary' : ''}">${esc(domain.mode.toUpperCase())}</span></td>
-                    <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'}">${esc(domain.class)}</span></td>
-                    <td>${domain.group ? `<span class="chip">${esc(domain.group)}</span>` : '—'}</td>
-                    <td class="mono">${ip ? esc(ip) : '—'}</td>
-                    <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>
-                    <td>${streak ? `<span class="chip danger">${streak}</span>` : '<span class="chip">0</span>'}</td>
-                    <td><div class="table-actions">
-                      <button class="icon-button" data-edit-domain="${realIndex}" aria-label="编辑">${icon('edit')}</button>
-                      <button class="icon-button" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
-                      <button class="icon-button" data-delete-domain="${realIndex}" aria-label="删除">${icon('trash')}</button>
-                    </div></td>
-                  </tr>
-                `
-              }).join('') : '<tr><td colspan="8" class="table-empty">没有符合条件的域名</td></tr>'}
+            <tbody id="domain-rows">
+              ${domainRowsHTML(domains, filtered)}
             </tbody>
           </table>
         </div>
