@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,8 +15,9 @@ import (
 const testHashA = "0123456789abcdef0123456789abcdef01234567"
 const testHashB = "89abcdef0123456789abcdef0123456789abcdef"
 
-func TestDiscoverTransmissionSamples(t *testing.T) {
+func TestDiscoverTransmissionSamplesModernRPCStopsAfterOneSample(t *testing.T) {
 	var requests atomic.Int32
+	var trackerLookups atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		if r.URL.Path != "/transmission/rpc" {
@@ -23,58 +25,97 @@ func TestDiscoverTransmissionSamples(t *testing.T) {
 		}
 		if r.Header.Get("X-Transmission-Session-Id") == "" {
 			w.Header().Set("X-Transmission-Session-Id", "session-123")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			Method  string `json:"method"`
+			Params struct {
+				Fields []string `json:"fields"`
+				IDs []int `json:"ids"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if req.JSONRPC != "2.0" || req.Method != "torrent_get" {
+			t.Fatalf("expected Transmission 4.1 JSON-RPC request, got %#v", req)
+		}
 		w.Header().Set("Content-Type", "application/json")
+		if len(req.Params.IDs) == 0 {
+			_, _ = w.Write([]byte(`{
+				"jsonrpc":"2.0",
+				"result":{"torrents":[
+					{"id":11,"hash_string":"0123456789abcdef0123456789abcdef01234567","left_until_done":0,"is_finished":true,"status":6,"activity_date":500},
+					{"id":12,"hash_string":"89abcdef0123456789abcdef0123456789abcdef","left_until_done":0,"is_finished":true,"status":6,"activity_date":400}
+				]},
+				"id":1
+			}`))
+			return
+		}
+		trackerLookups.Add(1)
+		switch req.Params.IDs[0] {
+		case 11:
+			_, _ = w.Write([]byte(`{
+				"jsonrpc":"2.0",
+				"result":{"torrents":[{"trackers":[{"announce":"https://tracker.m-team.cc/announce?passkey=modern-secret","tier":0}]}]},
+				"id":1
+			}`))
+		case 12:
+			t.Fatal("second torrent must not be inspected after one sample for the only target domain was found")
+		default:
+			t.Fatalf("unexpected torrent id %d", req.Params.IDs[0])
+		}
+	}))
+	defer srv.Close()
+
+	got, err := discoverTransmissionSamples(context.Background(), DownloaderClientConfig{Enabled:true, URL:srv.URL}, map[string]bool{"tracker.m-team.cc": true}, 20)
+	if err != nil { t.Fatal(err) }
+	if requests.Load() != 3 { t.Fatalf("expected 409 negotiation + lightweight list + one tracker lookup, got %d requests", requests.Load()) }
+	if trackerLookups.Load() != 1 { t.Fatalf("expected one tracker lookup, got %d", trackerLookups.Load()) }
+	sample, ok := got["tracker.m-team.cc"]
+	if !ok { t.Fatal("missing m-team sample") }
+	if sample.HashHex != testHashA || sample.Path != "/announce" || !strings.Contains(sample.URL, "modern-secret") {
+		t.Fatalf("unexpected sample: %#v", sample)
+	}
+}
+
+func TestDiscoverTransmissionSamplesLegacyRPC(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "legacy-session")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+			Arguments struct {
+				Fields []string `json:"fields"`
+				IDs []int `json:"ids"`
+			} `json:"arguments"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if req.Method != "torrent-get" { t.Fatalf("expected legacy torrent-get, got %s", req.Method) }
+		if len(req.Arguments.IDs) == 0 {
+			_, _ = w.Write([]byte(`{
+				"result":"success",
+				"arguments":{"torrents":[{"id":21,"hashString":"0123456789abcdef0123456789abcdef01234567","leftUntilDone":0,"isFinished":true,"status":6,"activityDate":200}]}
+			}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{
 			"result":"success",
-			"arguments":{"torrents":[
-				{
-					"hashString":"0123456789abcdef0123456789abcdef01234567",
-					"name":"completed seed",
-					"leftUntilDone":0,
-					"status":6,
-					"activityDate":200,
-					"trackers":[{"announce":"https://tracker.m-team.cc/announce?passkey=secret","tier":0}]
-				},
-				{
-					"hashString":"89abcdef0123456789abcdef0123456789abcdef",
-					"name":"incomplete",
-					"leftUntilDone":123,
-					"status":4,
-					"activityDate":999,
-					"trackers":[{"announce":"https://tracker.ptcafe.club/announce.php?passkey=skip","tier":0}]
-				}
-			]}
+			"arguments":{"torrents":[{"trackers":[{"announce":"https://tracker.hdtime.org/announce.php?passkey=legacy-secret","tier":0}]}]}
 		}`))
 	}))
 	defer srv.Close()
 
-	targets := map[string]bool{
-		"tracker.m-team.cc":   true,
-		"tracker.ptcafe.club": true,
-	}
-	got, err := discoverTransmissionSamples(context.Background(), DownloaderClientConfig{
-		Enabled: true,
-		URL:     srv.URL,
-	}, targets)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if requests.Load() != 2 {
-		t.Fatalf("expected Transmission session negotiation + request, got %d requests", requests.Load())
-	}
-	sample, ok := got["tracker.m-team.cc"]
-	if !ok {
-		t.Fatal("missing m-team sample")
-	}
-	if sample.HashHex != testHashA || sample.Path != "/announce" || !strings.Contains(sample.URL, "passkey=secret") {
-		t.Fatalf("unexpected sample: %#v", sample)
-	}
-	if _, ok := got["tracker.ptcafe.club"]; ok {
-		t.Fatal("incomplete torrent must not be used as tracker sample")
-	}
+	got, err := discoverTransmissionSamples(context.Background(), DownloaderClientConfig{Enabled:true, URL:srv.URL}, map[string]bool{"tracker.hdtime.org": true}, 20)
+	if err != nil { t.Fatal(err) }
+	if requests.Load() != 3 { t.Fatalf("expected 409 negotiation + list + tracker lookup, got %d requests", requests.Load()) }
+	if _, ok := got["tracker.hdtime.org"]; !ok { t.Fatal("missing legacy Transmission sample") }
 }
 
 func TestDiscoverQBittorrentSamplesWithTrackerFallback(t *testing.T) {
