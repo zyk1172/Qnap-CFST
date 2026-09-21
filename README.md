@@ -1,63 +1,310 @@
 # CFHost
 
-CFHost 是一个面向 NAS / QNAP 的 Cloudflare 优选与 Hosts 管理服务。
+**面向 QNAP / NAS 的 Cloudflare 优选、域名验证与 Hosts 自动管理服务。**
 
-项目基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的成熟测速核心，在其上增加 WebUI、Docker、域名级验证、智能 Repair 和宿主机 Hosts 管理。
+CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的测速核心，为 NAS 场景增加 WebUI、Smart Repair、Full Optimize、Tracker 真实 announce、宿主机 Hosts 管理、运行历史和 GitHub 映射同步。
 
-> 当前开发版本为 v0.4。CFST 测速核心仍保持独立，QNAP / PT / Hosts 逻辑全部位于 `cmd/cfhost/`。
-
-## v0.2 第二批
-
-本批重点把旧 Shell 中真正需要的 Repair / Tracker 行为迁到 Go，但不照搬原来的大单体结构。
-
-### current-IP-first Repair
-
-Repair 不再每次先启动完整 CFST：
+它解决的不是单纯“找一个延迟最低的 Cloudflare IP”，而是：
 
 ```text
-当前映射
+CFST 找候选
    ↓
-逐域名验证
-   ├─ 成功 → 直接保留
-   └─ 失败
-        ↓
-   有效期内候选缓存
-        ↓
-   按候选顺序逐个验证
-        ├─ 成功 → 立即停止
-        └─ 全失败 → 记录 failure streak
-                         ↓
-                 达到阈值 + 冷却允许
-                         ↓
-                    完整 CFST
+按 latency / bandwidth 策略排序
+   ↓
+逐域名验证实际可用性
+   ↓
+Tracker 可选真实 announce
+   ↓
+生成当前有效映射
+   ↓
+事务式写入 QNAP /etc/hosts
+   ↓
+失效时只 Repair 该域名
+   ↓
+需要时手动 Full Optimize
 ```
+
+## 主要功能
+
+- **CFST 优选**：复用 CloudflareSpeedTest 的成熟测速核心。
+- **Smart Repair**：优先验证当前 IP，失效后再尝试缓存候选，必要时才重新跑完整 CFST。
+- **Full Optimize**：显式全局优化；手动执行时重新测速并允许全部域名重选 IP，周期执行默认关闭。
+- **两类选择策略**
+  - `latency`：loss → delay → speed
+  - `bandwidth`：loss → speed → delay
+- **严格 HTTP 验证**：支持重试、跳转、正文大小、Challenge / 占位页识别。
+- **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
+- **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
+- **QNAP Hosts 管理**
+  - 只管理自己的 Marker
+  - 保留非受管内容
+  - 原地写入，保持 inode
+  - 写前备份
+  - 写后校验
+  - 失败自动回滚
+- **旧版本迁移**：可导入旧 CF-YX Marker 和 `legacy-hosts-map.tsv`。
+- **GitHub 原子同步**：一次 commit 同时发布 `hosts-map.tsv` 和 `status.json`。
+- **运行历史与日志**：保存最近任务、耗时、候选数量、映射变化和错误信息。
+- **MoviePilot V3 风格 WebUI**
+  - Dashboard
+  - 域名管理
+  - 候选 IP
+  - 任务与历史
+  - 实时日志
+  - 设置
+  - Light / Dark / Glass / 跟随系统
+  - Cmd/Ctrl + K 命令面板
+  - 响应式手机 / 平板布局
+
+---
+
+# QNAP amd64 快速部署
+
+适用于 Intel / AMD x86_64 QNAP NAS。
+
+> Docker 平台名统一叫 `linux/amd64`。Intel x86_64 机型同样使用这个架构。
+
+## 1. 镜像
+
+推荐使用专用 QNAP amd64 镜像：
+
+```text
+ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+```
+
+镜像固定为：
+
+```text
+linux/amd64
+```
+
+如果 GHCR Package 已设为 **Public**，可以匿名拉取。
+
+如果仍是 Private，需要先登录：
+
+```bash
+docker login ghcr.io
+```
+
+---
+
+## 2. 准备持久化目录
+
+推荐：
+
+```text
+/share/Container/cfhost/data
+```
+
+SSH 下可以先创建：
+
+```bash
+mkdir -p /share/Container/cfhost/data
+```
+
+这个目录会保存：
+
+```text
+config.json
+state.json
+hosts-backup-*
+tracker-samples.tsv
+tracker-samples.auto.tsv
+github-token
+legacy-hosts-map.tsv
+```
+
+重建或升级容器不会丢失配置和运行状态。
+
+---
+
+## 3. Container Station Compose
+
+在 QNAP **Container Station → 应用程序 → 创建** 中粘贴：
+
+```yaml
+services:
+  cfhost:
+    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64}
+    platform: linux/amd64
+    container_name: cfhost
+    hostname: cfhost
+    restart: unless-stopped
+
+    ports:
+      - "${CFHOST_PORT:-9876}:8080"
+
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATA_DIR: /data
+      CFST_BIN: /app/cfst
+      CFST_IP_FILE: /app/ip.txt
+      CFST_IPV6_FILE: /app/ipv6.txt
+      HOSTS_PATH: /host/etc/hosts
+
+    volumes:
+      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
+      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
+
+    stop_grace_period: 15s
+```
+
+默认无需额外填写环境变量。
+
+如果需要覆盖，可使用：
+
+```env
+CFHOST_IMAGE=ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+CFHOST_PORT=9876
+CFHOST_DATA_DIR=/share/Container/cfhost/data
+CFHOST_HOSTS_FILE=/etc/hosts
+TZ=Asia/Shanghai
+```
+
+仓库中也提供现成文件：
+
+```text
+deploy/qnap/compose-amd64.yaml
+deploy/qnap/.env.amd64.example
+deploy/qnap/README-amd64.md
+```
+
+---
+
+## 4. 启动后访问
 
 默认：
 
-- Repair 每 15 分钟可执行
-- candidate cache TTL：24 小时
-- 连续失败 2 次后才允许完整测速
-- 完整测速基础冷却：1 小时
-- 持续失败退避：1h → 2h → 4h → 8h → 12h 上限
+```text
+http://QNAP-IP:9876
+```
 
-因此一个长期坏域名不会再每 15 分钟触发一次完整 Cloudflare 扫描。
+首次启动会自动创建：
 
-首次安装且没有映射、没有候选缓存时仍会立即执行一次 CFST，不需要等待两轮失败。
+```text
+/share/Container/cfhost/data/config.json
+/share/Container/cfhost/data/state.json
+```
 
-### Tracker 真实 announce
+然后直接在 WebUI 中配置：
 
-开启 `Tracker 真实 announce` 后，Tracker 不再只看 HTTPS endpoint 是否能连接。
+- 受管域名
+- HTTP / Tracker 类型
+- latency / bandwidth 策略
+- CFST 延迟、丢包和速度阈值
+- Smart Repair
+- Full Optimize
+- Hosts 自动应用
+- Tracker 真实 announce
+- Transmission / qBittorrent 自动发现测试种子
+- GitHub 同步
 
-每个 Tracker 使用一条真实种子样本：
+---
+
+# 为什么这样挂载 Hosts
+
+Compose 使用：
+
+```yaml
+- /etc/hosts:/host/etc/hosts:rw
+```
+
+容器内：
+
+```text
+HOSTS_PATH=/host/etc/hosts
+```
+
+这里修改的是 **QNAP 宿主机的真实 `/etc/hosts`**。
+
+不要写成：
+
+```yaml
+- /etc/hosts:/etc/hosts
+```
+
+Docker 自己会管理容器内部的 `/etc/hosts`，直接覆盖它容易和 Docker 的 Hosts 机制冲突。
+
+CFHost 会：
+
+1. 校验现有 Marker。
+2. 保留非受管 Hosts 内容。
+3. 写入前备份。
+4. 原地 truncate + write，保持 inode。
+5. fsync 后重新读取验证。
+6. 失败则自动恢复旧内容。
+
+---
+
+# Tracker 真实 announce
+
+普通网站只需要 HTTP 验证；PT Tracker 可以启用真实 announce 验证。
+
+CFHost 支持两种样本来源：
+
+1. **手工样本**：`/data/tracker-samples.tsv`
+2. **自动发现样本**：`/data/tracker-samples.auto.tsv`
+
+手工样本优先级更高，不会被自动发现覆盖。
+
+## 从 Transmission 自动发现
+
+在 WebUI：
+
+```text
+设置 → Hosts 与 Tracker
+```
+
+填写 Transmission RPC 地址、用户名和密码即可。
+
+例如同一台 QNAP 上：
+
+```text
+http://192.168.1.10:9091/transmission/rpc
+```
+
+不要填 `127.0.0.1`，因为 CFHost 默认运行在 Docker bridge 网络中，容器里的 localhost 指向 CFHost 自己。
+
+Transmission 自动发现：
+
+- 兼容 Transmission 4.1+ JSON-RPC 2.0
+- 兼容旧版 `torrent-get` RPC
+- 使用正常的 `X-Transmission-Session-Id` 409 握手
+- 先只读取轻量 torrent 元数据
+- 只选已完成 / 正在做种的 40 位 v1 info-hash
+- 分批读取 Tracker，避免一次拉取整个 PT 库的 tracker 数组
+- **每个目标 Tracker 域名找到 1 个样本后就停止继续寻找该域名**
+
+## 从 qBittorrent 自动发现
+
+填写 qBittorrent WebUI 地址、用户名和密码，例如：
+
+```text
+http://192.168.1.10:8080
+```
+
+CFHost 会读取 completed torrents，优先使用当前工作 Tracker；目标域名仍缺失时再按上限查询 torrent tracker 列表。
+
+自动发现只读取 torrent hash、完成状态和 Tracker URL，不会：
+
+- 暂停 / 恢复任务
+- reannounce
+- 修改 Tracker
+- 删除任务
+- 改变下载或做种状态
+
+## 手工样本格式
+
+如果需要手工维护：
 
 ```text
 domain<TAB>announce_path<TAB>40位 info_hash<TAB>完整 HTTPS announce URL
 ```
 
-默认文件：
+默认位置：
 
 ```text
-/data/tracker-samples.tsv
+/share/Container/cfhost/data/tracker-samples.tsv
 ```
 
 仓库提供：
@@ -66,125 +313,189 @@ domain<TAB>announce_path<TAB>40位 info_hash<TAB>完整 HTTPS announce URL
 tracker-samples.example.tsv
 ```
 
-旧 QNAP Cloudflare Hosts Manager 的 `state/tracker-test-samples.tsv` 格式与新版本一致，可以直接迁移到 Docker 的 `data/tracker-samples.tsv`。
+真实 announce 成功要求：
 
-成功条件：
-
-- HTTPS 请求确实通过指定候选 IP
+- TCP 实际连接指定候选 Cloudflare IP
+- TLS Host / SNI 仍使用 Tracker 域名
 - HTTP 200
-- 返回 bencode dictionary
-- 包含正常 announce 字段（`interval` 或 `peers`）
+- 返回合法 bencode dictionary
+- 包含 `interval` 或 `peers`
 - 不包含 `failure reason`
 
-探测方式已经改成按需顺序验证：
+默认：
+
+```text
+retries = 2
+required successes = 1
+```
+
+---
+
+# Smart Repair 与 Full Optimize
+
+## Smart Repair
+
+自动维护遵循：
+
+> **哪个域名坏了，就只修哪个域名。**
+
+例如：
+
+```text
+A 当前 IP 正常 → 保持 A 原 IP
+B 当前 IP 失败 → 只给 B 找替代 IP
+C 当前 IP 正常 → 保持 C 原 IP
+```
+
+B 的修复流程：
 
 ```text
 当前 IP
-  ↓失败
-候选 1
-  ↓失败
-候选 2
-  ↓成功
-停止
+  ↓ 失败
+同站点组已验证 IP
+  ↓ 不可用
+有效期内候选缓存
+  ↓ 全失败
+达到 failure threshold + cooldown
+  ↓
+完整 CFST 刷新候选池
+  ↓
+只继续解决仍 unresolved 的域名
 ```
 
-不会像旧脚本那样预先对每个 Tracker 的全部 Top N IP 做真实 announce。
+即使 B 触发了新的 CFST，A / C 也不会因此重新选择 IP。
 
-缺少 Tracker 样本属于配置问题，不会触发 CFST 重测速，因为换一批 Cloudflare IP 无法解决“没有样本”。
+默认：
 
-### 候选排序
+- Repair 间隔：15 分钟
+- candidate cache TTL：24 小时
+- failure threshold：2
+- Refresh 基础冷却：1 小时
+- 最大退避：12 小时
 
-CFHost 对 CFST 候选再次按 PT latency 策略排序：
+## Full Optimize
 
-1. 丢包率低
-2. 延迟低
-3. 下载速度高
-4. IP
-
-同一站点组仍优先尝试已验证的共享 IP，但每个域名都独立验证，失败就继续下一个候选。
-
-### Hosts
-
-Repair 最终只保留本轮验证成功的映射。
-
-如果某个域名当前 IP 已确认失效、缓存和新候选都无法替换，它不会继续把坏 IP 写回 Hosts。
-
-如果全部映射失效，CFHost 会清除自己的 Marker 区域，让域名恢复正常 DNS；不会恢复已经确认失败的旧映射。
-
-## Docker Compose
-
-```yaml
-services:
-  cfhost:
-    build: .
-    container_name: cfhost
-    restart: unless-stopped
-    ports:
-      - "9876:8080"
-    environment:
-      TZ: Asia/Shanghai
-      DATA_DIR: /data
-      HOSTS_PATH: /host/etc/hosts
-    volumes:
-      - ./data:/data
-      - /etc/hosts:/host/etc/hosts
-```
-
-启动：
-
-```bash
-docker compose up -d --build
-```
-
-打开：
+Full Optimize 是明确的**全局重选**操作：
 
 ```text
-http://NAS-IP:9876
+强制 CFST
+   ↓
+按 latency / bandwidth 排序
+   ↓
+重新验证全部启用域名
+   ↓
+允许所有域名选择当前最优可用 IP
 ```
 
-首次启动会自动生成 `data/config.json`。
+默认策略：
 
-如果要启用 PT Tracker 真实 announce，把旧项目的样本复制过去：
+- **手动 Full Optimize：可随时执行**
+- **周期性 Full Optimize：默认关闭**
+- 只有主动打开 WebUI 中的“允许周期性全局优化”后，才按配置周期执行
+
+旧版本的 `optimize.enabled=true` 不会自动迁移成周期全局换 IP。
+
+---
+
+# latency / bandwidth
+
+## latency
+
+适合 Tracker 和延迟敏感域名：
+
+```text
+loss → delay → speed → IP
+```
+
+## bandwidth
+
+适合更关注下载吞吐的域名：
+
+```text
+loss → speed → delay → IP
+```
+
+默认 bandwidth 门槛：
+
+```text
+loss <= 0
+delay <= 180 ms
+speed >= 0.5 MB/s
+```
+
+每个域名默认最多验证 Top 10 候选。
+
+---
+
+# GitHub 映射同步
+
+CFHost 可以把当前映射发布到独立仓库：
+
+```text
+hosts-map.tsv
+status.json
+```
+
+两个文件通过 Git Data API 在 **同一个 commit** 中原子更新。
+
+默认 Token 文件：
+
+```text
+/share/Container/cfhost/data/github-token
+```
+
+容器内：
+
+```text
+/data/github-token
+```
+
+也可以使用运行环境中的 `GITHUB_TOKEN`。
+
+---
+
+# 更新
+
+拉取最新版：
 
 ```bash
-cp /旧项目/state/tracker-test-samples.tsv ./data/tracker-samples.tsv
+docker pull ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 ```
 
-也可以按照 `tracker-samples.example.tsv` 自己创建。
+如果使用 Container Station Compose，重新创建 / 更新应用即可。
 
-## WebUI
+因为以下内容都在 bind mount 中：
 
-当前可以直接配置：
+```text
+/data
+/host/etc/hosts
+```
 
-- CFST 延迟上限
-- 最大丢包率
-- 最低下载速度
-- 下载测速数量
-- IPv4 / IPv6
-- Repair 间隔
-- candidate cache TTL
-- failure streak 阈值
-- refresh cooldown
-- 最大 backoff
-- Tracker real announce
-- Tracker 样本路径
-- announce 重试次数
-- 域名 / 分组 / HTTP / Tracker 类型
-- 自动 Repair
-- Repair 后自动写 Hosts
+升级镜像不会删除 CFHost 配置和状态。
 
-状态页显示：
+---
 
-- 当前映射
-- 每个域名连续失败次数
-- 候选 IP 与采样时间
-- 最近一次完整 CFST
-- 下次允许完整 CFST 的时间
-- Repair / Tracker 日志
+# 常用路径与端口
 
-## 与上游 CFST 的关系
+| 项目 | 默认值 |
+| --- | --- |
+| WebUI | `http://QNAP-IP:9876` |
+| 容器监听端口 | `8080` |
+| QNAP 数据目录 | `/share/Container/cfhost/data` |
+| 容器数据目录 | `/data` |
+| QNAP Hosts | `/etc/hosts` |
+| 容器 Hosts 挂载 | `/host/etc/hosts` |
+| 手工 Tracker 样本 | `/data/tracker-samples.tsv` |
+| 自动 Tracker 样本 | `/data/tracker-samples.auto.tsv` |
+| GitHub Token | `/data/github-token` |
+| IPv4 IP 池 | `/app/ip.txt` |
+| IPv6 IP 池 | `/app/ipv6.txt` |
 
-上游测速核心仍保留在：
+---
+
+# 架构
+
+上游 CFST 核心保持在：
 
 ```text
 main.go
@@ -192,209 +503,39 @@ task/
 utils/
 ```
 
-CFHost 服务代码：
+CFHost 服务：
 
 ```text
 cmd/cfhost/
 ```
 
-Docker 镜像构建两个程序：
+镜像中包含两个程序：
 
 ```text
 /app/cfst
 /app/cfhost
 ```
 
-第二批仍没有修改上游 CFST 的测速实现。
+WebUI 由 Go `embed.FS` 直接打包，不需要 Vue / Node / Nginx 等额外运行时。
 
-## 尚未迁入
+---
 
-下一批适合独立处理：
+# 与 CloudflareSpeedTest 的关系
 
-1. GitHub hosts-map/status 同步
-2. 同步格式收敛为单次原子发布
-3. 更完整的运行历史/统计
-4. QNAP 实机部署后的兼容性修正
+本项目保留 CloudflareSpeedTest 作为候选 IP 测速核心，并在其之上增加 NAS / QNAP 场景的域名验证、Repair、Hosts、Tracker 和 WebUI 服务层。
 
-## v0.3 第三批
+上游项目：
 
-### GitHub 原子同步
+[https://github.com/XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)
 
-CFHost 可以继续发布兼容现有 macOS / Windows 客户端的 10 列 `hosts-map.tsv`，并同时生成 `status.json`。
+---
 
-与旧 Shell 不同，v0.3 不再对两个文件分别调用 Contents API。现在使用 GitHub Git Data API：
-
-```text
-hosts-map.tsv ─→ blob ┐
-status.json    ─→ blob ├→ one tree → one commit → update branch ref
-                       ┘
-```
-
-因此客户端不会再看到“map 已更新但 status 还是旧版本”或相反的瞬时状态。
-
-只有映射、策略类别或候选指标发生变化时才自动发布；普通 Repair 仅重新确认同一映射不会制造新的 Git commit。WebUI 的“立即同步”可以强制发布一次。
-
-默认同步目标：
-
-```text
-zyk1172/cloudflare-hosts-sync
-branch: main
-token file: /data/github-token
-```
-
-也支持容器环境变量 `GITHUB_TOKEN`。
-
-### siteGroup 与 class
-
-v0.3 明确区分：
-
-- `group`：同一 PT 站点的共享组，例如 `mteam`、`ptcafe`
-- `class`：同步/测速策略类别，仅为 `latency` 或 `bandwidth`
-
-旧配置没有 `class` 时自动迁移为 `latency`，因此不会破坏 v0.2 配置。
-
-### 运行历史
-
-`state.json` 保留最近 200 次任务记录，包括：
-
-- run / repair 类型
-- 开始和结束时间
-- 耗时
-- 成功 / 失败
-- 是否触发完整 CFST
-- 映射数量变化
-- 候选 IP 数量
-
-WebUI 直接显示最近运行历史与 GitHub 同步状态。
-
-### QNAP / Container Station
-
-主 Compose 支持通过环境变量覆盖：
-
-```text
-CFHOST_PORT
-CFHOST_DATA_DIR
-CFHOST_HOSTS_FILE
-```
-
-例如 QNAP：
-
-```bash
-CFHOST_DATA_DIR=/share/Container/cfhost/data docker compose up -d
-```
-
-容器增加 `/healthz`、Docker healthcheck、SIGTERM graceful shutdown 和 15 秒停止宽限期。Hosts 仍通过单文件 bind mount 原地写入，保持宿主机文件 inode。
-
-仓库同时提供 `deploy/qnap/compose.yaml`。打 `cfhost-v*` tag 后，镜像工作流可以发布 amd64/arm64 镜像到 GHCR。
-
-## License
+# License
 
 本项目继承上游 CloudflareSpeedTest，使用 GNU GPL v3。
 
-
-## v0.4 第四批
-
-### 严格 HTTP 验证
-
-普通网站默认恢复严格验证，不再把“能收到任意 HTTP 响应”直接视为成功：
-
-- 指定候选 IP 连接原域名
-- 最多重试 2 次
-- 跟随最多 3 次跳转
-- 跳转到其它域名后恢复正常 DNS，不错误地继续绑定候选 IP
-- 最终必须是 2xx
-- HTTP 200 正文默认至少 512 bytes
-- 拒绝 Cloudflare challenge、nginx/宝塔默认页、parked domain 等常见占位内容
-
-这些参数都可以在 WebUI 修改。
-
-### Hosts 事务与迁移
-
-Hosts 写入现在会：
-
-1. 校验 CFHost 和旧 CF-YX Marker 是否完整、唯一且不嵌套。
-2. 生成新 Hosts 后确认非受管内容没有变化。
-3. 先备份，再原地写入并重新读取校验，继续保持 inode。
-4. 如果写入失败，立即恢复原内容。
-5. Repair/Optimize 写 Hosts 后如果 state.json 提交失败，再把 Hosts 回滚到旧版本。
-
-备份默认只保留最近 10 份。
-
-首次启动且 CFHost state 为空时，会自动从宿主机现有 CFHost/CF-YX Marker 导入映射；也会读取可选的 `/data/legacy-hosts-map.tsv`。导入映射只作为“待验证 current IP”，下一次 Repair 会重新验证。首次成功应用新 Hosts 后，旧的：
+MoviePilot-Frontend 的视觉语言被用于 WebUI 设计参考；相关 MIT License 说明见：
 
 ```text
-# CF-YX-LATENCY-BEGIN
-# CF-YX-LATENCY-END
-# CF-YX-BANDWIDTH-BEGIN
-# CF-YX-BANDWIDTH-END
+THIRD_PARTY_NOTICES.md
 ```
-
-会被移除并收敛到一个 CFHost Marker。
-
-### 真正的 latency / bandwidth 选择策略
-
-每个域名的 `class` 现在实际参与候选选择：
-
-```text
-latency:
-loss -> delay -> speed -> IP
-
-bandwidth:
-loss -> speed -> delay -> IP
-```
-
-bandwidth 还会额外应用默认阈值：
-
-- loss <= 0
-- delay <= 180 ms
-- speed >= 0.5 MB/s
-
-每个域名默认最多验证 Top 10 个候选。
-
-CFST 本身仍负责生成带真实下载速度的候选；CFHost 不修改上游测速核心。
-
-### 逐域名 Repair 与 Full Optimize
-
-自动维护默认采用“哪个域名坏了就修哪个”的策略：
-
-```text
-Smart Repair:
-A 域名当前 IP 可用 -> A 保持原 IP
-B 域名当前 IP 失败 -> 只给 B 尝试共享 IP / 缓存候选 / 必要时 CFST
-C 域名当前 IP 可用 -> C 保持原 IP
-```
-
-即使某个失效域名最终触发了完整 CFST，新的候选池也只用于解决当前 unresolved 域名；本轮验证正常的域名不会因为它而重新选 IP。
-
-`Full Optimize` 是不同的显式全局操作：
-
-```text
-手动 Full Optimize:
-强制 CFST -> 按最新 latency/bandwidth 策略重新排序
--> 每个域名重新验证 -> 允许所有域名重新选择当前最优 IP
-```
-
-周期性全局优化现在默认关闭。旧版本中的 `optimize.enabled=true` 不会自动迁移成周期全局换 IP，避免升级后继续改变健康域名。
-
-如果确实需要定期全局重选，可在 WebUI 中主动开启“允许周期性全局优化”；手动点击“完整优化”始终保留。
-
-### Tracker
-
-旧生产配置实际为：
-
-```text
-TRACKER_REAL_ANNOUNCE_RETRIES=2
-TRACKER_REAL_ANNOUNCE_REQUIRED_SUCCESSES=1
-```
-
-所以 v0.4 保持“一次有效真实 announce 即证明候选可用”，没有错误地改成必须连续成功两次。
-
-## QNAP amd64 image
-
-A dedicated QNAP/x86_64 image is published as:
-
-```text
-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
-```
-
-The image manifest contains only `linux/amd64`. The QNAP compose file pins the same platform explicitly and bind-mounts the NAS host `/etc/hosts` at `/host/etc/hosts`.
