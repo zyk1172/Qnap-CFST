@@ -39,23 +39,23 @@ platform: linux/amd64
 ```yaml
 services:
   cfhost:
-    image: ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64}
     platform: linux/amd64
     container_name: cfhost
     hostname: cfhost
     restart: unless-stopped
     ports:
-      - "9876:8080"
+      - "${CFHOST_PORT:-9876}:8080"
     environment:
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
       CFST_BIN: /app/cfst
       CFST_IP_FILE: /app/ip.txt
       CFST_IPV6_FILE: /app/ipv6.txt
       HOSTS_PATH: /host/etc/hosts
     volumes:
-      - /share/Container/cfhost/data:/data
-      - /etc/hosts:/host/etc/hosts:rw
+      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
+      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
     stop_grace_period: 15s
 ```
 
@@ -86,6 +86,16 @@ legacy-hosts-map.tsv
 
 ```text
 /share/Container/cfhost/data
+```
+
+Compose 已内置默认值，即使 Container Station 不加载 `.env` 也可以直接创建应用。需要自定义时，可复制 `.env.amd64.example` 为 `.env`，或直接在 Container Station 项目环境变量中设置：
+
+```text
+CFHOST_IMAGE=ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+CFHOST_PORT=9876
+CFHOST_DATA_DIR=/share/Container/cfhost/data
+CFHOST_HOSTS_FILE=/etc/hosts
+TZ=Asia/Shanghai
 ```
 
 不要把 `/data` 改成临时容器目录，否则重建容器后配置、状态、候选缓存和历史记录都会消失。
