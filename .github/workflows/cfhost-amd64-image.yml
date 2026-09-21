@@ -3,6 +3,8 @@ name: CFHost QNAP AMD64 Image
 on:
   workflow_dispatch:
   push:
+    branches:
+      - master
     tags:
       - "cfhost-amd64-v*"
 
