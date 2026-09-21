@@ -184,14 +184,17 @@ func parseTransmissionTorrentList(body []byte, modern bool) ([]transmissionTorre
 	return out, nil
 }
 
-func parseTransmissionTrackers(body []byte, modern bool) ([]transmissionTracker, error) {
-	var rows []struct {
-		Trackers []transmissionTracker `json:"trackers"`
-	}
+type transmissionTrackerRow struct {
+	ID       int
+	Trackers []transmissionTracker
+}
+
+func parseTransmissionTrackers(body []byte, modern bool) ([]transmissionTrackerRow, error) {
 	if modern {
 		var response struct {
 			Result struct {
 				Torrents []struct {
+					ID       int                   `json:"id"`
 					Trackers []transmissionTracker `json:"trackers"`
 				} `json:"torrents"`
 			} `json:"result"`
@@ -205,145 +208,33 @@ func parseTransmissionTrackers(body []byte, modern bool) ([]transmissionTracker,
 		if response.Error != nil {
 			return nil, fmt.Errorf("Transmission JSON-RPC: %s", response.Error.Message)
 		}
-		rows = response.Result.Torrents
-	} else {
-		var response struct {
-			Result    string `json:"result"`
-			Arguments struct {
-				Torrents []struct {
-					Trackers []transmissionTracker `json:"trackers"`
-				} `json:"torrents"`
-			} `json:"arguments"`
+		out := make([]transmissionTrackerRow, 0, len(response.Result.Torrents))
+		for _, row := range response.Result.Torrents {
+			out = append(out, transmissionTrackerRow{ID: row.ID, Trackers: row.Trackers})
 		}
-		if err := json.Unmarshal(body, &response); err != nil {
-			return nil, err
-		}
-		if response.Result != "" && response.Result != "success" {
-			return nil, fmt.Errorf("Transmission RPC: %s", response.Result)
-		}
-		rows = response.Arguments.Torrents
+		return out, nil
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0].Trackers, nil
-}
 
-type qbitTorrent struct {
-	Hash         string  `json:"hash"`
-	Name         string  `json:"name"`
-	AmountLeft   int64   `json:"amount_left"`
-	Progress     float64 `json:"progress"`
-	State        string  `json:"state"`
-	Tracker      string  `json:"tracker"`
-	LastActivity int64   `json:"last_activity"`
-}
-
-type qbitTracker struct {
-	URL    string `json:"url"`
-	Status int    `json:"status"`
-	Tier   int    `json:"tier"`
-}
-
-type rankedTrackerSample struct {
-	Sample TrackerSample
-	Score  int64
-}
-
-func trackerTargetDomains(cfg Config) map[string]bool {
-	out := make(map[string]bool)
-	for _, d := range cfg.Domains {
-		if d.Enabled && d.Mode == "tracker" {
-			out[strings.ToLower(strings.TrimSpace(d.Host))] = true
-		}
+	var response struct {
+		Result    string `json:"result"`
+		Arguments struct {
+			Torrents []struct {
+				ID       int                   `json:"id"`
+				Trackers []transmissionTracker `json:"trackers"`
+			} `json:"torrents"`
+		} `json:"arguments"`
 	}
-	return out
-}
-
-func sampleFromAnnounce(hashHex, rawURL string, targets map[string]bool) (TrackerSample, bool) {
-	hashHex = strings.ToLower(strings.TrimSpace(hashHex))
-	if len(hashHex) != 40 {
-		return TrackerSample{}, false
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
 	}
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Scheme != "https" {
-		return TrackerSample{}, false
+	if response.Result != "" && response.Result != "success" {
+		return nil, fmt.Errorf("Transmission RPC: %s", response.Result)
 	}
-	domain := strings.ToLower(u.Hostname())
-	if domain == "" || !targets[domain] {
-		return TrackerSample{}, false
-	}
-	hashBytes, err := decodeInfoHash(hashHex)
-	if err != nil {
-		return TrackerSample{}, false
-	}
-	pathValue := u.EscapedPath()
-	if pathValue == "" {
-		pathValue = "/"
-	}
-	// Existing TrackerSample parser compares URL.Path, not EscapedPath.
-	pathValue = u.Path
-	if pathValue == "" {
-		pathValue = "/"
-	}
-	return TrackerSample{
-		Domain:  domain,
-		Path:    pathValue,
-		HashHex: hashHex,
-		Hash:    hashBytes,
-		URL:     u.String(),
-	}, true
-}
-
-func decodeInfoHash(hashHex string) ([]byte, error) {
-	if len(hashHex) != 40 {
-		return nil, fmt.Errorf("info hash must be 40 hex chars")
-	}
-	out := make([]byte, 20)
-	for i := 0; i < 20; i++ {
-		var v byte
-		for j := 0; j < 2; j++ {
-			c := hashHex[i*2+j]
-			v <<= 4
-			switch {
-			case c >= '0' && c <= '9':
-				v |= c - '0'
-			case c >= 'a' && c <= 'f':
-				v |= c - 'a' + 10
-			case c >= 'A' && c <= 'F':
-				v |= c - 'A' + 10
-			default:
-				return nil, fmt.Errorf("invalid info hash")
-			}
-		}
-		out[i] = v
+	out := make([]transmissionTrackerRow, 0, len(response.Arguments.Torrents))
+	for _, row := range response.Arguments.Torrents {
+		out = append(out, transmissionTrackerRow{ID: row.ID, Trackers: row.Trackers})
 	}
 	return out, nil
-}
-
-func missingTargets(targets map[string]bool, found map[string]rankedTrackerSample) int {
-	n := 0
-	for domain := range targets {
-		if _, ok := found[domain]; !ok {
-			n++
-		}
-	}
-	return n
-}
-
-func chooseSample(found map[string]rankedTrackerSample, sample TrackerSample, score int64) {
-	old, ok := found[sample.Domain]
-	if !ok || score > old.Score {
-		found[sample.Domain] = rankedTrackerSample{Sample: sample, Score: score}
-	}
-}
-
-func flattenRankedSamples(found map[string]rankedTrackerSample) map[string]TrackerSample {
-	out := make(map[string]TrackerSample, len(found))
-	for domain, item := range found {
-		out[domain] = item.Sample
-	}
-	return out
 }
 
 func discoverTransmissionSamples(ctx context.Context, cfg DownloaderClientConfig, targets map[string]bool, maxTrackerLookups int) (map[string]TrackerSample, error) {
@@ -404,42 +295,71 @@ func discoverTransmissionSamples(ctx context.Context, cfg DownloaderClientConfig
 	// One sample per target Tracker domain is enough; after a domain is found,
 	// later torrents for that domain are ignored.
 	found := make(map[string]rankedTrackerSample)
-	lookups := 0
+	byID := make(map[int]transmissionTorrentSummary, len(eligible))
 	for _, torrent := range eligible {
-		if missingTargets(targets, found) == 0 || lookups >= maxTrackerLookups {
-			break
+		byID[torrent.ID] = torrent
+	}
+
+	const batchSize = 16
+	lookups := 0
+	for offset := 0; offset < len(eligible) && missingTargets(targets, found) > 0 && lookups < maxTrackerLookups; {
+		remaining := maxTrackerLookups - lookups
+		size := batchSize
+		if remaining < size {
+			size = remaining
 		}
-		lookups++
+		if len(eligible)-offset < size {
+			size = len(eligible) - offset
+		}
+		ids := make([]int, 0, size)
+		for _, torrent := range eligible[offset : offset+size] {
+			ids = append(ids, torrent.ID)
+		}
+		offset += size
+		lookups += size
+
 		body, err := rpc.call(
 			ctx,
 			"torrent-get",
 			"torrent_get",
 			map[string]any{
-				"ids":    []int{torrent.ID},
-				"fields": []string{"id", "hashString", "trackers"},
+				"ids":    ids,
+				"fields": []string{"id", "trackers"},
 			},
 			map[string]any{
-				"ids":    []int{torrent.ID},
-				"fields": []string{"id", "hash_string", "trackers"},
+				"ids":    ids,
+				"fields": []string{"id", "trackers"},
 			},
 		)
 		if err != nil {
 			return nil, err
 		}
-		trackers, err := parseTransmissionTrackers(body, rpc.modern)
+		rows, err := parseTransmissionTrackers(body, rpc.modern)
 		if err != nil {
-			return nil, fmt.Errorf("Transmission trackers for torrent %d: %w", torrent.ID, err)
+			return nil, fmt.Errorf("Transmission tracker batch: %w", err)
 		}
-		for _, tracker := range trackers {
-			sample, ok := sampleFromAnnounce(torrent.HashString, tracker.Announce, targets)
+		for _, row := range rows {
+			torrent, ok := byID[row.ID]
 			if !ok {
 				continue
 			}
-			if _, exists := found[sample.Domain]; exists {
-				continue
+			for _, tracker := range row.Trackers {
+				sample, ok := sampleFromAnnounce(torrent.HashString, tracker.Announce, targets)
+				if !ok {
+					continue
+				}
+				if _, exists := found[sample.Domain]; exists {
+					continue
+				}
+				found[sample.Domain] = rankedTrackerSample{Sample: sample, Score: torrent.ActivityDate}
 			}
-			found[sample.Domain] = rankedTrackerSample{Sample: sample, Score: torrent.ActivityDate}
 		}
+	}
+	if len(found) == 0 {
+		if len(eligible) == 0 {
+			return map[string]TrackerSample{}, fmt.Errorf("Transmission connected: %d torrents returned, no completed v1 torrent is eligible", len(torrents))
+		}
+		return map[string]TrackerSample{}, fmt.Errorf("Transmission connected: checked %d completed torrents, no matching HTTPS Tracker sample found", lookups)
 	}
 	return flattenRankedSamples(found), nil
 }
