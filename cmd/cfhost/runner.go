@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -202,7 +201,6 @@ func verifyDomain(parent context.Context, d Domain, ip string, timeoutSeconds in
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
 		ForceAttemptHTTP2: true,
-		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ip, "443"))
 		},
