@@ -13,19 +13,19 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <div><h1>CFHost</h1><div class="sub">Cloudflare 优选 · 域名验证 · Hosts 管理</div></div>
+    <div><h1>CFHost</h1><div class="sub">Cloudflare 优选 · 智能 Repair · Hosts 管理</div></div>
     <div class="actions">
-      <button onclick="job('run')">仅测速</button>
-      <button class="primary" onclick="job('repair')">测速并解析</button>
+      <button onclick="job('run')">强制 CFST 测速</button>
+      <button class="primary" onclick="job('repair')">智能 Repair</button>
       <button onclick="applyHosts()">应用 Hosts</button>
     </div>
   </div>
 
   <div class="grid">
     <div class="card"><div class="muted">运行状态</div><div id="runState" class="metric">-</div></div>
-    <div class="card"><div class="muted">候选 IP</div><div id="candidateCount" class="metric">0</div></div>
+    <div class="card"><div class="muted">缓存候选 IP</div><div id="candidateCount" class="metric">0</div></div>
     <div class="card"><div class="muted">已解析域名</div><div id="mappingCount" class="metric">0</div></div>
-    <div class="card"><div class="muted">最近成功</div><div id="lastSuccess" class="metric tiny">-</div></div>
+    <div class="card"><div class="muted">最近完整测速</div><div id="lastRefresh" class="metric tiny">-</div><div id="nextRefresh" class="muted tiny"></div></div>
   </div>
 
   <section class="card">
@@ -41,7 +41,14 @@
       <div class="field"><label>验证超时秒数</label><input id="verifyTimeout" type="number"></div>
       <div class="field wide"><label>下载测速 URL</label><input id="downloadUrl"></div>
       <div class="field"><label>Repair 间隔（分钟）</label><input id="repairInterval" type="number"></div>
+      <div class="field"><label>候选缓存 TTL（分钟）</label><input id="candidateTTL" type="number"></div>
+      <div class="field"><label>触发完整测速的连续失败次数</label><input id="failureThreshold" type="number"></div>
+      <div class="field"><label>完整测速基础冷却（分钟）</label><input id="refreshCooldown" type="number"></div>
+      <div class="field"><label>完整测速最大退避（分钟）</label><input id="refreshMaxBackoff" type="number"></div>
       <div class="field"><label>Hosts 路径</label><input id="hostsPath"></div>
+      <div class="field wide"><label>Tracker 样本文件</label><input id="trackerSamples"></div>
+      <div class="field"><label>Tracker announce 重试</label><input id="trackerRetries" type="number"></div>
+      <div class="field switch"><input id="realAnnounce" type="checkbox"><label for="realAnnounce">Tracker 真实 announce</label></div>
       <div class="field switch"><input id="autoRepair" type="checkbox"><label for="autoRepair">自动 Repair</label></div>
       <div class="field switch"><input id="autoApply" type="checkbox"><label for="autoApply">Repair 后自动写 Hosts</label></div>
       <div class="field switch"><input id="ipv6" type="checkbox"><label for="ipv6">使用 IPv6 IP 池</label></div>
@@ -49,18 +56,18 @@
   </section>
 
   <section class="card">
-    <div class="section-head"><div><h2>域名</h2><div class="muted tiny">HTTP 与 Tracker 都会先对候选 IP 做 HTTPS 链路验证；真实 Tracker announce 将在后续版本迁入。</div></div><button onclick="addDomain()">添加</button></div>
+    <div class="section-head"><div><h2>域名</h2><div class="muted tiny">Repair 先验证当前 IP，再尝试有效期内的候选缓存。Tracker 开启真实 announce 后，缺少样本不会触发无意义的 CFST 重测速。</div></div><button onclick="addDomain()">添加</button></div>
     <div class="scroll"><table><thead><tr><th>启用</th><th>域名</th><th>组</th><th>类型</th><th>路径</th><th></th></tr></thead><tbody id="domains"></tbody></table></div>
   </section>
 
   <section class="card">
     <div class="section-head"><h2>当前映射</h2><span id="lastError" class="status-bad"></span></div>
-    <div class="scroll"><table><thead><tr><th>域名</th><th>IP</th><th>状态</th></tr></thead><tbody id="mappings"></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>域名</th><th>IP</th><th>连续失败</th><th>状态</th></tr></thead><tbody id="mappings"></tbody></table></div>
   </section>
 
   <section class="card">
     <div class="section-head"><h2>CFST 候选结果</h2></div>
-    <div class="scroll"><table><thead><tr><th>IP</th><th>丢包率</th><th>延迟 ms</th><th>速度 MB/s</th><th>地区</th></tr></thead><tbody id="candidates"></tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>IP</th><th>丢包率</th><th>延迟 ms</th><th>速度 MB/s</th><th>地区</th><th>采样时间</th></tr></thead><tbody id="candidates"></tbody></table></div>
   </section>
 
   <section class="card"><div class="section-head"><h2>日志</h2></div><pre id="logs"></pre></section>
@@ -81,13 +88,17 @@ function render(){
   $('runState').className='metric '+(state.running?'status-good':'');
   $('candidateCount').textContent=(state.candidates||[]).length;
   $('mappingCount').textContent=Object.keys(state.mappings||{}).length;
-  $('lastSuccess').textContent=state.lastSuccess||'-';
+  $('lastRefresh').textContent=state.lastRefresh||'-';
+  $('nextRefresh').textContent=state.nextRefresh?('下次最早：'+state.nextRefresh):'';
   $('lastError').textContent=state.lastError||'';
   $('maxDelay').value=config.cfst.maxDelayMs;$('minSpeed').value=config.cfst.minSpeedMB;$('maxLoss').value=config.cfst.maxLossRate;
   $('downloadCount').value=config.cfst.downloadCount;$('threads').value=config.cfst.threads;$('pingTimes').value=config.cfst.pingTimes;
   $('downloadSeconds').value=config.cfst.downloadSeconds;$('verifyTimeout').value=config.verifyTimeoutSeconds;$('downloadUrl').value=config.cfst.downloadUrl;
-  $('repairInterval').value=config.repairIntervalMinutes;$('hostsPath').value=config.hostsPath;$('autoRepair').checked=config.autoRepair;
-  $('autoApply').checked=config.autoApply;$('ipv6').checked=config.cfst.ipv6;
+  $('repairInterval').value=config.repairIntervalMinutes;$('candidateTTL').value=config.repair.candidateTTLMinutes;
+  $('failureThreshold').value=config.repair.failureThreshold;$('refreshCooldown').value=config.repair.refreshCooldownMinutes;
+  $('refreshMaxBackoff').value=config.repair.refreshMaxBackoffMinutes;$('hostsPath').value=config.hostsPath;
+  $('trackerSamples').value=config.tracker.samplesPath;$('trackerRetries').value=config.tracker.retries;$('realAnnounce').checked=config.tracker.realAnnounce;
+  $('autoRepair').checked=config.autoRepair;$('autoApply').checked=config.autoApply;$('ipv6').checked=config.cfst.ipv6;
   renderDomains();renderMappings();renderCandidates();$('logs').textContent=(state.logs||[]).join('\n');
 }
 function renderDomains(){
@@ -100,12 +111,12 @@ function renderDomains(){
     <td><button class="danger" onclick="removeDomain(${i})">删除</button></td></tr>`).join('');
 }
 function renderMappings(){
-  const m=state.mappings||{},s=state.domainStatus||{};
+  const m=state.mappings||{},s=state.domainStatus||{},h=state.domainHealth||{};
   const hosts=[...new Set([...(config.domains||[]).map(x=>x.host),...Object.keys(m)])];
-  $('mappings').innerHTML=hosts.map(h=>`<tr><td>${esc(h)}</td><td><span class="pill">${esc(m[h]||'-')}</span></td><td class="tiny">${esc(s[h]||'-')}</td></tr>`).join('');
+  $('mappings').innerHTML=hosts.map(host=>`<tr><td>${esc(host)}</td><td><span class="pill">${esc(m[host]||'-')}</span></td><td>${h[host]?.failureStreak||0}</td><td class="tiny">${esc(s[host]||'-')}</td></tr>`).join('');
 }
 function renderCandidates(){
-  $('candidates').innerHTML=(state.candidates||[]).slice(0,30).map(c=>`<tr><td>${esc(c.ip)}</td><td>${c.lossRate}</td><td>${c.delayMs}</td><td>${c.speedMB}</td><td>${esc(c.colo)}</td></tr>`).join('');
+  $('candidates').innerHTML=(state.candidates||[]).slice(0,30).map(c=>`<tr><td>${esc(c.ip)}</td><td>${c.lossRate}</td><td>${c.delayMs}</td><td>${c.speedMB}</td><td>${esc(c.colo)}</td><td class="tiny">${esc(c.observedAt||'-')}</td></tr>`).join('');
 }
 function syncDomainInputs(){
   document.querySelectorAll('#domains [data-i]').forEach(el=>{
@@ -121,8 +132,11 @@ async function saveConfig(){
     config.cfst.maxDelayMs=Number($('maxDelay').value);config.cfst.minSpeedMB=Number($('minSpeed').value);config.cfst.maxLossRate=Number($('maxLoss').value);
     config.cfst.downloadCount=Number($('downloadCount').value);config.cfst.threads=Number($('threads').value);config.cfst.pingTimes=Number($('pingTimes').value);
     config.cfst.downloadSeconds=Number($('downloadSeconds').value);config.verifyTimeoutSeconds=Number($('verifyTimeout').value);config.cfst.downloadUrl=$('downloadUrl').value;
-    config.repairIntervalMinutes=Number($('repairInterval').value);config.hostsPath=$('hostsPath').value;config.autoRepair=$('autoRepair').checked;
-    config.autoApply=$('autoApply').checked;config.cfst.ipv6=$('ipv6').checked;
+    config.repairIntervalMinutes=Number($('repairInterval').value);config.repair.candidateTTLMinutes=Number($('candidateTTL').value);
+    config.repair.failureThreshold=Number($('failureThreshold').value);config.repair.refreshCooldownMinutes=Number($('refreshCooldown').value);
+    config.repair.refreshMaxBackoffMinutes=Number($('refreshMaxBackoff').value);config.hostsPath=$('hostsPath').value;
+    config.tracker.samplesPath=$('trackerSamples').value;config.tracker.retries=Number($('trackerRetries').value);config.tracker.realAnnounce=$('realAnnounce').checked;
+    config.autoRepair=$('autoRepair').checked;config.autoApply=$('autoApply').checked;config.cfst.ipv6=$('ipv6').checked;
     config=await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)});
     await refresh();
   }catch(e){alert(e.message)}

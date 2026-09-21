@@ -18,16 +18,25 @@ type App struct {
 	cfstBin string
 }
 
+type DomainHealth struct {
+	FailureStreak int    `json:"failureStreak"`
+	LastSuccess   string `json:"lastSuccess"`
+	LastFailure   string `json:"lastFailure"`
+}
+
 type RuntimeState struct {
-	Running      bool              `json:"running"`
-	CurrentJob   string            `json:"currentJob"`
-	LastRun      string            `json:"lastRun"`
-	LastSuccess  string            `json:"lastSuccess"`
-	LastError    string            `json:"lastError"`
-	Candidates   []Candidate       `json:"candidates"`
-	Mappings     map[string]string `json:"mappings"`
-	DomainStatus map[string]string `json:"domainStatus"`
-	Logs         []string          `json:"logs"`
+	Running       bool                    `json:"running"`
+	CurrentJob    string                  `json:"currentJob"`
+	LastRun       string                  `json:"lastRun"`
+	LastSuccess   string                  `json:"lastSuccess"`
+	LastError     string                  `json:"lastError"`
+	LastRefresh   string                  `json:"lastRefresh"`
+	NextRefresh   string                  `json:"nextRefresh"`
+	Candidates    []Candidate             `json:"candidates"`
+	Mappings      map[string]string       `json:"mappings"`
+	DomainStatus  map[string]string       `json:"domainStatus"`
+	DomainHealth  map[string]DomainHealth `json:"domainHealth"`
+	Logs          []string                `json:"logs"`
 }
 
 func main() {
@@ -46,6 +55,7 @@ func main() {
 		state: RuntimeState{
 			Mappings:     map[string]string{},
 			DomainStatus: map[string]string{},
+			DomainHealth: map[string]DomainHealth{},
 		},
 	}
 	app.loadState()
@@ -90,6 +100,9 @@ func (a *App) loadState() {
 	}
 	if s.DomainStatus == nil {
 		s.DomainStatus = map[string]string{}
+	}
+	if s.DomainHealth == nil {
+		s.DomainHealth = map[string]DomainHealth{}
 	}
 	a.state = s
 }

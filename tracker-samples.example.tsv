@@ -1,0 +1,7 @@
+# CFHost Tracker real-announce samples
+# format:
+# domain<TAB>announce_path<TAB>40-char info_hash hex<TAB>full https announce URL
+#
+# Copy this file to data/tracker-samples.tsv and replace placeholders with
+# samples from your own active torrents. Keep one sample per managed Tracker.
+tracker.example.com	/announce	0123456789abcdef0123456789abcdef01234567	https://tracker.example.com/announce?passkey=REPLACE_ME
