@@ -45,6 +45,7 @@
       <div class="field"><label>每域名最多候选</label><input id="candidateLimit" type="number"></div>
       <div class="field"><label>HTTP 200 最小正文 bytes</label><input id="minBodyBytes" type="number"></div>
       <div class="field"><label>最大跳转次数</label><input id="maxRedirects" type="number"></div>
+      <div class="field wide"><label>挑战页 / 占位页匹配规则</label><input id="blockPatterns"></div>
       <div class="field wide"><label>下载测速 URL</label><input id="downloadUrl"></div>
       <div class="field"><label>Repair 间隔（分钟）</label><input id="repairInterval" type="number"></div>
       <div class="field"><label>候选缓存 TTL（分钟）</label><input id="candidateTTL" type="number"></div>
@@ -125,7 +126,7 @@ function render(){
   $('maxDelay').value=config.cfst.maxDelayMs;$('minSpeed').value=config.cfst.minSpeedMB;$('maxLoss').value=config.cfst.maxLossRate;
   $('downloadCount').value=config.cfst.downloadCount;$('threads').value=config.cfst.threads;$('pingTimes').value=config.cfst.pingTimes;
   $('downloadSeconds').value=config.cfst.downloadSeconds;$('verifyTimeout').value=config.verifyTimeoutSeconds;$('downloadUrl').value=config.cfst.downloadUrl;
-  $('httpRetries').value=config.verify.httpRetries;$('candidateLimit').value=config.verify.candidateLimit;$('minBodyBytes').value=config.verify.minBodyBytes;$('maxRedirects').value=config.verify.maxRedirects;$('strictHttp').checked=config.verify.strictHttp;
+  $('httpRetries').value=config.verify.httpRetries;$('candidateLimit').value=config.verify.candidateLimit;$('minBodyBytes').value=config.verify.minBodyBytes;$('maxRedirects').value=config.verify.maxRedirects;$('blockPatterns').value=config.verify.blockPatterns;$('strictHttp').checked=config.verify.strictHttp;
   $('repairInterval').value=config.repairIntervalMinutes;$('candidateTTL').value=config.repair.candidateTTLMinutes;
   $('failureThreshold').value=config.repair.failureThreshold;$('refreshCooldown').value=config.repair.refreshCooldownMinutes;
   $('refreshMaxBackoff').value=config.repair.refreshMaxBackoffMinutes;$('hostsPath').value=config.hostsPath;
@@ -169,7 +170,7 @@ async function saveConfig(){
     config.cfst.maxDelayMs=Number($('maxDelay').value);config.cfst.minSpeedMB=Number($('minSpeed').value);config.cfst.maxLossRate=Number($('maxLoss').value);
     config.cfst.downloadCount=Number($('downloadCount').value);config.cfst.threads=Number($('threads').value);config.cfst.pingTimes=Number($('pingTimes').value);
     config.cfst.downloadSeconds=Number($('downloadSeconds').value);config.verifyTimeoutSeconds=Number($('verifyTimeout').value);config.cfst.downloadUrl=$('downloadUrl').value;
-    config.verify.httpRetries=Number($('httpRetries').value);config.verify.candidateLimit=Number($('candidateLimit').value);config.verify.minBodyBytes=Number($('minBodyBytes').value);config.verify.maxRedirects=Number($('maxRedirects').value);config.verify.strictHttp=$('strictHttp').checked;
+    config.verify.httpRetries=Number($('httpRetries').value);config.verify.candidateLimit=Number($('candidateLimit').value);config.verify.minBodyBytes=Number($('minBodyBytes').value);config.verify.maxRedirects=Number($('maxRedirects').value);config.verify.blockPatterns=$('blockPatterns').value;config.verify.strictHttp=$('strictHttp').checked;
     config.repairIntervalMinutes=Number($('repairInterval').value);config.repair.candidateTTLMinutes=Number($('candidateTTL').value);
     config.repair.failureThreshold=Number($('failureThreshold').value);config.repair.refreshCooldownMinutes=Number($('refreshCooldown').value);
     config.repair.refreshMaxBackoffMinutes=Number($('refreshMaxBackoff').value);config.hostsPath=$('hostsPath').value;
