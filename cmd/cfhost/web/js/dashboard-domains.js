@@ -1,3 +1,32 @@
+function unresolvedDomainsNow() {
+  const domains = (store.config?.domains || []).filter(domain => domain.enabled)
+  const mappings = store.state?.mappings || {}
+  const statuses = store.state?.domainStatus || {}
+  return domains
+    .filter(domain => !mappings[domain.host])
+    .map(domain => ({ host: domain.host, detail: statuses[domain.host] || '等待验证' }))
+}
+
+// A run can report success while individual domains stay unresolved, and each
+// run record now carries that. Surface it on the dashboard instead of leaving it
+// only in the domain table, because an unresolved domain silently misses its
+// Hosts mapping.
+function unresolvedNotice() {
+  const pending = unresolvedDomainsNow()
+  if (!pending.length) return ''
+  const shown = pending.slice(0, 4)
+  return `
+    <div class="alert warning">
+      ${icon('warning')}
+      <div>
+        <strong>${pending.length} 个已启用域名当前没有映射</strong>
+        ${shown.map(item => `<span class="alert-line"><code>${esc(item.host)}</code> · ${esc(item.detail)}</span>`).join('')}
+        ${pending.length > shown.length ? `<span class="alert-line">另有 ${pending.length - shown.length} 个，详见域名页</span>` : ''}
+      </div>
+    </div>
+  `
+}
+
 function renderDashboard() {
   const counts = statusCounts()
   const candidate = candidateStats()
@@ -13,6 +42,7 @@ function renderDashboard() {
     ${store.state.lastError ? `
       <div class="alert">${icon('warning')}<div><strong>最近任务失败</strong><span>${esc(store.state.lastError)}</span></div></div>
     ` : ''}
+    ${unresolvedNotice()}
     <div class="grid cols-4">
       ${statCard('运行状态', store.state.running ? jobLabel(store.state.currentJob) : '空闲', store.state.running ? '任务执行中' : '等待下一次计划任务', 'activity', store.state.running ? '' : 'success', false)}
       ${statCard('受管域名', counts.total, `${counts.ok} 正常 · ${counts.failed} 待处理`, 'globe', 'info', true)}
@@ -113,10 +143,19 @@ function syncSummary() {
 
 function historyTimelineItem(item) {
   const success = !!item.success
+  const unresolved = Number(item.unresolvedCount) || 0
+  const names = item.unresolvedDomains || []
+  const variant = !success ? 'danger' : unresolved ? 'warning' : 'success'
+  const summary = success
+    ? `${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
+    : esc(item.error || '执行失败')
+  const leftover = success && unresolved
+    ? `<small class="timeline-warning">${unresolved} 个域名未解析${names.length ? ` · ${esc(names.join('、'))}` : ''}</small>`
+    : ''
   return `
     <div class="timeline-item">
-      <span class="timeline-mark ${success ? 'success' : 'danger'}">${icon(success ? 'check' : 'warning')}</span>
-      <div class="timeline-copy"><strong>${esc(jobLabel(item.kind))}</strong><small>${success ? `${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选` : esc(item.error || '执行失败')}</small></div>
+      <span class="timeline-mark ${variant}">${icon(success && !unresolved ? 'check' : 'warning')}</span>
+      <div class="timeline-copy"><strong>${esc(jobLabel(item.kind))}</strong><small>${summary}</small>${leftover}</div>
       <span class="timeline-time">${fmtTime(item.startedAt, true)}</span>
     </div>
   `

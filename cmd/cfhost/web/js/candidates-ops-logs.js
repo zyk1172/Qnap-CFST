@@ -103,18 +103,33 @@ function renderOperations() {
       <div class="card-head"><div><h2 class="card-title">运行历史</h2><div class="card-subtitle">最多保留 200 次记录</div></div><span class="chip info">${history.length} 条</span></div>
       <div class="card-body">
         <div class="table-wrap">
-          <table class="data-table"><thead><tr><th>任务</th><th>开始</th><th>耗时</th><th>结果</th><th>完整 CFST</th><th>映射变化</th><th>候选</th><th>错误</th></tr></thead>
-          <tbody>${history.length ? history.map(item => `
-            <tr><td><strong>${esc(jobLabel(item.kind))}</strong></td><td>${fmtTime(item.startedAt)}</td><td>${fmtDuration(item.durationMs)}</td><td><span class="chip ${item.success ? 'success' : 'danger'}"><span class="dot"></span>${item.success ? '成功' : '失败'}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
-          `).join('') : '<tr><td colspan="8" class="table-empty">暂无运行记录</td></tr>'}</tbody></table>
+          <table class="data-table"><thead><tr><th>任务</th><th>开始</th><th>耗时</th><th>结果</th><th>完整 CFST</th><th>映射变化</th><th>候选</th><th>未解析</th><th>错误</th></tr></thead>
+          <tbody>${history.length ? history.map(historyRow).join('') : '<tr><td colspan="9" class="table-empty">暂无运行记录</td></tr>'}</tbody></table>
         </div>
       </div>
     </section>
   `
 }
 
-function operationCard(action, title, description, iconName) {
+// A run can succeed while individual domains stay unresolved, so the result
+// column must not read as a clean success in that case.
+function historyRow(item) {
+  const unresolved = Number(item.unresolvedCount) || 0
+  const names = item.unresolvedDomains || []
+  const verdict = !item.success
+    ? { cls: 'danger', label: '失败' }
+    : unresolved
+      ? { cls: 'warning', label: '部分完成' }
+      : { cls: 'success', label: '成功' }
+  const unresolvedCell = unresolved
+    ? `<span class="chip warning" title="${esc(names.join('、'))}">${unresolved}</span>`
+    : '—'
   return `
+    <tr><td><strong>${esc(jobLabel(item.kind))}</strong></td><td>${fmtTime(item.startedAt)}</td><td>${fmtDuration(item.durationMs)}</td><td><span class="chip ${verdict.cls}"><span class="dot"></span>${verdict.label}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${unresolvedCell}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
+  `
+}
+
+function operationCard(action, title, description, iconName) {  return `
     <button class="card stat-card hoverable operation-card" data-op="${action}">
       <div class="stat-head"><span class="stat-icon">${icon(iconName)}</span><span class="chip">${action === 'apply' ? 'Hosts' : action === 'sync' ? 'GitHub' : 'Task'}</span></div>
       <div class="operation-title">${esc(title)}</div>

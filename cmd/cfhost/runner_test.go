@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -338,5 +339,35 @@ func TestTrackerDiscoverySkipsNormalDomains(t *testing.T) {
 	}
 	if !targets["tracker.verified.example"] {
 		t.Fatal("verified tracker should remain a discovery target")
+	}
+}
+
+func TestUnresolvedDomainsListsEnabledDomainsWithoutMappings(t *testing.T) {
+	cfg := Config{Domains: []Domain{
+		{Host: "b.example", Enabled: true},
+		{Host: "a.example", Enabled: true},
+		{Host: "c.example", Enabled: false},
+	}}
+	names, total := unresolvedDomains(cfg, map[string]string{"a.example": "1.1.1.1"})
+	if total != 1 || len(names) != 1 || names[0] != "b.example" {
+		t.Fatalf("got names=%v total=%d", names, total)
+	}
+	names, total = unresolvedDomains(cfg, nil)
+	if total != 2 || len(names) != 2 || names[0] != "a.example" || names[1] != "b.example" {
+		t.Fatalf("disabled domains must be excluded and names sorted: %v total=%d", names, total)
+	}
+}
+
+func TestUnresolvedDomainsCapsReportedNames(t *testing.T) {
+	cfg := Config{}
+	for i := 0; i < 30; i++ {
+		cfg.Domains = append(cfg.Domains, Domain{Host: fmt.Sprintf("d%02d.example", i), Enabled: true})
+	}
+	names, total := unresolvedDomains(cfg, nil)
+	if total != 30 {
+		t.Fatalf("total=%d, want 30", total)
+	}
+	if len(names) != 20 {
+		t.Fatalf("reported names=%d, want 20", len(names))
 	}
 }

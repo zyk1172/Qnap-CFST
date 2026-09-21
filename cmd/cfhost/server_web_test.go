@@ -224,3 +224,32 @@ func TestSearchInputsPatchResultsInsteadOfRerendering(t *testing.T) {
 		}
 	}
 }
+
+// A run can report success while individual domains stay unresolved, so both
+// the dashboard and the history table must surface that instead of showing a
+// clean success the operator would never look into.
+func TestUnresolvedDomainsAreSurfacedInUI(t *testing.T) {
+	for file, needles := range map[string][]string{
+		"web/js/dashboard-domains.js": {
+			"function unresolvedDomainsNow(",
+			"function unresolvedNotice(",
+			"item.unresolvedCount",
+			"item.unresolvedDomains",
+		},
+		"web/js/candidates-ops-logs.js": {
+			"function historyRow(",
+			"item.unresolvedCount",
+			"部分完成",
+		},
+	} {
+		content, err := webAssets.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range needles {
+			if !strings.Contains(string(content), needle) {
+				t.Fatalf("%s missing %q", file, needle)
+			}
+		}
+	}
+}
