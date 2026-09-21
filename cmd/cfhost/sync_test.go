@@ -78,3 +78,33 @@ func TestGitHubAtomicPublishUsesOneRefUpdate(t *testing.T) {
 		t.Fatalf("atomic publish mismatch: sha=%s commits=%d refUpdates=%d", sha, commits, refUpdates)
 	}
 }
+
+
+func TestSyncPayloadPreservesNormalStrategy(t *testing.T) {
+	a:=&App{
+		config:defaultConfig(),
+		state:RuntimeState{
+			Mappings:map[string]string{"plain.example.com":"104.16.0.9"},
+			DomainStatus:map[string]string{"plain.example.com":"normal · lowest latency · 104.16.0.9 · 11.00 ms · verification skipped"},
+			DomainHealth:map[string]DomainHealth{"plain.example.com":{LastSuccess:"2026-09-22T01:00:00+08:00"}},
+			Candidates:[]Candidate{{IP:"104.16.0.9",LossRate:0.1,DelayMS:11,SpeedMB:6,Colo:"HKG"}},
+		},
+	}
+	cfg:=defaultConfig()
+	cfg.Domains=[]Domain{{Host:"plain.example.com",Class:"normal",Mode:"tracker",Enabled:true}}
+	cfg.Sync.Repository="owner/repo"
+	cfg.Sync.Branch="main"
+	payload,err:=a.buildSyncPayload(cfg,time.Date(2026,9,22,1,1,0,0,time.FixedZone("UTC+8",8*3600)))
+	if err!=nil{t.Fatal(err)}
+	if !strings.Contains(payload.MapText,"plain.example.com\t104.16.0.9\tnormal\t11\t6\t0.1\tHKG\t") {
+		t.Fatalf("normal sync class missing: %s",payload.MapText)
+	}
+	if !strings.Contains(payload.MapText,"\t-\tSELECTED\n") {
+		t.Fatalf("normal record must be marked SELECTED without fake HTTP code: %s",payload.MapText)
+	}
+	var status map[string]any
+	if err:=json.Unmarshal([]byte(payload.StatusText),&status);err!=nil{t.Fatal(err)}
+	if int(status["schema"].(float64))!=3 || int(status["normal_count"].(float64))!=1 {
+		t.Fatalf("unexpected schema-3 normal status: %#v",status)
+	}
+}
