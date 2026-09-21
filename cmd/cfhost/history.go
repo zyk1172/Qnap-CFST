@@ -2,10 +2,15 @@ package main
 
 import "sort"
 
-// unresolvedDomains names the enabled domains that ended a run without a
-// mapping. A run can report success while individual domains stay unresolved,
-// so the run record carries this explicitly instead of hiding it behind a job
-// level success flag.
+// resolutionJob reports whether a job is responsible for producing domain
+// mappings. A plain CFST "run" only refreshes the candidate pool and must not be
+// labelled partial merely because some domains were already unresolved.
+func resolutionJob(kind string) bool {
+	return kind == "repair" || kind == "optimize"
+}
+
+// unresolvedDomains names enabled domains that ended a resolution job without
+// a mapping.
 func unresolvedDomains(cfg Config, mappings map[string]string) ([]string, int) {
 	unresolved := make([]string, 0, len(cfg.Domains))
 	for _, d := range cfg.Domains {
