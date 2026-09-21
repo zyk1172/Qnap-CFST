@@ -31,7 +31,7 @@ document.addEventListener('click', async event => {
   else if (action === 'refresh') {
     try {
       await loadAll()
-      renderPage(false)
+      renderPage(false, false)
       updateShellStatus()
       toast('已刷新', '配置和运行状态已重新读取。', 'success')
     } catch (error) {
@@ -54,7 +54,7 @@ document.addEventListener('click', async event => {
   } else if (action === 'toggle-log-pause') {
     if (!store.logPaused) store.frozenLogs = [...(store.state.logs || [])]
     store.logPaused = !store.logPaused
-    renderPage(false)
+    renderPage(false, false)
   }
 
   const theme = event.target.closest('[data-theme-choice]')
@@ -116,7 +116,7 @@ document.addEventListener('click', async event => {
 document.addEventListener('input', event => {
   if (event.target.id === 'domain-search') {
     store.domainQuery = event.target.value
-    renderPage(false)
+    renderPage(false, false)
     requestAnimationFrame(() => {
       const input = $('#domain-search')
       input?.focus()
@@ -127,7 +127,7 @@ document.addEventListener('input', event => {
 
   if (event.target.id === 'log-search') {
     store.logQuery = event.target.value
-    renderPage(false)
+    renderPage(false, false)
     requestAnimationFrame(() => {
       const input = $('#log-search')
       input?.focus()
@@ -240,7 +240,7 @@ async function boot() {
     await loadAll()
     store.page = currentPageFromHash()
     updateNavigation()
-    renderPage(false)
+    renderPage(false, true)
     updateShellStatus()
     $('#app').setAttribute('aria-hidden', 'false')
     setTimeout(() => $('#boot-screen').classList.add('is-hidden'), 100)
