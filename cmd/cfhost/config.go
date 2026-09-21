@@ -21,6 +21,22 @@ type CFSTConfig struct {
 	RunTimeoutMinutes int     `json:"runTimeoutMinutes"`
 }
 
+type RepairConfig struct {
+	CandidateTTLMinutes        int `json:"candidateTTLMinutes"`
+	FailureThreshold           int `json:"failureThreshold"`
+	RefreshCooldownMinutes     int `json:"refreshCooldownMinutes"`
+	RefreshMaxBackoffMinutes   int `json:"refreshMaxBackoffMinutes"`
+}
+
+type TrackerConfig struct {
+	RealAnnounce  bool   `json:"realAnnounce"`
+	SamplesPath   string `json:"samplesPath"`
+	Retries       int    `json:"retries"`
+	UserAgent     string `json:"userAgent"`
+	PeerIDPrefix  string `json:"peerIdPrefix"`
+	AnnouncePort  int    `json:"announcePort"`
+}
+
 type Domain struct {
 	Host     string `json:"host"`
 	Group    string `json:"group"`
@@ -30,14 +46,16 @@ type Domain struct {
 }
 
 type Config struct {
-	Listen                string     `json:"listen"`
-	AutoRepair            bool       `json:"autoRepair"`
-	RepairIntervalMinutes int        `json:"repairIntervalMinutes"`
-	AutoApply             bool       `json:"autoApply"`
-	HostsPath             string     `json:"hostsPath"`
-	VerifyTimeoutSeconds  int        `json:"verifyTimeoutSeconds"`
-	CFST                  CFSTConfig `json:"cfst"`
-	Domains               []Domain   `json:"domains"`
+	Listen                string        `json:"listen"`
+	AutoRepair            bool          `json:"autoRepair"`
+	RepairIntervalMinutes int           `json:"repairIntervalMinutes"`
+	AutoApply             bool          `json:"autoApply"`
+	HostsPath             string        `json:"hostsPath"`
+	VerifyTimeoutSeconds  int           `json:"verifyTimeoutSeconds"`
+	CFST                  CFSTConfig    `json:"cfst"`
+	Repair                RepairConfig  `json:"repair"`
+	Tracker               TrackerConfig `json:"tracker"`
+	Domains               []Domain      `json:"domains"`
 }
 
 func defaultConfig() Config {
@@ -59,6 +77,20 @@ func defaultConfig() Config {
 			MinSpeedMB:        0.1,
 			DownloadURL:       "https://cf.xiu2.xyz/url",
 			RunTimeoutMinutes: 30,
+		},
+		Repair: RepairConfig{
+			CandidateTTLMinutes:      1440,
+			FailureThreshold:         2,
+			RefreshCooldownMinutes:   60,
+			RefreshMaxBackoffMinutes: 720,
+		},
+		Tracker: TrackerConfig{
+			RealAnnounce: true,
+			SamplesPath:  "/data/tracker-samples.tsv",
+			Retries:      2,
+			UserAgent:    "Transmission/4.1.3",
+			PeerIDPrefix: "-TR4130-",
+			AnnouncePort: 51413,
 		},
 		Domains: []Domain{
 			{Host: "tracker.m-team.cc", Group: "mteam", Mode: "tracker", Endpoint: "/announce", Enabled: true},
@@ -115,6 +147,44 @@ func normalizeConfig(c *Config) error {
 	if c.CFST.RunTimeoutMinutes < 1 {
 		c.CFST.RunTimeoutMinutes = 30
 	}
+
+	if c.Repair.CandidateTTLMinutes < 1 {
+		c.Repair.CandidateTTLMinutes = 1440
+	}
+	if c.Repair.FailureThreshold < 1 {
+		c.Repair.FailureThreshold = 2
+	}
+	if c.Repair.RefreshCooldownMinutes < 1 {
+		c.Repair.RefreshCooldownMinutes = 60
+	}
+	if c.Repair.RefreshMaxBackoffMinutes < c.Repair.RefreshCooldownMinutes {
+		c.Repair.RefreshMaxBackoffMinutes = 720
+	}
+
+	trackerUnset := c.Tracker.SamplesPath == "" && c.Tracker.Retries == 0 &&
+		c.Tracker.UserAgent == "" && c.Tracker.PeerIDPrefix == "" && c.Tracker.AnnouncePort == 0
+	if trackerUnset {
+		c.Tracker.RealAnnounce = true
+	}
+	if c.Tracker.SamplesPath == "" {
+		c.Tracker.SamplesPath = "/data/tracker-samples.tsv"
+	}
+	if c.Tracker.Retries < 1 {
+		c.Tracker.Retries = 2
+	}
+	if c.Tracker.UserAgent == "" {
+		c.Tracker.UserAgent = "Transmission/4.1.3"
+	}
+	if c.Tracker.PeerIDPrefix == "" {
+		c.Tracker.PeerIDPrefix = "-TR4130-"
+	}
+	if len(c.Tracker.PeerIDPrefix) >= 20 {
+		return errors.New("tracker peerIdPrefix must be shorter than 20 bytes")
+	}
+	if c.Tracker.AnnouncePort < 1 || c.Tracker.AnnouncePort > 65535 {
+		c.Tracker.AnnouncePort = 51413
+	}
+
 	seen := make(map[string]bool)
 	clean := make([]Domain, 0, len(c.Domains))
 	for _, d := range c.Domains {

@@ -25,36 +25,12 @@ const (
 )
 
 type Candidate struct {
-	IP        string  `json:"ip"`
-	LossRate  float64 `json:"lossRate"`
-	DelayMS   float64 `json:"delayMs"`
-	SpeedMB   float64 `json:"speedMB"`
-	Colo      string  `json:"colo"`
-}
-
-func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
-	candidates, err := a.runCFST(ctx, cfg)
-	if err != nil {
-		return err
-	}
-
-	a.mu.Lock()
-	a.state.Candidates = candidates
-	a.mu.Unlock()
-
-	if kind == "run" {
-		return nil
-	}
-	mappings, statuses := a.resolveDomains(ctx, cfg, candidates)
-	a.mu.Lock()
-	a.state.Mappings = mappings
-	a.state.DomainStatus = statuses
-	a.mu.Unlock()
-
-	if cfg.AutoApply {
-		return a.applyMappings(cfg.HostsPath, mappings)
-	}
-	return nil
+	IP         string  `json:"ip"`
+	LossRate   float64 `json:"lossRate"`
+	DelayMS    float64 `json:"delayMs"`
+	SpeedMB    float64 `json:"speedMB"`
+	Colo       string  `json:"colo"`
+	ObservedAt string  `json:"observedAt"`
 }
 
 func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
@@ -103,6 +79,11 @@ func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
 	if len(candidates) == 0 {
 		return nil, errors.New("CFST returned no candidates")
 	}
+	observed := time.Now().Format(time.RFC3339)
+	for i := range candidates {
+		candidates[i].ObservedAt = observed
+	}
+	candidates = rankCandidates(candidates)
 	a.appendLog("CFST returned %d candidates", len(candidates))
 	return candidates, nil
 }
@@ -142,58 +123,56 @@ func parseCandidates(path string) ([]Candidate, error) {
 	return out, nil
 }
 
-func (a *App) resolveDomains(ctx context.Context, cfg Config, candidates []Candidate) (map[string]string, map[string]string) {
-	mappings := make(map[string]string)
-	statuses := make(map[string]string)
-	groupIP := make(map[string]string)
+func rankCandidates(in []Candidate) []Candidate {
+	out := append([]Candidate(nil), in...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].LossRate != out[j].LossRate {
+			return out[i].LossRate < out[j].LossRate
+		}
+		if out[i].DelayMS != out[j].DelayMS {
+			return out[i].DelayMS < out[j].DelayMS
+		}
+		if out[i].SpeedMB != out[j].SpeedMB {
+			return out[i].SpeedMB > out[j].SpeedMB
+		}
+		return out[i].IP < out[j].IP
+	})
+	return out
+}
 
-	for _, d := range cfg.Domains {
-		if !d.Enabled {
-			statuses[d.Host] = "disabled"
+func freshCandidates(in []Candidate, ttl time.Duration, now time.Time) []Candidate {
+	out := make([]Candidate, 0, len(in))
+	for _, c := range in {
+		observed, err := time.Parse(time.RFC3339, c.ObservedAt)
+		if err != nil || now.Before(observed) || now.Sub(observed) > ttl {
 			continue
 		}
+		out = append(out, c)
+	}
+	return rankCandidates(out)
+}
 
-		order := candidateOrder(candidates, groupIP[d.Group])
-		for _, c := range order {
-			ok, detail := verifyDomain(ctx, d, c.IP, cfg.VerifyTimeoutSeconds)
-			if ok {
-				mappings[d.Host] = c.IP
-				statuses[d.Host] = "ok · " + c.IP + " · " + detail
-				if d.Group != "" && groupIP[d.Group] == "" {
-					groupIP[d.Group] = c.IP
-				}
-				a.appendLog("%s -> %s (%s)", d.Host, c.IP, detail)
+func orderedCandidates(all []Candidate, preferred, skipIP string) []Candidate {
+	ranked := rankCandidates(all)
+	out := make([]Candidate, 0, len(ranked))
+	if preferred != "" && preferred != skipIP {
+		for _, c := range ranked {
+			if c.IP == preferred {
+				out = append(out, c)
 				break
 			}
 		}
-		if _, ok := mappings[d.Host]; !ok {
-			statuses[d.Host] = "no verified candidate"
-			a.appendLog("%s: no verified candidate", d.Host)
-		}
 	}
-	return mappings, statuses
-}
-
-func candidateOrder(all []Candidate, preferred string) []Candidate {
-	if preferred == "" {
-		return all
-	}
-	out := make([]Candidate, 0, len(all))
-	for _, c := range all {
-		if c.IP == preferred {
-			out = append(out, c)
-			break
+	for _, c := range ranked {
+		if c.IP == skipIP || c.IP == preferred {
+			continue
 		}
-	}
-	for _, c := range all {
-		if c.IP != preferred {
-			out = append(out, c)
-		}
+		out = append(out, c)
 	}
 	return out
 }
 
-func verifyDomain(parent context.Context, d Domain, ip string, timeoutSeconds int) (bool, string) {
+func verifyHTTPDomain(parent context.Context, d Domain, ip string, timeoutSeconds int) (bool, string) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
@@ -222,7 +201,7 @@ func verifyDomain(parent context.Context, d Domain, ip string, timeoutSeconds in
 	if err != nil {
 		return false, "request error"
 	}
-	req.Header.Set("User-Agent", "CFHost/0.1")
+	req.Header.Set("User-Agent", "CFHost/0.2")
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, err.Error()
@@ -233,16 +212,10 @@ func verifyDomain(parent context.Context, d Domain, ip string, timeoutSeconds in
 	if resp.StatusCode < 100 || resp.StatusCode > 599 {
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
-	if d.Mode == "tracker" {
-		return true, fmt.Sprintf("tracker endpoint HTTP %d", resp.StatusCode)
-	}
 	return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
 }
 
 func (a *App) applyMappings(hostsPath string, mappings map[string]string) error {
-	if len(mappings) == 0 {
-		return errors.New("no mappings to apply")
-	}
 	current, err := os.ReadFile(hostsPath)
 	if err != nil {
 		return fmt.Errorf("read hosts: %w", err)
@@ -280,12 +253,15 @@ func renderHosts(existing string, mappings map[string]string) string {
 	lines := strings.Split(strings.ReplaceAll(existing, "\r\n", "\n"), "\n")
 	out := make([]string, 0, len(lines)+len(mappings)+3)
 	skipping := false
+	hadMarker := false
 	for _, line := range lines {
 		switch strings.TrimSpace(line) {
 		case hostsBegin:
+			hadMarker = true
 			skipping = true
 			continue
 		case hostsEnd:
+			hadMarker = true
 			skipping = false
 			continue
 		}
@@ -293,19 +269,25 @@ func renderHosts(existing string, mappings map[string]string) string {
 			out = append(out, line)
 		}
 	}
+	if len(mappings) == 0 && !hadMarker {
+		return existing
+	}
 	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 		out = out[:len(out)-1]
 	}
-	out = append(out, "", hostsBegin)
-	hosts := make([]string, 0, len(mappings))
-	for host := range mappings {
-		hosts = append(hosts, host)
+	if len(mappings) > 0 {
+		out = append(out, "", hostsBegin)
+		hosts := make([]string, 0, len(mappings))
+		for host := range mappings {
+			hosts = append(hosts, host)
+		}
+		sort.Strings(hosts)
+		for _, host := range hosts {
+			out = append(out, mappings[host]+" "+host)
+		}
+		out = append(out, hostsEnd)
 	}
-	sort.Strings(hosts)
-	for _, host := range hosts {
-		out = append(out, mappings[host]+" "+host)
-	}
-	out = append(out, hostsEnd, "")
+	out = append(out, "")
 	return strings.Join(out, "\n")
 }
 
