@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CFHost</title>
+<style>
+:root{color-scheme:light dark;--bg:#f4f6f8;--card:#fff;--text:#15181c;--muted:#667085;--line:#e4e7ec;--accent:#2563eb;--good:#15803d;--bad:#b42318}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a20;--text:#f5f7fa;--muted:#98a2b3;--line:#2b3038;--accent:#60a5fa;--good:#4ade80;--bad:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:1180px;margin:auto;padding:28px 18px 60px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}h1{font-size:28px;margin:0}.sub{color:var(--muted)}.actions{display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:9px;padding:9px 13px;cursor:pointer}button.primary{background:var(--accent);color:white;border-color:var(--accent)}button.danger{color:var(--bad)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px}.metric{font-size:24px;font-weight:650}.muted{color:var(--muted)}section{margin-top:16px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}h2{font-size:17px;margin:0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}th{font-size:12px;color:var(--muted);font-weight:600}input,select{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;padding:8px}.form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.wide{grid-column:span 2}.switch{display:flex;gap:8px;align-items:center}.switch input{width:auto}.status-good{color:var(--good)}.status-bad{color:var(--bad)}pre{white-space:pre-wrap;max-height:320px;overflow:auto;background:var(--bg);padding:12px;border-radius:9px;margin:0}.scroll{overflow:auto}.tiny{font-size:12px}.pill{display:inline-block;padding:2px 7px;border-radius:99px;background:var(--bg);border:1px solid var(--line)}@media(max-width:850px){.grid,.form-grid{grid-template-columns:1fr 1fr}.wide{grid-column:span 2}.top{align-items:flex-start;flex-direction:column}}@media(max-width:520px){.grid,.form-grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>CFHost</h1><div class="sub">Cloudflare 优选 · 域名验证 · Hosts 管理</div></div>
+    <div class="actions">
+      <button onclick="job('run')">仅测速</button>
+      <button class="primary" onclick="job('repair')">测速并解析</button>
+      <button onclick="applyHosts()">应用 Hosts</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="muted">运行状态</div><div id="runState" class="metric">-</div></div>
+    <div class="card"><div class="muted">候选 IP</div><div id="candidateCount" class="metric">0</div></div>
+    <div class="card"><div class="muted">已解析域名</div><div id="mappingCount" class="metric">0</div></div>
+    <div class="card"><div class="muted">最近成功</div><div id="lastSuccess" class="metric tiny">-</div></div>
+  </div>
+
+  <section class="card">
+    <div class="section-head"><h2>设置</h2><button class="primary" onclick="saveConfig()">保存设置</button></div>
+    <div class="form-grid">
+      <div class="field"><label>延迟上限 ms</label><input id="maxDelay" type="number"></div>
+      <div class="field"><label>最低下载速度 MB/s</label><input id="minSpeed" type="number" step="0.1"></div>
+      <div class="field"><label>最大丢包率 0~1</label><input id="maxLoss" type="number" step="0.01"></div>
+      <div class="field"><label>下载测速数量</label><input id="downloadCount" type="number"></div>
+      <div class="field"><label>测速线程</label><input id="threads" type="number"></div>
+      <div class="field"><label>Ping 次数</label><input id="pingTimes" type="number"></div>
+      <div class="field"><label>单 IP 下载秒数</label><input id="downloadSeconds" type="number"></div>
+      <div class="field"><label>验证超时秒数</label><input id="verifyTimeout" type="number"></div>
+      <div class="field wide"><label>下载测速 URL</label><input id="downloadUrl"></div>
+      <div class="field"><label>Repair 间隔（分钟）</label><input id="repairInterval" type="number"></div>
+      <div class="field"><label>Hosts 路径</label><input id="hostsPath"></div>
+      <div class="field switch"><input id="autoRepair" type="checkbox"><label for="autoRepair">自动 Repair</label></div>
+      <div class="field switch"><input id="autoApply" type="checkbox"><label for="autoApply">Repair 后自动写 Hosts</label></div>
+      <div class="field switch"><input id="ipv6" type="checkbox"><label for="ipv6">使用 IPv6 IP 池</label></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-head"><div><h2>域名</h2><div class="muted tiny">HTTP 与 Tracker 都会先对候选 IP 做 HTTPS 链路验证；真实 Tracker announce 将在后续版本迁入。</div></div><button onclick="addDomain()">添加</button></div>
+    <div class="scroll"><table><thead><tr><th>启用</th><th>域名</th><th>组</th><th>类型</th><th>路径</th><th></th></tr></thead><tbody id="domains"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head"><h2>当前映射</h2><span id="lastError" class="status-bad"></span></div>
+    <div class="scroll"><table><thead><tr><th>域名</th><th>IP</th><th>状态</th></tr></thead><tbody id="mappings"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head"><h2>CFST 候选结果</h2></div>
+    <div class="scroll"><table><thead><tr><th>IP</th><th>丢包率</th><th>延迟 ms</th><th>速度 MB/s</th><th>地区</th></tr></thead><tbody id="candidates"></tbody></table></div>
+  </section>
+
+  <section class="card"><div class="section-head"><h2>日志</h2></div><pre id="logs"></pre></section>
+</div>
+<script>
+let config=null,state=null;
+const $=id=>document.getElementById(id);
+async function api(path,opt){const r=await fetch(path,opt);if(!r.ok)throw new Error(await r.text());return r.headers.get('content-type')?.includes('json')?r.json():null}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+async function refresh(){
+  try{
+    [config,state]=await Promise.all([api('/api/config'),api('/api/status')]);
+    render();
+  }catch(e){$('lastError').textContent=e.message}
+}
+function render(){
+  $('runState').textContent=state.running?(state.currentJob||'运行中'):'空闲';
+  $('runState').className='metric '+(state.running?'status-good':'');
+  $('candidateCount').textContent=(state.candidates||[]).length;
+  $('mappingCount').textContent=Object.keys(state.mappings||{}).length;
+  $('lastSuccess').textContent=state.lastSuccess||'-';
+  $('lastError').textContent=state.lastError||'';
+  $('maxDelay').value=config.cfst.maxDelayMs;$('minSpeed').value=config.cfst.minSpeedMB;$('maxLoss').value=config.cfst.maxLossRate;
+  $('downloadCount').value=config.cfst.downloadCount;$('threads').value=config.cfst.threads;$('pingTimes').value=config.cfst.pingTimes;
+  $('downloadSeconds').value=config.cfst.downloadSeconds;$('verifyTimeout').value=config.verifyTimeoutSeconds;$('downloadUrl').value=config.cfst.downloadUrl;
+  $('repairInterval').value=config.repairIntervalMinutes;$('hostsPath').value=config.hostsPath;$('autoRepair').checked=config.autoRepair;
+  $('autoApply').checked=config.autoApply;$('ipv6').checked=config.cfst.ipv6;
+  renderDomains();renderMappings();renderCandidates();$('logs').textContent=(state.logs||[]).join('\n');
+}
+function renderDomains(){
+  $('domains').innerHTML=(config.domains||[]).map((d,i)=>`<tr>
+    <td><input style="width:auto" type="checkbox" data-k="enabled" data-i="${i}" ${d.enabled?'checked':''}></td>
+    <td><input data-k="host" data-i="${i}" value="${esc(d.host)}"></td>
+    <td><input data-k="group" data-i="${i}" value="${esc(d.group)}"></td>
+    <td><select data-k="mode" data-i="${i}"><option value="http" ${d.mode==='http'?'selected':''}>HTTP</option><option value="tracker" ${d.mode==='tracker'?'selected':''}>Tracker</option></select></td>
+    <td><input data-k="endpoint" data-i="${i}" value="${esc(d.endpoint)}"></td>
+    <td><button class="danger" onclick="removeDomain(${i})">删除</button></td></tr>`).join('');
+}
+function renderMappings(){
+  const m=state.mappings||{},s=state.domainStatus||{};
+  const hosts=[...new Set([...(config.domains||[]).map(x=>x.host),...Object.keys(m)])];
+  $('mappings').innerHTML=hosts.map(h=>`<tr><td>${esc(h)}</td><td><span class="pill">${esc(m[h]||'-')}</span></td><td class="tiny">${esc(s[h]||'-')}</td></tr>`).join('');
+}
+function renderCandidates(){
+  $('candidates').innerHTML=(state.candidates||[]).slice(0,30).map(c=>`<tr><td>${esc(c.ip)}</td><td>${c.lossRate}</td><td>${c.delayMs}</td><td>${c.speedMB}</td><td>${esc(c.colo)}</td></tr>`).join('');
+}
+function syncDomainInputs(){
+  document.querySelectorAll('#domains [data-i]').forEach(el=>{
+    const i=Number(el.dataset.i),k=el.dataset.k;
+    config.domains[i][k]=el.type==='checkbox'?el.checked:el.value;
+  });
+}
+function addDomain(){syncDomainInputs();config.domains.push({host:'',group:'',mode:'http',endpoint:'/',enabled:true});renderDomains()}
+function removeDomain(i){syncDomainInputs();config.domains.splice(i,1);renderDomains()}
+async function saveConfig(){
+  try{
+    syncDomainInputs();
+    config.cfst.maxDelayMs=Number($('maxDelay').value);config.cfst.minSpeedMB=Number($('minSpeed').value);config.cfst.maxLossRate=Number($('maxLoss').value);
+    config.cfst.downloadCount=Number($('downloadCount').value);config.cfst.threads=Number($('threads').value);config.cfst.pingTimes=Number($('pingTimes').value);
+    config.cfst.downloadSeconds=Number($('downloadSeconds').value);config.verifyTimeoutSeconds=Number($('verifyTimeout').value);config.cfst.downloadUrl=$('downloadUrl').value;
+    config.repairIntervalMinutes=Number($('repairInterval').value);config.hostsPath=$('hostsPath').value;config.autoRepair=$('autoRepair').checked;
+    config.autoApply=$('autoApply').checked;config.cfst.ipv6=$('ipv6').checked;
+    config=await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)});
+    await refresh();
+  }catch(e){alert(e.message)}
+}
+async function job(k){try{await api('/api/'+k,{method:'POST'});await refresh()}catch(e){alert(e.message)}}
+async function applyHosts(){try{await api('/api/apply',{method:'POST'});await refresh()}catch(e){alert(e.message)}}
+refresh();setInterval(async()=>{try{state=await api('/api/status');render()}catch{}},3000);
+</script>
+</body>
+</html>
