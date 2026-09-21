@@ -201,6 +201,7 @@ svg { display: block; }
 }
 .status-dot.is-ok { background: var(--success); }
 .status-dot.is-running { background: var(--primary); animation: status-pulse 1.6s ease-out infinite; }
+.status-dot.is-warning { background: var(--warning); }
 .status-dot.is-error { background: var(--danger); }
 @keyframes status-pulse {
   0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb), .38); }
