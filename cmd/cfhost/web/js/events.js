@@ -110,7 +110,9 @@ document.addEventListener('click', async event => {
   const command = event.target.closest('[data-command-index]')
   if (command) executeCommand(Number(command.dataset.commandIndex))
 
-  if (!event.target.closest('.popover-anchor')) closeAppearance()
+  // The appearance toggle buttons are not all inside .popover-anchor (the sidebar
+  // footer one is not), so an outside-click must not immediately undo an open.
+  if (action !== 'open-appearance' && !event.target.closest('.popover-anchor')) closeAppearance()
 })
 
 document.addEventListener('input', event => {
