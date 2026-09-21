@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -171,24 +172,190 @@ func trackerAnnounceAttempt(parent context.Context, d Domain, ip string, sample 
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Sprintf("tracker HTTP %d", resp.StatusCode)
 	}
-	if ok, reason := trackerResponseOK(body); !ok {
-		return false, reason
-	}
-	return true, "announce response"
+	verdict := evaluateTrackerResponse(body)
+	return verdict.Reachable, verdict.Detail
 }
 
-func trackerResponseOK(body []byte) (bool, string) {
+// trackerProbeVerdict deliberately separates candidate reachability from whether
+// the tracker accepted this particular announce. Once the request reached the
+// tracker through the candidate IP and the tracker returned a valid bencoded
+// dictionary, the Hosts mapping has proven its job even when the tracker sends
+// a business-level failure reason.
+type trackerProbeVerdict struct {
+	Reachable bool
+	Accepted  bool
+	Reason    string
+	Detail    string
+}
+
+func evaluateTrackerResponse(body []byte) trackerProbeVerdict {
 	trimmed := bytes.TrimSpace(body)
-	if bytes.Contains(trimmed, []byte("failure reason")) {
-		return false, "tracker failure reason"
+	keys, failureReason, ok := parseTrackerDictionary(trimmed)
+	if !ok {
+		return trackerProbeVerdict{Detail: "tracker invalid response"}
 	}
-	if len(trimmed) == 0 || trimmed[0] != 'd' {
-		return false, "tracker invalid response"
+	if failureReason != nil {
+		reason := sanitizeTrackerReason(failureReason)
+		if reason == "" {
+			reason = "tracker rejected announce"
+		}
+		return trackerProbeVerdict{
+			Reachable: true,
+			Reason:    reason,
+			Detail:    "announce rejected · candidate reachable · " + reason,
+		}
 	}
-	if !bytes.Contains(trimmed, []byte("8:interval")) && !bytes.Contains(trimmed, []byte("5:peers")) {
-		return false, "tracker invalid response"
+	if keys["interval"] || keys["peers"] || keys["peers6"] {
+		return trackerProbeVerdict{Reachable: true, Accepted: true, Detail: "announce accepted"}
 	}
-	return true, "announce response"
+	return trackerProbeVerdict{Reachable: true, Detail: "tracker replied · candidate reachable"}
+}
+
+// parseTrackerDictionary validates the complete top-level bencoded dictionary
+// instead of accepting any body that merely starts with 'd' and ends with 'e'.
+// It also extracts a string-valued "failure reason" when present.
+func parseTrackerDictionary(data []byte) (map[string]bool, []byte, bool) {
+	if len(data) < 2 || data[0] != 'd' {
+		return nil, nil, false
+	}
+	pos := 1
+	keys := make(map[string]bool)
+	var failureReason []byte
+	for {
+		if pos >= len(data) {
+			return nil, nil, false
+		}
+		if data[pos] == 'e' {
+			pos++
+			return keys, failureReason, pos == len(data)
+		}
+		keyBytes, ok := parseBencodeString(data, &pos)
+		if !ok {
+			return nil, nil, false
+		}
+		key := string(keyBytes)
+		keys[key] = true
+		if key == "failure reason" && pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
+			value, ok := parseBencodeString(data, &pos)
+			if !ok {
+				return nil, nil, false
+			}
+			failureReason = append([]byte(nil), value...)
+			continue
+		}
+		if !skipBencodeValue(data, &pos, 0) {
+			return nil, nil, false
+		}
+	}
+}
+
+func parseBencodeString(data []byte, pos *int) ([]byte, bool) {
+	if *pos >= len(data) || data[*pos] < '0' || data[*pos] > '9' {
+		return nil, false
+	}
+	start := *pos
+	for *pos < len(data) && data[*pos] >= '0' && data[*pos] <= '9' {
+		(*pos)++
+	}
+	if *pos >= len(data) || data[*pos] != ':' {
+		return nil, false
+	}
+	lengthText := string(data[start:*pos])
+	if len(lengthText) > 1 && lengthText[0] == '0' {
+		return nil, false
+	}
+	length, err := strconv.Atoi(lengthText)
+	if err != nil || length < 0 {
+		return nil, false
+	}
+	(*pos)++
+	if length > len(data)-*pos {
+		return nil, false
+	}
+	value := data[*pos : *pos+length]
+	*pos += length
+	return value, true
+}
+
+func skipBencodeValue(data []byte, pos *int, depth int) bool {
+	if depth > 64 || *pos >= len(data) {
+		return false
+	}
+	switch data[*pos] {
+	case 'i':
+		(*pos)++
+		start := *pos
+		for *pos < len(data) && data[*pos] != 'e' {
+			(*pos)++
+		}
+		if *pos >= len(data) || start == *pos {
+			return false
+		}
+		number := string(data[start:*pos])
+		if (len(number) > 1 && number[0] == '0') || number == "-0" {
+			return false
+		}
+		if _, err := strconv.ParseInt(number, 10, 64); err != nil {
+			return false
+		}
+		(*pos)++
+		return true
+	case 'l':
+		(*pos)++
+		for {
+			if *pos >= len(data) {
+				return false
+			}
+			if data[*pos] == 'e' {
+				(*pos)++
+				return true
+			}
+			if !skipBencodeValue(data, pos, depth+1) {
+				return false
+			}
+		}
+	case 'd':
+		(*pos)++
+		for {
+			if *pos >= len(data) {
+				return false
+			}
+			if data[*pos] == 'e' {
+				(*pos)++
+				return true
+			}
+			if _, ok := parseBencodeString(data, pos); !ok {
+				return false
+			}
+			if !skipBencodeValue(data, pos, depth+1) {
+				return false
+			}
+		}
+	default:
+		if data[*pos] >= '0' && data[*pos] <= '9' {
+			_, ok := parseBencodeString(data, pos)
+			return ok
+		}
+		return false
+	}
+}
+
+// Trackers sometimes echo request parameters back in the failure reason.
+var trackerReasonSecretPattern = regexp.MustCompile(`(?i)(passkey|credential|torrent_pass|authkey)=[^&\\s]*`)
+
+func sanitizeTrackerReason(raw []byte) string {
+	reason := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, string(raw))
+	reason = trackerReasonSecretPattern.ReplaceAllString(reason, "$1=***")
+	reason = strings.Join(strings.Fields(reason), " ")
+	if len(reason) > 160 {
+		reason = strings.ToValidUTF8(reason[:160], "") + "…"
+	}
+	return reason
 }
 
 func buildAnnounceURL(sample TrackerSample, peerPrefix string, port int) string {
