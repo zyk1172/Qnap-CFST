@@ -42,7 +42,9 @@ document.addEventListener('click', async event => {
   else if (action === 'add-domain') openDomainEditor()
   else if (action === 'save-settings') await saveSettings()
   else if (action === 'discard-settings') discardSettings()
-  else if (action === 'copy-logs') {
+  else if (action === 'discover-trackers') {
+    await discoverTrackerSamplesNow()
+  } else if (action === 'copy-logs') {
     try {
       await navigator.clipboard.writeText((store.state.logs || []).join('\n'))
       toast('日志已复制', `${(store.state.logs || []).length} 行`, 'success')
