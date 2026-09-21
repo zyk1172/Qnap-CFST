@@ -55,13 +55,26 @@ type HostsConfig struct {
 	LegacyStateMapPath string `json:"legacyStateMapPath"`
 }
 
+type DownloaderClientConfig struct {
+	Enabled  bool   `json:"enabled"`
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 type TrackerConfig struct {
-	RealAnnounce bool   `json:"realAnnounce"`
-	SamplesPath  string `json:"samplesPath"`
-	Retries      int    `json:"retries"`
-	UserAgent    string `json:"userAgent"`
-	PeerIDPrefix string `json:"peerIdPrefix"`
-	AnnouncePort int    `json:"announcePort"`
+	RealAnnounce            bool                   `json:"realAnnounce"`
+	SamplesPath             string                 `json:"samplesPath"`
+	AutoDiscover            bool                   `json:"autoDiscover"`
+	AutoSamplesPath         string                 `json:"autoSamplesPath"`
+	DiscoveryTimeoutSeconds int                    `json:"discoveryTimeoutSeconds"`
+	MaxTrackerLookups       int                    `json:"maxTrackerLookups"`
+	Transmission            DownloaderClientConfig `json:"transmission"`
+	QBittorrent             DownloaderClientConfig `json:"qbittorrent"`
+	Retries                 int                    `json:"retries"`
+	UserAgent               string                 `json:"userAgent"`
+	PeerIDPrefix            string                 `json:"peerIdPrefix"`
+	AnnouncePort            int                    `json:"announcePort"`
 }
 
 type SyncConfig struct {
@@ -148,12 +161,16 @@ func defaultConfig() Config {
 			LegacyStateMapPath: "/data/legacy-hosts-map.tsv",
 		},
 		Tracker: TrackerConfig{
-			RealAnnounce: true,
-			SamplesPath:  "/data/tracker-samples.tsv",
-			Retries:      2,
-			UserAgent:    "Transmission/4.1.3",
-			PeerIDPrefix: "-TR4130-",
-			AnnouncePort: 51413,
+			RealAnnounce:            true,
+			SamplesPath:             "/data/tracker-samples.tsv",
+			AutoDiscover:            true,
+			AutoSamplesPath:         "/data/tracker-samples.auto.tsv",
+			DiscoveryTimeoutSeconds: 15,
+			MaxTrackerLookups:       200,
+			Retries:                 2,
+			UserAgent:               "Transmission/4.1.3",
+			PeerIDPrefix:            "-TR4130-",
+			AnnouncePort:            51413,
 		},
 		Sync: SyncConfig{
 			Enabled:       false,
@@ -221,6 +238,13 @@ func normalizeConfig(c *Config) error {
 	trackerUnset := c.Tracker.SamplesPath == "" && c.Tracker.Retries == 0 && c.Tracker.UserAgent == "" && c.Tracker.PeerIDPrefix == "" && c.Tracker.AnnouncePort == 0
 	if trackerUnset { c.Tracker.RealAnnounce = true }
 	if c.Tracker.SamplesPath == "" { c.Tracker.SamplesPath = "/data/tracker-samples.tsv" }
+	if c.Tracker.AutoSamplesPath == "" { c.Tracker.AutoSamplesPath = "/data/tracker-samples.auto.tsv" }
+	if c.Tracker.DiscoveryTimeoutSeconds < 1 { c.Tracker.DiscoveryTimeoutSeconds = 15 }
+	if c.Tracker.MaxTrackerLookups < 1 { c.Tracker.MaxTrackerLookups = 200 }
+	c.Tracker.Transmission.URL = strings.TrimSpace(c.Tracker.Transmission.URL)
+	c.Tracker.Transmission.Username = strings.TrimSpace(c.Tracker.Transmission.Username)
+	c.Tracker.QBittorrent.URL = strings.TrimSpace(c.Tracker.QBittorrent.URL)
+	c.Tracker.QBittorrent.Username = strings.TrimSpace(c.Tracker.QBittorrent.Username)
 	if c.Tracker.Retries < 1 { c.Tracker.Retries = 2 }
 	if c.Tracker.UserAgent == "" { c.Tracker.UserAgent = "Transmission/4.1.3" }
 	if c.Tracker.PeerIDPrefix == "" { c.Tracker.PeerIDPrefix = "-TR4130-" }
@@ -271,6 +295,16 @@ func loadConfig(dataDir string) (Config, error) {
 	if _, ok := raw["bandwidth"]; !ok { c.Bandwidth = d.Bandwidth }
 	if _, ok := raw["optimize"]; !ok { c.Optimize = d.Optimize }
 	if _, ok := raw["hosts"]; !ok { c.Hosts = d.Hosts }
+	if trackerRaw, ok := raw["tracker"]; !ok {
+		c.Tracker = d.Tracker
+	} else {
+		var trackerFields map[string]json.RawMessage
+		_ = json.Unmarshal(trackerRaw, &trackerFields)
+		if _, ok := trackerFields["autoDiscover"]; !ok { c.Tracker.AutoDiscover = d.Tracker.AutoDiscover }
+		if _, ok := trackerFields["autoSamplesPath"]; !ok { c.Tracker.AutoSamplesPath = d.Tracker.AutoSamplesPath }
+		if _, ok := trackerFields["discoveryTimeoutSeconds"]; !ok { c.Tracker.DiscoveryTimeoutSeconds = d.Tracker.DiscoveryTimeoutSeconds }
+		if _, ok := trackerFields["maxTrackerLookups"]; !ok { c.Tracker.MaxTrackerLookups = d.Tracker.MaxTrackerLookups }
+	}
 	if err := normalizeConfig(&c); err != nil { return Config{}, err }
 	return c, nil
 }
