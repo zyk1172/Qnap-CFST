@@ -39,7 +39,7 @@ func freshCandidates(in []Candidate, ttl time.Duration, now time.Time) []Candida
 		if err != nil || now.Before(observed) || now.Sub(observed) > ttl { continue }
 		out = append(out, c)
 	}
-	return out
+	return rankCandidates(out)
 }
 
 func candidateEligible(c Candidate, d Domain, cfg Config) bool {
