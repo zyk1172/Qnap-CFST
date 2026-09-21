@@ -99,3 +99,31 @@ func TestStaticUIRejectsNonGetMethods(t *testing.T) {
 		t.Fatalf("expected 405, got %d", rec.Code)
 	}
 }
+
+
+func TestDashboardPollingDoesNotRestartCounterAnimation(t *testing.T) {
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	coreJS := string(core)
+	eventsJS := string(events)
+
+	if !strings.Contains(coreJS, "renderPage(false, false)") {
+		t.Fatal("status polling must render without dashboard counter animation")
+	}
+	if !strings.Contains(coreJS, "nextSignature !== store.renderSignature") {
+		t.Fatal("status polling must skip unchanged page rerenders")
+	}
+	if !strings.Contains(coreJS, "store.renderSignature = pageRefreshSignature()") {
+		t.Fatal("rendered page signature must be recorded")
+	}
+	if !strings.Contains(eventsJS, "renderPage(false, true)") {
+		t.Fatal("initial page load should retain dashboard counter animation")
+	}
+}
