@@ -139,3 +139,20 @@ func TestLoadTrackerSamples(t *testing.T) {
 		t.Fatalf("unexpected samples: %#v", samples)
 	}
 }
+
+func TestLoadTrackerSamplesKeepsValidRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "samples-partial.tsv")
+	content := "bad-row\n" +
+		"tracker.example.com\t/announce\t0123456789abcdef0123456789abcdef01234567\thttps://tracker.example.com/announce?passkey=test\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	samples, err := loadTrackerSamples(path)
+	if err == nil {
+		t.Fatal("expected warning error for invalid row")
+	}
+	if len(samples) != 1 {
+		t.Fatalf("valid sample should survive invalid sibling row: %#v", samples)
+	}
+}
