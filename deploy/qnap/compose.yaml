@@ -1,6 +1,6 @@
 services:
   cfhost:
-    build: .
+    image: ghcr.io/zyk1172/qnap-cfst:cfhost
     container_name: cfhost
     restart: unless-stopped
     ports:
@@ -8,11 +8,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
-      CFST_BIN: /app/cfst
-      CFST_IP_FILE: /app/ip.txt
-      CFST_IPV6_FILE: /app/ipv6.txt
       HOSTS_PATH: /host/etc/hosts
     volumes:
-      - ${CFHOST_DATA_DIR:-./data}:/data
+      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
       - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts
     stop_grace_period: 15s

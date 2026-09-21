@@ -206,6 +206,11 @@ func (a *App) runSmartRepair(ctx context.Context, cfg Config) error {
 		if err := a.applyMappings(cfg.HostsPath, mappings); err != nil {
 			return err
 		}
+		if cfg.Sync.Enabled {
+			if err := a.publishSync(ctx, cfg, false); err != nil {
+				a.appendLog("github sync failed: %v", err)
+			}
+		}
 	}
 	if refreshErr != nil {
 		return refreshErr

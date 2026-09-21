@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -25,18 +28,20 @@ type DomainHealth struct {
 }
 
 type RuntimeState struct {
-	Running       bool                    `json:"running"`
-	CurrentJob    string                  `json:"currentJob"`
-	LastRun       string                  `json:"lastRun"`
-	LastSuccess   string                  `json:"lastSuccess"`
-	LastError     string                  `json:"lastError"`
-	LastRefresh   string                  `json:"lastRefresh"`
-	NextRefresh   string                  `json:"nextRefresh"`
-	Candidates    []Candidate             `json:"candidates"`
-	Mappings      map[string]string       `json:"mappings"`
-	DomainStatus  map[string]string       `json:"domainStatus"`
-	DomainHealth  map[string]DomainHealth `json:"domainHealth"`
-	Logs          []string                `json:"logs"`
+	Running      bool                    `json:"running"`
+	CurrentJob   string                  `json:"currentJob"`
+	LastRun      string                  `json:"lastRun"`
+	LastSuccess  string                  `json:"lastSuccess"`
+	LastError    string                  `json:"lastError"`
+	LastRefresh  string                  `json:"lastRefresh"`
+	NextRefresh  string                  `json:"nextRefresh"`
+	Candidates   []Candidate             `json:"candidates"`
+	Mappings     map[string]string       `json:"mappings"`
+	DomainStatus map[string]string       `json:"domainStatus"`
+	DomainHealth map[string]DomainHealth `json:"domainHealth"`
+	Sync         SyncRuntimeState        `json:"sync"`
+	History      []RunRecord             `json:"history"`
+	Logs         []string                `json:"logs"`
 }
 
 func main() {
@@ -61,9 +66,28 @@ func main() {
 	app.loadState()
 	go app.scheduler()
 
-	log.Printf("CFHost listening on %s", cfg.Listen)
-	if err := http.ListenAndServe(cfg.Listen, app.routes()); err != nil {
-		log.Fatal(err)
+	server := &http.Server{Addr: cfg.Listen, Handler: app.routes()}
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("CFHost listening on %s", cfg.Listen)
+		errCh <- server.ListenAndServe()
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case sig := <-sigCh:
+		log.Printf("CFHost stopping on %s", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+		app.persistState()
 	}
 }
 
@@ -103,6 +127,9 @@ func (a *App) loadState() {
 	}
 	if s.DomainHealth == nil {
 		s.DomainHealth = map[string]DomainHealth{}
+	}
+	if len(s.History) > 200 {
+		s.History = s.History[len(s.History)-200:]
 	}
 	a.state = s
 }
@@ -148,9 +175,12 @@ func (a *App) startJob(kind string) bool {
 	a.state.Running = true
 	a.state.CurrentJob = kind
 	a.state.LastError = ""
+	mappingsBefore := len(a.state.Mappings)
+	refreshBefore := a.state.LastRefresh
 	a.mu.Unlock()
 
 	go func() {
+		started := time.Now()
 		cfg := a.snapshotConfig()
 		timeout := time.Duration(cfg.CFST.RunTimeoutMinutes) * time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -158,7 +188,8 @@ func (a *App) startJob(kind string) bool {
 
 		a.appendLog("%s started", kind)
 		err := a.runJob(ctx, kind, cfg)
-		now := time.Now().Format(time.RFC3339)
+		finished := time.Now()
+		now := finished.Format(time.RFC3339)
 
 		a.mu.Lock()
 		a.state.Running = false
@@ -169,6 +200,24 @@ func (a *App) startJob(kind string) bool {
 		} else {
 			a.state.LastSuccess = now
 			a.state.LastError = ""
+		}
+		record := RunRecord{
+			Kind:           kind,
+			StartedAt:      started.Format(time.RFC3339),
+			FinishedAt:     now,
+			DurationMS:     finished.Sub(started).Milliseconds(),
+			Success:        err == nil,
+			MappingsBefore: mappingsBefore,
+			MappingsAfter:  len(a.state.Mappings),
+			CandidateCount: len(a.state.Candidates),
+			FullRefresh:    a.state.LastRefresh != refreshBefore,
+		}
+		if err != nil {
+			record.Error = err.Error()
+		}
+		a.state.History = append(a.state.History, record)
+		if len(a.state.History) > 200 {
+			a.state.History = a.state.History[len(a.state.History)-200:]
 		}
 		a.mu.Unlock()
 
