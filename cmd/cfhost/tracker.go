@@ -32,6 +32,7 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 	defer f.Close()
 
 	out := make(map[string]TrackerSample)
+	problems := make([]string, 0)
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
 	for scanner.Scan() {
@@ -42,7 +43,8 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 		}
 		parts := strings.SplitN(line, "\t", 4)
 		if len(parts) != 4 {
-			return nil, fmt.Errorf("tracker sample line %d: expected 4 tab-separated fields", lineNo)
+			problems = append(problems, fmt.Sprintf("line %d: expected 4 tab-separated fields", lineNo))
+			continue
 		}
 		domain := strings.ToLower(strings.TrimSpace(parts[0]))
 		pathValue := strings.TrimSpace(parts[1])
@@ -50,17 +52,20 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 		rawURL := strings.TrimSpace(parts[3])
 		hashBytes, err := hex.DecodeString(hashHex)
 		if err != nil || len(hashBytes) != 20 {
-			return nil, fmt.Errorf("tracker sample line %d: invalid 40-char info hash", lineNo)
+			problems = append(problems, fmt.Sprintf("line %d: invalid 40-char info hash", lineNo))
+			continue
 		}
 		u, err := url.Parse(rawURL)
 		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), domain) {
-			return nil, fmt.Errorf("tracker sample line %d: announce URL must be https and match domain", lineNo)
+			problems = append(problems, fmt.Sprintf("line %d: announce URL must be https and match domain", lineNo))
+			continue
 		}
 		if pathValue == "" {
 			pathValue = u.Path
 		}
 		if !strings.HasPrefix(pathValue, "/") || u.Path != pathValue {
-			return nil, fmt.Errorf("tracker sample line %d: path does not match announce URL", lineNo)
+			problems = append(problems, fmt.Sprintf("line %d: path does not match announce URL", lineNo))
+			continue
 		}
 		out[domain] = TrackerSample{
 			Domain:  domain,
@@ -71,11 +76,13 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return out, err
+	}
+	if len(problems) > 0 {
+		return out, fmt.Errorf("ignored invalid tracker samples: %s", strings.Join(problems, "; "))
 	}
 	return out, nil
 }
-
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
 	if d.Mode != "tracker" || !cfg.Tracker.RealAnnounce {
 		return verifyHTTPDomain(ctx, d, ip, cfg.VerifyTimeoutSeconds)
