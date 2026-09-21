@@ -138,15 +138,17 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 	signatureParts := []string{cfg.Sync.Repository, cfg.Sync.Branch}
 	latencyCount := 0
 	bandwidthCount := 0
+	normalCount := 0
 	for _, host := range hosts {
 		d := domains[host]
 		class := d.Class
-		if class != "bandwidth" {
-			class = "latency"
-		}
-		if class == "bandwidth" {
+		switch class {
+		case "bandwidth":
 			bandwidthCount++
-		} else {
+		case "normal":
+			normalCount++
+		default:
+			class = "latency"
 			latencyCount++
 		}
 		ip := mappings[host]
@@ -181,13 +183,14 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 	sum := sha256.Sum256([]byte(strings.Join(signatureParts, "\n")))
 	signature := hex.EncodeToString(sum[:])
 	statusDoc := map[string]any{
-		"schema":          2,
+		"schema":          3,
 		"generated_at":    now.Format(time.RFC3339),
 		"source":          "CFHost",
 		"map_file":        "hosts-map.tsv",
 		"domain_count":    len(hosts),
 		"latency_count":   latencyCount,
 		"bandwidth_count": bandwidthCount,
+		"normal_count":    normalCount,
 		"last_run":        lastRun,
 		"last_refresh":    lastRefresh,
 		"signature":       signature,
