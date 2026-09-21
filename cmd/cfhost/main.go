@@ -102,7 +102,7 @@ func (a *App) persistState() {
 }
 
 func optimizeDue(now time.Time,lastOptimize,lastAttempt,lastRefresh string,cfg OptimizeConfig) bool {
-	if !cfg.Enabled { return false }
+	if !cfg.ScheduledFull { return false }
 	if lastAttemptTime,err:=time.Parse(time.RFC3339,lastAttempt); err==nil && !lastAttemptTime.IsZero() && now.Sub(lastAttemptTime)<time.Duration(cfg.RetryMinutes)*time.Minute {
 		return false
 	}
