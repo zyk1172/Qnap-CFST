@@ -156,6 +156,10 @@ function openDomainEditor(index = null) {
     ? { host: '', group: '', class: 'latency', mode: 'http', endpoint: '/', enabled: true }
     : store.config.domains[index]
   const title = index === null ? '添加域名' : '编辑域名'
+  const sample = index === null ? null : trackerSampleMeta(current)
+  const sampleBlock = sample && current.mode === 'tracker'
+    ? `<div class="field span-2"><label>Tracker 样本状态</label><div class="alert ${sample.variant === 'danger' ? '' : sample.variant === 'warning' ? 'warning' : 'info'}"><div><strong>${esc(sample.label)}</strong><span>${esc(sample.detail)}</span></div></div></div>`
+    : ''
   const body = `
     <form id="domain-form" class="form-grid">
       <div class="field span-2"><label>域名</label><input name="host" required value="${esc(current.host)}" placeholder="tracker.example.com"></div>
@@ -166,6 +170,7 @@ function openDomainEditor(index = null) {
       <div class="field span-2">
         <div class="switch-row"><div class="switch-copy"><strong>启用域名</strong><small>关闭后不会参与 Repair 或 Optimize。</small></div><label class="switch"><input name="enabled" type="checkbox" ${current.enabled ? 'checked' : ''}><span></span></label></div>
       </div>
+      ${sampleBlock}
     </form>
   `
   openModal(modalTemplate(
@@ -250,6 +255,32 @@ function discardSettings() {
 
 function updateSaveBar() {
   $('#save-bar')?.classList.toggle('is-visible', store.dirty)
+}
+
+async function maintainDomain(index) {
+  const domain = store.config?.domains?.[index]
+  if (!domain) return
+  if (!domain.enabled) {
+    toast('无法维护', `${domain.host} 当前已停用。`, 'error')
+    return
+  }
+  if (store.state?.running) {
+    const target = store.state.currentDomain ? ` · ${store.state.currentDomain}` : ''
+    toast('已有任务运行中', `${jobLabel(store.state.currentJob)}${target}`, 'error')
+    return
+  }
+  try {
+    await api('/api/domain-maintain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: domain.host }),
+    })
+    toast('单域名维护已启动', domain.host, 'success')
+    await refreshStatus({ quiet: true })
+    renderPage(false, false)
+  } catch (error) {
+    toast('单域名维护启动失败', error.message, 'error')
+  }
 }
 
 async function runJob(kind) {
@@ -363,8 +394,9 @@ async function discoverTrackerSamplesNow() {
     const source = []
     if (report.transmission) source.push(`Transmission ${report.transmission}`)
     if (report.qbittorrent) source.push(`qBittorrent ${report.qbittorrent}`)
+    await refreshStatus({ quiet: true })
     if (domains.length) {
-      toast('Tracker 样本发现完成', `${domains.length} 个域名 · ${source.join(' · ') || '已更新缓存'}`, 'success')
+      toast('Tracker 样本发现完成', `${domains.length} 个域名 · ${source.join(' · ') || '已更新缓存'} · 可到域名页查看样本状态`, 'success')
     } else if (report.errors?.length) {
       toast('没有发现 Tracker 样本', report.errors.join('；'), 'error')
     } else {
