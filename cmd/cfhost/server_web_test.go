@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -395,6 +396,84 @@ func TestDomainActionsAreIconOnlyAndColorCoded(t *testing.T) {
 	} {
 		if !strings.Contains(cssText, selector) {
 			t.Fatalf("missing action color style %q", selector)
+		}
+	}
+}
+
+
+func TestSidebarShowsLiveJobProgress(t *testing.T) {
+	index, err := webAssets.ReadFile("web/index.html")
+	if err != nil { t.Fatal(err) }
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil { t.Fatal(err) }
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil { t.Fatal(err) }
+
+	indexHTML := string(index)
+	coreJS := string(core)
+	cssText := string(css)
+
+	for _, want := range []string{
+		"id=\"sidebar-subtitle-text\"",
+		"id=\"sidebar-subtitle-copy\"",
+		"id=\"sidebar-progress-track\"",
+		"id=\"sidebar-progress-fill\"",
+	} {
+		if !strings.Contains(indexHTML, want) {
+			t.Fatalf("sidebar progress markup missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"function liveProgressText()",
+		"function updateSidebarProgress(",
+		"progress.step",
+		"progress.steps",
+		"progress.percent",
+		"progress.detail",
+	} {
+		if !strings.Contains(coreJS, want) {
+			t.Fatalf("sidebar progress logic missing %q", want)
+		}
+	}
+	if strings.Contains(coreJS, "$('#sidebar-subtitle').textContent") {
+		t.Fatal("sidebar subtitle must preserve its marquee child structure")
+	}
+	for _, want := range []string{
+		".sidebar-subtitle.is-progress .sidebar-subtitle-track",
+		"@keyframes sidebar-runtime-scroll",
+		".sidebar-progress-track.is-active",
+	} {
+		if !strings.Contains(cssText, want) {
+			t.Fatalf("sidebar progress CSS missing %q", want)
+		}
+	}
+}
+
+func TestRepairAndOptimizeExposeRealProgressStages(t *testing.T) {
+	for file, stages := range map[string][]string{
+		"repair.go": {
+			"读取样本",
+			"检查当前映射",
+			"验证缓存候选",
+			"评估刷新",
+			"CFST 测速",
+			"验证新候选",
+			"应用结果",
+		},
+		"optimize.go": {
+			"准备完整优化",
+			"CFST 测速",
+			"读取样本",
+			"验证并选择域名",
+			"应用结果",
+		},
+	} {
+		content, err := os.ReadFile(file)
+		if err != nil { t.Fatal(err) }
+		for _, stage := range stages {
+			if !strings.Contains(string(content), stage) {
+				t.Fatalf("%s missing progress stage %q", file, stage)
+			}
 		}
 	}
 }
