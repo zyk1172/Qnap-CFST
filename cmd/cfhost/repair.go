@@ -132,7 +132,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 
 	a.setJobProgress("验证缓存候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 3, 7, 0, len(pending))
-	pending=a.resolvePending(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,"验证缓存候选",3,7)
+	pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,"验证缓存候选",3,7)
 	a.setJobProgress("评估刷新", fmt.Sprintf("仍有 %d 个域名待处理", len(pending)), 4, 7, 0, 0)
 	maxProspective:=0; refreshablePending:=0
 	for _,p:=range pending {
@@ -179,7 +179,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			a.storeCandidates(newCandidates)
 			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
 			a.setJobProgress("验证新候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 6, 7, 0, len(pending))
-			pending=a.resolvePending(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP,"验证新候选",6,7)
+			pending=a.resolvePendingWithProgress(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP,"验证新候选",6,7)
 		}
 	} else if refreshablePending>0 {
 		a.setJobProgress("验证新候选", "无需立即刷新 CFST，保留当前判定", 6, 7, 1, 1)
@@ -208,7 +208,11 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	return nil
 }
 
-func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string,progressStage string,progressStep,progressSteps int) []pendingDomain {
+func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string) []pendingDomain {
+	return a.resolvePendingWithProgress(ctx,cfg,samples,candidates,pending,mappings,statuses,groupIP,"验证候选",1,1)
+}
+
+func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string,progressStage string,progressStep,progressSteps int) []pendingDomain {
 	if len(pending)==0{
 		a.setJobProgress(progressStage, "无需处理", progressStep, progressSteps, 1, 1)
 		return pending
