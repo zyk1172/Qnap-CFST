@@ -291,7 +291,7 @@ func TestDomainTableShowsTrackerSampleStateAndMaintenance(t *testing.T) {
 	eventsJS := string(events)
 	interactionsJS := string(interactions)
 
-	for _, want := range []string{"<th>样本</th>", "data-maintain-domain", "trackerSampleMeta(domain)"} {
+	for _, want := range []string{"data-maintain-domain", "trackerSampleMeta(domain)", "data-domain-expand", "domain-detail-panel"} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("domain table missing %q", want)
 		}
@@ -316,6 +316,85 @@ func TestDomainPagePollingIncludesTrackerSampleState(t *testing.T) {
 	for _, want := range []string{"trackerSamples: state.trackerSamples", "currentDomain: state.currentDomain"} {
 		if !strings.Contains(coreJS, want) {
 			t.Fatalf("domain refresh signature missing %q", want)
+		}
+	}
+}
+
+
+func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
+	domains, err := webAssets.ReadFile("web/js/dashboard-domains.js")
+	if err != nil { t.Fatal(err) }
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil { t.Fatal(err) }
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil { t.Fatal(err) }
+
+	domainsJS := string(domains)
+	cssText := string(css)
+	eventsJS := string(events)
+
+	if !strings.Contains(domainsJS, "<th>域名</th><th>类型 / 策略</th><th>当前 IP</th><th>状态</th><th></th>") {
+		t.Fatal("domain main table must keep only five compact columns")
+	}
+	for _, removed := range []string{"<th>站点组</th>", "<th>样本</th>", "<th>连续失败</th>"} {
+		if strings.Contains(domainsJS, removed) {
+			t.Fatalf("detail-only column leaked back into compact table: %q", removed)
+		}
+	}
+	for _, want := range []string{
+		"['站点组', domain.group || '—']",
+		"['Endpoint', domain.endpoint || '/']",
+		"['样本状态', domain.mode === 'tracker' ? sample.label : '不适用']",
+		"['连续失败', String(streak)]",
+	} {
+		if !strings.Contains(domainsJS, want) {
+			t.Fatalf("expanded detail is missing %q", want)
+		}
+	}
+	if !strings.Contains(eventsJS, "store.expandedDomainHost === domain.host ? '' : domain.host") {
+		t.Fatal("clicking a domain must toggle its detail row")
+	}
+	if !strings.Contains(cssText, ".domain-table-wrap { overflow: hidden; }") ||
+		!strings.Contains(cssText, ".domain-table { table-layout: fixed; min-width: 0; }") {
+		t.Fatal("domain table must not depend on horizontal scrolling")
+	}
+	if !strings.Contains(cssText, `grid-template-areas:
+      "host actions"
+      "meta actions"
+      "ip status";`) {
+		t.Fatal("mobile domain rows must switch to a compact grid")
+	}
+}
+
+func TestDomainActionsAreIconOnlyAndColorCoded(t *testing.T) {
+	domains, err := webAssets.ReadFile("web/js/dashboard-domains.js")
+	if err != nil { t.Fatal(err) }
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil { t.Fatal(err) }
+
+	domainsJS := string(domains)
+	cssText := string(css)
+	for _, cls := range []string{
+		"domain-action maintain",
+		"domain-action edit",
+		"domain-action toggle",
+		"domain-action delete",
+	} {
+		if !strings.Contains(domainsJS, cls) {
+			t.Fatalf("missing color-coded action class %q", cls)
+		}
+	}
+	if strings.Contains(domainsJS, `>${maintaining ? icon('activity') : icon('repair')}${maintaining ? '维护中' : '维护'}</button>`) {
+		t.Fatal("maintenance action must be icon-only")
+	}
+	for _, selector := range []string{
+		".domain-action.maintain",
+		".domain-action.edit",
+		".domain-action.toggle",
+		".domain-action.delete",
+	} {
+		if !strings.Contains(cssText, selector) {
+			t.Fatalf("missing action color style %q", selector)
 		}
 	}
 }
