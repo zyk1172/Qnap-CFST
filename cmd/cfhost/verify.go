@@ -107,14 +107,39 @@ func verifyHTTPConnectivity(parent context.Context, d Domain, ip string, cfg Con
 	return evaluateHTTPConnectivityStatus(resp.StatusCode)
 }
 
-func evaluateHTTPConnectivityStatus(status int) (bool, string) {
+type httpProbeDisposition int
+
+const (
+	httpProbeReachable httpProbeDisposition = iota
+	httpProbeTemporaryFailure
+	httpProbeHardFailure
+)
+
+func classifyHTTPConnectivityStatus(status int) httpProbeDisposition {
 	if status < 100 || status > 599 {
-		return false, fmt.Sprintf("HTTP %d", status)
+		return httpProbeHardFailure
 	}
-	if status == http.StatusForbidden {
-		return false, fmt.Sprintf("HTTP %d", status)
+	switch status {
+	case http.StatusForbidden, http.StatusMisdirectedRequest, http.StatusUnavailableForLegalReasons:
+		return httpProbeHardFailure
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusTooManyRequests:
+		return httpProbeTemporaryFailure
 	}
-	return true, fmt.Sprintf("HTTP %d", status)
+	if status >= 500 {
+		return httpProbeTemporaryFailure
+	}
+	return httpProbeReachable
+}
+
+func evaluateHTTPConnectivityStatus(status int) (bool, string) {
+	switch classifyHTTPConnectivityStatus(status) {
+	case httpProbeReachable:
+		return true, fmt.Sprintf("HTTP %d", status)
+	case httpProbeTemporaryFailure:
+		return false, fmt.Sprintf("HTTP %d · temporary failure", status)
+	default:
+		return false, fmt.Sprintf("HTTP %d · blocked/unusable", status)
+	}
 }
 
 func verifyHTTPDomain(parent context.Context, d Domain, ip string, cfg Config) (bool, string) {
