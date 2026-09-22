@@ -146,9 +146,10 @@ function historyTimelineItem(item) {
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
   const variant = !success ? 'danger' : unresolved ? 'warning' : 'success'
+  const target = item.targetDomain ? `${item.targetDomain} · ` : ''
   const summary = success
-    ? `${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
-    : esc(item.error || '执行失败')
+    ? `${target}${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
+    : `${target}${esc(item.error || '执行失败')}`
   const leftover = success && unresolved
     ? `<small class="timeline-warning">${unresolved} 个域名未解析${names.length ? ` · ${esc(names.join('、'))}` : ''}</small>`
     : ''
