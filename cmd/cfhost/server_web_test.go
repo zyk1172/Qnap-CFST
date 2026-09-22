@@ -274,3 +274,48 @@ func TestShellStatusSurfacesUnresolvedDomains(t *testing.T) {
 		t.Fatal("warning shell status must have a dedicated status-dot style")
 	}
 }
+
+
+func TestDomainTableShowsTrackerSampleStateAndMaintenance(t *testing.T) {
+	domains, err := webAssets.ReadFile("web/js/dashboard-domains.js")
+	if err != nil { t.Fatal(err) }
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil { t.Fatal(err) }
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil { t.Fatal(err) }
+	interactions, err := webAssets.ReadFile("web/js/interactions.js")
+	if err != nil { t.Fatal(err) }
+
+	domainsJS := string(domains)
+	coreJS := string(core)
+	eventsJS := string(events)
+	interactionsJS := string(interactions)
+
+	for _, want := range []string{"<th>样本</th>", "data-maintain-domain", "trackerSampleMeta(domain)"} {
+		if !strings.Contains(domainsJS, want) {
+			t.Fatalf("domain table missing %q", want)
+		}
+	}
+	for _, want := range []string{"已获取 · 待测试", "样本通过", "样本失败", "未获取"} {
+		if !strings.Contains(coreJS, want) {
+			t.Fatalf("sample status helper missing %q", want)
+		}
+	}
+	if !strings.Contains(eventsJS, "data-maintain-domain") {
+		t.Fatal("maintenance button is not wired")
+	}
+	if !strings.Contains(interactionsJS, "/api/domain-maintain") {
+		t.Fatal("single-domain maintenance API is not invoked")
+	}
+}
+
+func TestDomainPagePollingIncludesTrackerSampleState(t *testing.T) {
+	core, err := webAssets.ReadFile("web/js/core.js")
+	if err != nil { t.Fatal(err) }
+	coreJS := string(core)
+	for _, want := range []string{"trackerSamples: state.trackerSamples", "currentDomain: state.currentDomain"} {
+		if !strings.Contains(coreJS, want) {
+			t.Fatalf("domain refresh signature missing %q", want)
+		}
+	}
+}
