@@ -567,9 +567,10 @@ func TestBuildCFSTArgsDegraded(t *testing.T) {
 	cfg.CFST.DownloadCount = 20
 	cfg.CFST.DownloadSeconds = 5
 	cfg.CFST.MinSpeedMB = 2
+	cfg.CFST.DownloadURL = "https://speed.cloudflare.com/__down?bytes=90000000"
 	cfg.CFST.DegradedDownloadCount = 5
 	cfg.CFST.DegradedDownloadSeconds = 2
-	cfg.CFST.DegradedRateMbps = 5
+	cfg.CFST.DegradedDownloadMB = 5
 
 	args := buildCFSTArgs(cfg, "/app/ip.txt", "/data/result.csv", true)
 	value := func(flag string) string {
@@ -580,8 +581,27 @@ func TestBuildCFSTArgsDegraded(t *testing.T) {
 		}
 		return ""
 	}
-	if value("-dn") != "5" || value("-dt") != "2" || value("-sl") != "0" || value("-dr") != "5" {
+	if value("-dn") != "5" || value("-dt") != "2" || value("-sl") != "0" {
 		t.Fatalf("unexpected degraded args: %v", args)
+	}
+	if value("-url") != "https://speed.cloudflare.com/__down?bytes=5000000" {
+		t.Fatalf("degraded URL did not shrink bytes parameter: %v", args)
+	}
+	if value("-dr") != "" {
+		t.Fatalf("degraded mode must not use artificial rate throttling: %v", args)
+	}
+}
+
+func TestDegradedDownloadURLPreservesOtherQueryParameters(t *testing.T) {
+	got, ok := degradedDownloadURL("https://speed.cloudflare.com/__down?foo=bar&bytes=90000000", 5)
+	if !ok {
+		t.Fatal("Cloudflare bytes URL should be rewritable")
+	}
+	if !strings.Contains(got, "bytes=5000000") || !strings.Contains(got, "foo=bar") {
+		t.Fatalf("unexpected degraded URL: %s", got)
+	}
+	if got, ok := degradedDownloadURL("https://example.com/file.bin", 5); ok || got != "https://example.com/file.bin" {
+		t.Fatalf("generic URL without bytes must remain untouched: %s ok=%v", got, ok)
 	}
 }
 
@@ -609,7 +629,39 @@ func TestLegacyCFSTConfigEnablesAdaptiveRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.CFST.AdaptiveRateLimit || cfg.CFST.DegradedRateMbps != 5 || cfg.CFST.DegradedDownloadCount != 5 {
+	if !cfg.CFST.AdaptiveRateLimit || cfg.CFST.DegradedDownloadMB != 5 || cfg.CFST.DegradedDownloadCount != 5 {
 		t.Fatalf("legacy config did not receive adaptive rate-limit defaults: %#v", cfg.CFST)
+	}
+}
+
+func TestLegacyDegradedRateMigratesToDownloadMB(t *testing.T) {
+	dir := t.TempDir()
+	content := `{
+  "cfst": {
+    "threads": 200,
+    "pingTimes": 4,
+    "downloadCount": 20,
+    "downloadSeconds": 5,
+    "maxDelayMs": 350,
+    "maxLossRate": 0.2,
+    "minSpeedMB": 0.1,
+    "downloadUrl": "https://speed.cloudflare.com/__down?bytes=90000000",
+    "runTimeoutMinutes": 30,
+    "adaptiveRateLimit": true,
+    "degradedRateMbps": 3.5,
+    "degradedDownloadCount": 5,
+    "degradedDownloadSeconds": 2,
+    "rateLimitFallbackMinutes": 15
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CFST.DegradedDownloadMB != 3.5 {
+		t.Fatalf("legacy degradedRateMbps was not migrated: %#v", cfg.CFST)
 	}
 }
