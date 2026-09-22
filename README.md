@@ -294,7 +294,7 @@ Transmission 自动发现：
 其中：
 
 - `已获取 · 待测试`：已经从 Transmission / qBittorrent 或手工文件取得样本，但还没有对当前候选 IP 做真实 announce。
-- `样本通过`：已通过样本连接到 Tracker。Tracker 返回业务错误也属于“候选可达”，仍显示通过。
+- `样本通过`：已通过样本连接到 Tracker。一般 Tracker 业务错误也属于“候选可达”；但“Could not connect to tracker”这类上游连接失败会显示为样本失败。
 - `样本失败`：网络/TLS/HTTP/Tracker 响应格式层面没有打通。
 - `无需样本`：HTTP 域名、关闭真实 announce，或使用 `normal` 策略的 Tracker。
 
@@ -349,7 +349,8 @@ Tracker 样本验证的“候选可达”要求：
 只要已经收到 Tracker 的合法业务响应，就证明这个候选 IP 能到达 Tracker。因此：
 
 - 正常 `interval / peers / peers6` 响应：样本通过。
-- `failure reason`、`Missing key peer_id`、站点反作弊等业务错误：**仍记为样本通过 / candidate reachable**，不会因此继续更换 Cloudflare IP。
+- `Missing key peer_id`、站点反作弊、封禁、未注册种子等**业务错误**：仍记为样本通过 / candidate reachable，不会因此继续更换 Cloudflare IP。
+- `Could not connect to tracker`、`Could not connect to track...`、`Failed/Unable to connect to tracker` 等明确表示**未连到 Tracker/上游**的错误：样本失败，并继续尝试其他候选 IP。
 - TCP/TLS 失败、HTTP 非 200、HTML Challenge、空响应或非法/截断 bencode：样本失败。
 
 默认：
