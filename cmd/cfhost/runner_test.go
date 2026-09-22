@@ -132,6 +132,9 @@ func TestEvaluateTrackerResponseTreatsTrackerErrorsAsReachable(t *testing.T) {
 		{"PTT anti-abuse error still proves connectivity", bencodeFailure("PTT:多IP汇报同一资源，等缓存过期或修改qb高级里的网络接口"), true, false},
 		{"missing peer id still proves connectivity", bencodeFailure("Missing key peer_id"), true, false},
 		{"even IP-ban business error proves tracker connectivity", bencodeFailure("your ip is banned"), true, false},
+		{"upstream tracker connect failure is unreachable", bencodeFailure("Could not connect to tracker"), false, false},
+		{"truncated connect wording is unreachable", bencodeFailure("Could not connect to track"), false, false},
+		{"failed-to-connect wording is unreachable", bencodeFailure("Failed to connect to tracker"), false, false},
 		{"other valid tracker dictionary proves connectivity", "d5:hello3:youe", true, false},
 		{"html challenge is not tracker response", "<html>ok</html>", false, false},
 		{"empty response", "", false, false},
@@ -507,5 +510,35 @@ func TestManualTrackerSampleKeepsPriorityAndTestState(t *testing.T) {
 	st := a.state.TrackerSamples["tracker.example.com"]
 	if st.Source != "manual" || !st.Tested || !st.Passed {
 		t.Fatalf("auto discovery must not invalidate higher-priority manual sample: %#v", st)
+	}
+}
+
+
+func TestTrackerFailureConnectivityClassification(t *testing.T) {
+	unreachable := []string{
+		"Could not connect to tracker",
+		"Could not connect to track",
+		"Couldn't connect to tracker",
+		"Cannot connect to tracker",
+		"Can't connect to tracker",
+		"Failed to connect to tracker",
+		"Unable to connect to tracker",
+		"Tracker connection failed",
+	}
+	for _, reason := range unreachable {
+		if !trackerFailureIndicatesUnreachable(reason) {
+			t.Fatalf("expected connectivity failure classification for %q", reason)
+		}
+	}
+	business := []string{
+		"Missing key peer_id",
+		"your ip is banned",
+		"PTT:多IP汇报同一资源",
+		"torrent not registered",
+	}
+	for _, reason := range business {
+		if trackerFailureIndicatesUnreachable(reason) {
+			t.Fatalf("business rejection must not be classified as unreachable: %q", reason)
+		}
 	}
 }
