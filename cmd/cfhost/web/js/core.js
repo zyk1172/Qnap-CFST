@@ -279,6 +279,46 @@ function updateNavigation() {
   $('#page-eyebrow').textContent = meta.eyebrow
 }
 
+function liveProgressText() {
+  const progress = store.state?.progress || {}
+  if (!progress.stage) return ''
+  const parts = []
+  const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0))
+  parts.push(`${percent}%`)
+  if (progress.step && progress.steps) parts.push(`${progress.step}/${progress.steps}`)
+  parts.push(progress.stage)
+  if (progress.detail) parts.push(progress.detail)
+  return parts.join(' · ')
+}
+
+function updateSidebarProgress(running, fallbackSubtitle) {
+  const subtitle = $('#sidebar-subtitle')
+  const primary = $('#sidebar-subtitle-text')
+  const duplicate = $('#sidebar-subtitle-copy')
+  const track = $('#sidebar-progress-track')
+  const fill = $('#sidebar-progress-fill')
+  if (!subtitle || !primary || !duplicate || !track || !fill) return
+
+  const progressText = running ? liveProgressText() : ''
+  if (running && progressText) {
+    primary.textContent = progressText
+    duplicate.textContent = progressText
+    subtitle.classList.add('is-progress')
+    track.classList.add('is-active')
+    track.setAttribute('aria-hidden', 'false')
+    const percent = Math.max(0, Math.min(100, Number(store.state?.progress?.percent) || 0))
+    fill.style.width = `${percent}%`
+    return
+  }
+
+  primary.textContent = fallbackSubtitle
+  duplicate.textContent = ''
+  subtitle.classList.remove('is-progress')
+  track.classList.remove('is-active')
+  track.setAttribute('aria-hidden', 'true')
+  fill.style.width = '0%'
+}
+
 function updateShellStatus() {
   const running = !!store.state?.running
   const error = store.state?.lastError
@@ -304,7 +344,7 @@ function updateShellStatus() {
           : 'CFHost Service'
   const statusClass = running ? 'is-running' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
   $('#sidebar-status').textContent = text
-  $('#sidebar-subtitle').textContent = subtitle
+  updateSidebarProgress(running, subtitle)
   const sideDot = $('#sidebar-status-dot')
   sideDot.className = `status-dot ${statusClass}`
   const top = $('#topbar-service')
@@ -316,7 +356,7 @@ function updateShellStatus() {
 
 function updateConnectionError(error) {
   $('#sidebar-status').textContent = '连接失败'
-  $('#sidebar-subtitle').textContent = String(error.message || error)
+  updateSidebarProgress(false, String(error.message || error))
   $('#sidebar-status-dot').className = 'status-dot is-error'
   $('#topbar-service').innerHTML = '<span class="status-dot is-error"></span><span>连接失败</span>'
 }
