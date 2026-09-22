@@ -42,7 +42,7 @@ function renderCandidates() {
           ${infoLine('最大丢包率', String(store.config.cfst.maxLossRate))}
           ${infoLine('最低下载速度', `${store.config.cfst.minSpeedMB} MB/s`)}
           ${infoLine('下载测速数量', String(store.config.cfst.downloadCount))}
-          ${infoLine('限流降级参数', `${store.config.cfst.degradedRateMbps} Mbps · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
+          ${infoLine('限流降级参数', `${store.config.cfst.degradedDownloadMB} MB/次 · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
           ${infoLine('当前限流状态', rateLimit.active ? `HTTP ${rateLimit.statusCode || '—'} · 解封 ${fmtTime(rateLimit.until)}` : '未限流', rateLimit.active ? 'warning' : 'success')}
           ${infoLine('最近候选刷新', fmtTime(store.state.lastRefresh))}
           ${best ? infoLine('当前排序第一', `${best.ip} · ${Number(best.delayMs || 0).toFixed(1)} ms`, 'success') : ''}
@@ -51,7 +51,7 @@ function renderCandidates() {
     </div>
     <section class="card section">
       <div class="card-head">
-        <div><h2 class="card-title">全部候选</h2><div class="card-subtitle">数据来自最近一次 CFST 运行；测速地址限流期间可能来自 5 Mbps 降级探测</div></div>
+        <div><h2 class="card-title">全部候选</h2><div class="card-subtitle">数据来自最近一次 CFST 运行；测速地址限流期间可能来自小文件降级探测，速度仅供粗略筛选</div></div>
         <div class="segmented">
           <button data-candidate-sort="latency" class="${by === 'latency' ? 'is-active' : ''}">延迟</button>
           <button data-candidate-sort="speed" class="${by === 'speed' ? 'is-active' : ''}">速度</button>

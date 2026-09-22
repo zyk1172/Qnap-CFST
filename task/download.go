@@ -22,7 +22,6 @@ const (
 	defaultDisableDownload         = false
 	defaultTestNum                 = 10
 	defaultMinSpeed        float64 = 0.0
-	defaultMaxRateMbps     float64 = 0.0
 )
 
 var (
@@ -30,9 +29,8 @@ var (
 	Timeout = defaultTimeout
 	Disable = defaultDisableDownload
 
-	TestCount   = defaultTestNum
-	MinSpeed    = defaultMinSpeed
-	MaxRateMbps = defaultMaxRateMbps
+	TestCount = defaultTestNum
+	MinSpeed  = defaultMinSpeed
 )
 
 func checkDownloadDefault() {
@@ -239,19 +237,6 @@ func downloadHandler(ip *net.IPAddr) (float64, string, bool) {
 			e.Add(float64(contentRead-lastContentRead) / (float64(currentTime.Sub(last_time_slice)) / float64(timeSlice)))
 		}
 		contentRead += int64(bufferRead)
-		if MaxRateMbps > 0 && contentRead > 0 {
-			targetSeconds := float64(contentRead*8) / (MaxRateMbps * 1000 * 1000)
-			targetElapsed := time.Duration(targetSeconds * float64(time.Second))
-			if sleepFor := targetElapsed - time.Since(timeStart); sleepFor > 0 {
-				remaining := time.Until(timeEnd)
-				if sleepFor > remaining {
-					sleepFor = remaining
-				}
-				if sleepFor > 0 {
-					time.Sleep(sleepFor)
-				}
-			}
-		}
 	}
 	return e.Value() / (Timeout.Seconds() / 120), colo, false
 }

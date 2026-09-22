@@ -21,7 +21,7 @@ type CFSTConfig struct {
 	IPv6                     bool    `json:"ipv6"`
 	RunTimeoutMinutes        int     `json:"runTimeoutMinutes"`
 	AdaptiveRateLimit        bool    `json:"adaptiveRateLimit"`
-	DegradedRateMbps         float64 `json:"degradedRateMbps"`
+	DegradedDownloadMB       float64 `json:"degradedDownloadMB"`
 	DegradedDownloadCount    int     `json:"degradedDownloadCount"`
 	DegradedDownloadSeconds  int     `json:"degradedDownloadSeconds"`
 	RateLimitFallbackMinutes int     `json:"rateLimitFallbackMinutes"`
@@ -138,7 +138,7 @@ func defaultConfig() Config {
 			DownloadURL:              "https://cf.xiu2.xyz/url",
 			RunTimeoutMinutes:        30,
 			AdaptiveRateLimit:        true,
-			DegradedRateMbps:         5,
+			DegradedDownloadMB:       5,
 			DegradedDownloadCount:    5,
 			DegradedDownloadSeconds:  2,
 			RateLimitFallbackMinutes: 15,
@@ -224,7 +224,7 @@ func normalizeConfig(c *Config) error {
 	if c.CFST.MaxLossRate < 0 || c.CFST.MaxLossRate > 1 { return errors.New("maxLossRate must be between 0 and 1") }
 	if c.CFST.MinSpeedMB < 0 { return errors.New("minSpeedMB cannot be negative") }
 	if c.CFST.RunTimeoutMinutes < 1 { c.CFST.RunTimeoutMinutes = 30 }
-	if c.CFST.DegradedRateMbps <= 0 { c.CFST.DegradedRateMbps = 5 }
+	if c.CFST.DegradedDownloadMB <= 0 { c.CFST.DegradedDownloadMB = 5 }
 	if c.CFST.DegradedDownloadCount < 1 { c.CFST.DegradedDownloadCount = 5 }
 	if c.CFST.DegradedDownloadSeconds < 1 { c.CFST.DegradedDownloadSeconds = 2 }
 	if c.CFST.RateLimitFallbackMinutes < 1 { c.CFST.RateLimitFallbackMinutes = 15 }
@@ -328,7 +328,15 @@ func loadConfig(dataDir string) (Config, error) {
 		var cfstFields map[string]json.RawMessage
 		_ = json.Unmarshal(cfstRaw, &cfstFields)
 		if _, ok := cfstFields["adaptiveRateLimit"]; !ok { c.CFST.AdaptiveRateLimit = d.CFST.AdaptiveRateLimit }
-		if _, ok := cfstFields["degradedRateMbps"]; !ok { c.CFST.DegradedRateMbps = d.CFST.DegradedRateMbps }
+		if _, ok := cfstFields["degradedDownloadMB"]; !ok {
+			c.CFST.DegradedDownloadMB = d.CFST.DegradedDownloadMB
+			if legacy, exists := cfstFields["degradedRateMbps"]; exists {
+				var legacyValue float64
+				if json.Unmarshal(legacy, &legacyValue) == nil && legacyValue > 0 {
+					c.CFST.DegradedDownloadMB = legacyValue
+				}
+			}
+		}
 		if _, ok := cfstFields["degradedDownloadCount"]; !ok { c.CFST.DegradedDownloadCount = d.CFST.DegradedDownloadCount }
 		if _, ok := cfstFields["degradedDownloadSeconds"]; !ok { c.CFST.DegradedDownloadSeconds = d.CFST.DegradedDownloadSeconds }
 		if _, ok := cfstFields["rateLimitFallbackMinutes"]; !ok { c.CFST.RateLimitFallbackMinutes = d.CFST.RateLimitFallbackMinutes }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,10 +140,35 @@ func minPositive(a, b int) int {
 	return b
 }
 
+func degradedDownloadURL(raw string, megabytes float64) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || megabytes <= 0 {
+		return raw, false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw, false
+	}
+	query := u.Query()
+	if _, exists := query["bytes"]; !exists {
+		if !strings.EqualFold(u.Hostname(), "speed.cloudflare.com") || !strings.Contains(u.Path, "/__down") {
+			return raw, false
+		}
+	}
+	bytes := int64(megabytes*1_000_000 + 0.5)
+	if bytes < 1 {
+		return raw, false
+	}
+	query.Set("bytes", strconv.FormatInt(bytes, 10))
+	u.RawQuery = query.Encode()
+	return u.String(), true
+}
+
 func buildCFSTArgs(cfg Config, ipFile, resultPath string, degraded bool) []string {
 	downloadCount := cfg.CFST.DownloadCount
 	downloadSeconds := cfg.CFST.DownloadSeconds
 	minSpeed := cfg.CFST.MinSpeedMB
+	downloadURL := strings.TrimSpace(cfg.CFST.DownloadURL)
 	args := []string{
 		"-n", strconv.Itoa(cfg.CFST.Threads),
 		"-t", strconv.Itoa(cfg.CFST.PingTimes),
@@ -151,6 +177,9 @@ func buildCFSTArgs(cfg Config, ipFile, resultPath string, degraded bool) []strin
 		downloadCount = minPositive(cfg.CFST.DownloadCount, cfg.CFST.DegradedDownloadCount)
 		downloadSeconds = cfg.CFST.DegradedDownloadSeconds
 		minSpeed = 0
+		if reducedURL, ok := degradedDownloadURL(downloadURL, cfg.CFST.DegradedDownloadMB); ok {
+			downloadURL = reducedURL
+		}
 	}
 	args = append(args,
 		"-dn", strconv.Itoa(downloadCount),
@@ -162,11 +191,8 @@ func buildCFSTArgs(cfg Config, ipFile, resultPath string, degraded bool) []strin
 		"-f", ipFile,
 		"-o", resultPath,
 	)
-	if degraded {
-		args = append(args, "-dr", strconv.FormatFloat(cfg.CFST.DegradedRateMbps, 'f', -1, 64))
-	}
-	if strings.TrimSpace(cfg.CFST.DownloadURL) != "" {
-		args = append(args, "-url", cfg.CFST.DownloadURL)
+	if downloadURL != "" {
+		args = append(args, "-url", downloadURL)
 	}
 	return args
 }
@@ -175,7 +201,7 @@ func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
 	now := time.Now()
 	degraded, until := a.rateLimitMode(now, cfg)
 	if degraded {
-		a.appendLog("CFST rate-limit cooldown active until %s; using degraded probe (%.2f Mbps cap)", until.Format(time.RFC3339), cfg.CFST.DegradedRateMbps)
+		a.appendLog("CFST rate-limit cooldown active until %s; using degraded probe (%.2f MB request)", until.Format(time.RFC3339), cfg.CFST.DegradedDownloadMB)
 	}
 
 	candidates, signal, err := a.runCFSTMode(ctx, cfg, degraded)
@@ -183,7 +209,7 @@ func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
 		until = a.recordCFSTRateLimit(time.Now(), cfg, *signal)
 		a.appendLog("CFST rate limit detected: HTTP %d · retry-after=%q · until=%s", signal.StatusCode, signal.RetryAfter, until.Format(time.RFC3339))
 		if !degraded {
-			a.appendLog("CFST switching immediately to degraded probe: count=%d seconds=%d cap=%.2f Mbps", cfg.CFST.DegradedDownloadCount, cfg.CFST.DegradedDownloadSeconds, cfg.CFST.DegradedRateMbps)
+			a.appendLog("CFST switching immediately to degraded probe: count=%d seconds=%d request=%.2f MB", cfg.CFST.DegradedDownloadCount, cfg.CFST.DegradedDownloadSeconds, cfg.CFST.DegradedDownloadMB)
 			fallbackCandidates, fallbackSignal, fallbackErr := a.runCFSTMode(ctx, cfg, true)
 			if fallbackSignal != nil {
 				until = a.recordCFSTRateLimit(time.Now(), cfg, *fallbackSignal)
