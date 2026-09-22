@@ -22,6 +22,7 @@ const (
 	defaultDisableDownload         = false
 	defaultTestNum                 = 10
 	defaultMinSpeed        float64 = 0.0
+	defaultMaxRateMbps     float64 = 0.0
 )
 
 var (
@@ -29,8 +30,9 @@ var (
 	Timeout = defaultTimeout
 	Disable = defaultDisableDownload
 
-	TestCount = defaultTestNum
-	MinSpeed  = defaultMinSpeed
+	TestCount   = defaultTestNum
+	MinSpeed    = defaultMinSpeed
+	MaxRateMbps = defaultMaxRateMbps
 )
 
 func checkDownloadDefault() {
@@ -74,7 +76,7 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 	}
 	bar := utils.NewBar(TestCount, bar_b, "")
 	for i := 0; i < testNum; i++ {
-		speed, colo := downloadHandler(ipSet[i].IP)
+		speed, colo, rateLimited := downloadHandler(ipSet[i].IP)
 		ipSet[i].DownloadSpeed = speed
 		if ipSet[i].Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
 			ipSet[i].Colo = colo
@@ -86,6 +88,9 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 			if len(speedSet) == TestCount {       // 凑够满足条件的 IP 时（下载测速数量 -dn），就跳出循环
 				break
 			}
+		}
+		if rateLimited {
+			break
 		}
 	}
 	bar.Done()
@@ -136,7 +141,7 @@ func printDownloadDebugInfo(ip *net.IPAddr, err error, statusCode int, url, last
 }
 
 // return download Speed
-func downloadHandler(ip *net.IPAddr) (float64, string) {
+func downloadHandler(ip *net.IPAddr) (float64, string, bool) {
 	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
 	client := &http.Client{
 		Transport: &http.Transport{DialContext: getDialContext(ip)},
@@ -161,7 +166,7 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		if utils.Debug { // 调试模式下，输出更多信息
 			utils.Red.Printf("[调试] IP: %s, 下载测速请求创建失败，错误信息: %v, 下载测速地址: %s\n", ip.String(), err, URL)
 		}
-		return 0.0, ""
+		return 0.0, "", false
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
@@ -171,14 +176,22 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		if utils.Debug { // 调试模式下，输出更多信息
 			printDownloadDebugInfo(ip, err, 0, URL, lastRedirectURL, response)
 		}
-		return 0.0, ""
+		return 0.0, "", false
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
+		retryAfter := response.Header.Get("Retry-After")
+		if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode == http.StatusServiceUnavailable && retryAfter != "") {
+			fmt.Printf("CFST_RATE_LIMIT status=%d retry_after=%s\n", response.StatusCode, strconv.Quote(retryAfter))
+			if utils.Debug {
+				printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
+			}
+			return 0.0, "", true
+		}
 		if utils.Debug { // 调试模式下，输出更多信息
 			printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
 		}
-		return 0.0, ""
+		return 0.0, "", false
 	}
 
 	// 通过头部参数获取地区码
@@ -226,6 +239,19 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 			e.Add(float64(contentRead-lastContentRead) / (float64(currentTime.Sub(last_time_slice)) / float64(timeSlice)))
 		}
 		contentRead += int64(bufferRead)
+		if MaxRateMbps > 0 && contentRead > 0 {
+			targetSeconds := float64(contentRead*8) / (MaxRateMbps * 1000 * 1000)
+			targetElapsed := time.Duration(targetSeconds * float64(time.Second))
+			if sleepFor := targetElapsed - time.Since(timeStart); sleepFor > 0 {
+				remaining := time.Until(timeEnd)
+				if sleepFor > remaining {
+					sleepFor = remaining
+				}
+				if sleepFor > 0 {
+					time.Sleep(sleepFor)
+				}
+			}
+		}
 	}
-	return e.Value() / (Timeout.Seconds() / 120), colo
+	return e.Value() / (Timeout.Seconds() / 120), colo, false
 }
