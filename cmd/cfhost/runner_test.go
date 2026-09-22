@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -415,5 +416,96 @@ func TestResolutionJobClassification(t *testing.T) {
 		if resolutionJob(kind) {
 			t.Fatalf("%s must not be labelled partial because it does not resolve domains", kind)
 		}
+	}
+}
+
+
+func TestRunDomainMaintenanceOnlyChangesTarget(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Format(time.RFC3339)
+	cfg := defaultConfig()
+	cfg.AutoApply = false
+	cfg.Sync.Enabled = false
+	cfg.Domains = []Domain{
+		{Host:"a.example", Class:"normal", Mode:"http", Enabled:true},
+		{Host:"b.example", Class:"normal", Mode:"http", Enabled:true},
+	}
+	a := &App{
+		config: cfg,
+		dataDir: dir,
+		state: RuntimeState{
+			Mappings: map[string]string{"a.example":"1.1.1.1", "b.example":"9.9.9.9"},
+			DomainStatus: map[string]string{"a.example":"old-a", "b.example":"keep-b"},
+			DomainHealth: map[string]DomainHealth{},
+			TrackerSamples: map[string]TrackerSampleRuntime{},
+			Candidates: []Candidate{
+				{IP:"2.2.2.2", DelayMS:12, LossRate:0, SpeedMB:10, ObservedAt:now},
+				{IP:"3.3.3.3", DelayMS:25, LossRate:0, SpeedMB:20, ObservedAt:now},
+			},
+		},
+	}
+	if err := a.runDomainMaintenance(context.Background(), cfg, "a.example"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.state.Mappings["a.example"]; got != "2.2.2.2" {
+		t.Fatalf("target domain mapping=%q, want 2.2.2.2", got)
+	}
+	if got := a.state.Mappings["b.example"]; got != "9.9.9.9" {
+		t.Fatalf("unrelated domain changed: %q", got)
+	}
+	if got := a.state.DomainStatus["b.example"]; got != "keep-b" {
+		t.Fatalf("unrelated domain status changed: %q", got)
+	}
+}
+
+func TestTrackerSampleInventoryAndTestState(t *testing.T) {
+	dir := t.TempDir()
+	manualPath := filepath.Join(dir, "manual.tsv")
+	autoPath := filepath.Join(dir, "auto.tsv")
+	hash := "0123456789abcdef0123456789abcdef01234567"
+	if err := os.WriteFile(autoPath, []byte("tracker.example.com\t/announce\t"+hash+"\thttps://tracker.example.com/announce?passkey=test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Tracker.SamplesPath = manualPath
+	cfg.Tracker.AutoSamplesPath = autoPath
+	cfg.Domains = []Domain{{Host:"tracker.example.com", Class:"latency", Mode:"tracker", Enabled:true}}
+	a := &App{state:RuntimeState{TrackerSamples:map[string]TrackerSampleRuntime{}}}
+	a.refreshTrackerSampleInventory(cfg)
+	st := a.state.TrackerSamples["tracker.example.com"]
+	if !st.Available || st.Source != "auto" || st.Tested {
+		t.Fatalf("unexpected initial sample state: %#v", st)
+	}
+	a.recordTrackerSampleTest(cfg, cfg.Domains[0], true, "announce rejected · candidate reachable")
+	st = a.state.TrackerSamples["tracker.example.com"]
+	if !st.Available || !st.Tested || !st.Passed || st.LastTest == "" {
+		t.Fatalf("sample test state not recorded: %#v", st)
+	}
+	a.markTrackerSamplesPending([]string{"tracker.example.com"})
+	st = a.state.TrackerSamples["tracker.example.com"]
+	if st.Tested || st.Passed || st.Detail != "已获取，等待维护验证" {
+		t.Fatalf("new downloader sample must return to pending: %#v", st)
+	}
+}
+
+func TestManualTrackerSampleKeepsPriorityAndTestState(t *testing.T) {
+	dir := t.TempDir()
+	manualPath := filepath.Join(dir, "manual.tsv")
+	autoPath := filepath.Join(dir, "auto.tsv")
+	hash := "0123456789abcdef0123456789abcdef01234567"
+	line := "tracker.example.com\t/announce\t"+hash+"\thttps://tracker.example.com/announce?passkey=test\n"
+	if err := os.WriteFile(manualPath, []byte(line), 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(autoPath, []byte(line), 0600); err != nil { t.Fatal(err) }
+	cfg := defaultConfig()
+	cfg.Tracker.SamplesPath = manualPath
+	cfg.Tracker.AutoSamplesPath = autoPath
+	cfg.Domains = []Domain{{Host:"tracker.example.com", Class:"latency", Mode:"tracker", Enabled:true}}
+	a := &App{state:RuntimeState{TrackerSamples:map[string]TrackerSampleRuntime{}}}
+	a.refreshTrackerSampleInventory(cfg)
+	a.recordTrackerSampleTest(cfg, cfg.Domains[0], true, "announce accepted")
+	a.markTrackerSamplesPending([]string{"tracker.example.com"})
+	st := a.state.TrackerSamples["tracker.example.com"]
+	if st.Source != "manual" || !st.Tested || !st.Passed {
+		t.Fatalf("auto discovery must not invalidate higher-priority manual sample: %#v", st)
 	}
 }
