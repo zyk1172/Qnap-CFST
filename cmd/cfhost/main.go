@@ -135,7 +135,7 @@ func (a *App) scheduler() {
 func (a *App) startJob(kind string) bool {
 	a.mu.Lock()
 	if a.state.Running { a.mu.Unlock(); return false }
-	a.state.Running=true; a.state.CurrentJob=kind; a.state.LastError=""
+	a.state.Running=true; a.state.CurrentJob=kind; a.state.CurrentDomain=""; a.state.LastError=""
 	mappingsBefore:=len(a.state.Mappings); refreshBefore:=a.state.LastRefresh
 	a.mu.Unlock()
 
@@ -146,7 +146,7 @@ func (a *App) startJob(kind string) bool {
 		err:=a.runJob(ctx,kind,cfg)
 		finished:=time.Now(); now:=finished.Format(time.RFC3339)
 		a.mu.Lock()
-		a.state.Running=false; a.state.CurrentJob=""; a.state.LastRun=now
+		a.state.Running=false; a.state.CurrentJob=""; a.state.CurrentDomain=""; a.state.LastRun=now
 		if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
 		record:=RunRecord{Kind:kind,StartedAt:started.Format(time.RFC3339),FinishedAt:now,DurationMS:finished.Sub(started).Milliseconds(),Success:err==nil,MappingsBefore:mappingsBefore,MappingsAfter:len(a.state.Mappings),CandidateCount:len(a.state.Candidates),FullRefresh:a.state.LastRefresh!=refreshBefore}
 		if resolutionJob(kind) {
