@@ -56,8 +56,10 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 
 	scopeCfg := cfg
 	scopeCfg.Domains = []Domain{d}
+	a.setJobProgress("读取样本", d.Host, 1, 6, 0, 0)
 	samples := a.loadSamples(ctx, scopeCfg)
 	downloaderFailures := a.loadDownloaderTrackerFailures(ctx, scopeCfg, samples)
+	a.setJobProgress("读取样本", d.Host+" · 样本就绪", 1, 6, 1, 1)
 	now := time.Now()
 
 	a.mu.RLock()
@@ -73,6 +75,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	fresh := freshCandidates(cachedState, time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute, now)
 
 	finish := func(resolved bool, detail string) error {
+		a.setJobProgress("应用结果", d.Host+" · 写入映射与状态", 6, 6, 0, 0)
 		h := health[d.Host]
 		stamp := time.Now().Format(time.RFC3339)
 		if resolved {
@@ -89,6 +92,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		if !resolved {
 			return fmt.Errorf("%s unresolved: %s", d.Host, detail)
 		}
+		a.completeJobProgress("完成", d.Host+" · 维护完成")
 		return nil
 	}
 
@@ -136,6 +140,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return finish(false, "tracker sample missing")
 	}
 
+	a.setJobProgress("检查当前 IP", d.Host, 2, 6, 0, 0)
 	if currentIP != "" {
 		if failure, exists := downloaderFailures[d.Host]; exists && downloaderFailureIsNewer(failure, health[d.Host].LastSuccess) {
 			detail := "downloader reported tracker connection failure · " + failure.Detail
@@ -156,7 +161,10 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		}
 	}
 
+	candidateStage := "验证缓存候选"
+	candidateStep := 3
 	tryCandidates := func(candidates []Candidate) (bool, string) {
+		a.setJobProgress(candidateStage, fmt.Sprintf("%s · %d 个候选", d.Host, len(candidates)), candidateStep, 6, 0, len(candidates))
 		lastDetail := "no candidate"
 		preferred := groupPreferredIP(cfg, current, d, currentIP)
 		if preferred != "" {
@@ -169,7 +177,9 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 				return true, detail
 			}
 		}
-		for _, candidate := range orderedCandidates(candidates, d, "", currentIP, cfg) {
+		order := orderedCandidates(candidates, d, "", currentIP, cfg)
+		for index, candidate := range order {
+			a.setJobProgress(candidateStage, fmt.Sprintf("%d/%d · %s", index+1, len(order), candidate.IP), candidateStep, 6, index+1, len(order))
 			if candidate.IP == preferred {
 				continue
 			}
@@ -195,12 +205,17 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	// threshold/backoff. Only the selected domain consumes the new candidates.
 	a.appendLog("%s manual maintain: cached candidates exhausted, refreshing CFST", d.Host)
 	a.markRefreshAttempt(now)
+	a.setJobProgress("CFST 测速", d.Host+" · 刷新候选池", 4, 6, 0, 0)
 	refreshed, err := a.runCFST(ctx, cfg)
 	if err != nil {
 		statuses[d.Host] = "manual unresolved · CFST refresh failed · " + err.Error()
 		return finish(false, err.Error())
 	}
 	a.storeCandidates(refreshed)
+	a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(refreshed)), 4, 6, 1, 1)
+	candidateStage = "验证新候选"
+	candidateStep = 5
+	a.setJobProgress(candidateStage, d.Host, candidateStep, 6, 0, len(refreshed))
 	resolved, lastDetail := tryCandidates(refreshed)
 	if resolved {
 		return finish(true, "")
@@ -228,6 +243,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 	a.state.Running = true
 	a.state.CurrentJob = "maintain"
 	a.state.CurrentDomain = d.Host
+	a.state.Progress = initialJobProgress("maintain")
 	a.state.LastError = ""
 	mappingsBefore := len(a.state.Mappings)
 	refreshBefore := a.state.LastRefresh
@@ -248,6 +264,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 		a.state.Running = false
 		a.state.CurrentJob = ""
 		a.state.CurrentDomain = ""
+		a.state.Progress = JobProgress{}
 		a.state.LastRun = now
 		if err != nil {
 			a.state.LastError = err.Error()
