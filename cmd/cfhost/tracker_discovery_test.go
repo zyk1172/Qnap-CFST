@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const testHashA = "0123456789abcdef0123456789abcdef01234567"
@@ -267,4 +269,161 @@ func TestNormalizeDownloaderURLs(t *testing.T) {
 	if err != nil || got != "http://nas:8080/qb" {
 		t.Fatalf("unexpected qB URL %q err=%v", got, err)
 	}
+}
+
+
+func TestTransmissionTrackerConnectionFailureFeedsRepairSignal(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "runtime-session")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			Method  string `json:"method"`
+			Params struct {
+				Fields []string `json:"fields"`
+				IDs []string `json:"ids"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if req.JSONRPC != "2.0" || req.Method != "torrent_get" {
+			t.Fatalf("unexpected modern request %#v", req)
+		}
+		if len(req.Params.IDs) != 1 || req.Params.IDs[0] != testHashA {
+			t.Fatalf("expected sample hash lookup, got %#v", req.Params.IDs)
+		}
+		if !containsString(req.Params.Fields, "tracker_stats") {
+			t.Fatalf("tracker_stats not requested: %#v", req.Params.Fields)
+		}
+		now := time.Now().Unix()
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"jsonrpc":"2.0",
+			"result":{"torrents":[{
+				"hash_string":"%s",
+				"tracker_stats":[{
+					"announce":"https://tracker.m-team.cc/announce?passkey=secret",
+					"host":"tracker.m-team.cc",
+					"has_announced":true,
+					"last_announce_result":"Could not connect to tracker",
+					"last_announce_succeeded":false,
+					"last_announce_timed_out":false,
+					"last_announce_time":%d
+				}]
+			}]},
+			"id":1
+		}`, testHashA, now)))
+	}))
+	defer srv.Close()
+
+	hash, err := decodeInfoHash(testHashA)
+	if err != nil { t.Fatal(err) }
+	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
+		Enabled: true,
+		URL: srv.URL,
+	}, map[string]TrackerSample{
+		"tracker.m-team.cc": {
+			Domain:"tracker.m-team.cc",
+			HashHex:testHashA,
+			Hash:hash,
+			URL:"https://tracker.m-team.cc/announce?passkey=secret",
+		},
+	})
+	if err != nil { t.Fatal(err) }
+	failure, ok := failures["tracker.m-team.cc"]
+	if !ok {
+		t.Fatal("Transmission runtime connection failure was not surfaced")
+	}
+	if !strings.Contains(failure.Detail, "Could not connect to tracker") {
+		t.Fatalf("unexpected failure detail %q", failure.Detail)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("expected 409 negotiation + one tracker_stats request, got %d", requests.Load())
+	}
+}
+
+func TestTransmissionBusinessTrackerErrorDoesNotInvalidateCandidate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "runtime-session")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"jsonrpc":"2.0",
+			"result":{"torrents":[{
+				"hash_string":"%s",
+				"tracker_stats":[{
+					"announce":"https://tracker.m-team.cc/announce?passkey=secret",
+					"host":"tracker.m-team.cc",
+					"has_announced":true,
+					"last_announce_result":"Missing key peer_id",
+					"last_announce_succeeded":false,
+					"last_announce_timed_out":false,
+					"last_announce_time":%d
+				}]
+			}]},
+			"id":1
+		}`, testHashA, time.Now().Unix())))
+	}))
+	defer srv.Close()
+
+	hash, _ := decodeInfoHash(testHashA)
+	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
+		Enabled:true, URL:srv.URL,
+	}, map[string]TrackerSample{
+		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA, Hash:hash, URL:"https://tracker.m-team.cc/announce"},
+	})
+	if err != nil { t.Fatal(err) }
+	if _, exists := failures["tracker.m-team.cc"]; exists {
+		t.Fatal("business-level Tracker rejection must not invalidate the candidate")
+	}
+}
+
+func TestTransmissionTimedOutTrackerIsConnectionFailure(t *testing.T) {
+	body := []byte(`{
+		"jsonrpc":"2.0",
+		"result":{"torrents":[{
+			"hash_string":"0123456789abcdef0123456789abcdef01234567",
+			"tracker_stats":[{
+				"announce":"https://tracker.example.com/announce",
+				"host":"tracker.example.com",
+				"has_announced":true,
+				"last_announce_result":"",
+				"last_announce_succeeded":false,
+				"last_announce_timed_out":true,
+				"last_announce_time":123
+			}]
+		}]},
+		"id":1
+	}`)
+	rows, err := parseTransmissionTrackerStats(body, true)
+	if err != nil { t.Fatal(err) }
+	if len(rows) != 1 || len(rows[0].TrackerStats) != 1 || !rows[0].TrackerStats[0].LastAnnounceTimedOut {
+		t.Fatalf("timeout flag not parsed: %#v", rows)
+	}
+}
+
+func TestDownloaderTrackerFailureStalenessGuard(t *testing.T) {
+	failure := downloaderTrackerFailure{LastAnnounceTime: 1_800_000_000}
+	before := time.Unix(failure.LastAnnounceTime-10, 0).UTC().Format(time.RFC3339)
+	after := time.Unix(failure.LastAnnounceTime+10, 0).UTC().Format(time.RFC3339)
+	if !downloaderFailureIsNewer(failure, before) {
+		t.Fatal("new Transmission failure should invalidate an older successful mapping")
+	}
+	if downloaderFailureIsNewer(failure, after) {
+		t.Fatal("stale Transmission failure must not invalidate a mapping repaired afterwards")
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want { return true }
+	}
+	return false
 }
