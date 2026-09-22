@@ -63,6 +63,12 @@ document.addEventListener('click', async event => {
     return
   }
 
+  const maintain = event.target.closest('[data-maintain-domain]')
+  if (maintain) {
+    await maintainDomain(Number(maintain.dataset.maintainDomain))
+    return
+  }
+
   const edit = event.target.closest('[data-edit-domain]')
   if (edit) {
     openDomainEditor(Number(edit.dataset.editDomain))
