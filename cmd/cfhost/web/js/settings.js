@@ -191,7 +191,7 @@ function emptyState(text) {
 }
 
 function jobLabel(kind) {
-  return ({ run: 'CFST 测速', repair: '智能 Repair', optimize: '完整优化' })[kind] || kind || '任务'
+  return ({ run: 'CFST 测速', repair: '智能 Repair', optimize: '完整优化', maintain: '单域名维护' })[kind] || kind || '任务'
 }
 
 function hydrateIcons(root = document) {
