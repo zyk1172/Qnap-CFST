@@ -53,8 +53,6 @@ https://github.com/XIU2/CloudflareSpeedTest
         丢包几率上限；只输出低于/等于指定丢包率的 IP，范围 0.00~1.00，0 过滤掉任何丢包的 IP；(默认 1.00)
     -sl 5
         下载速度下限；只输出高于指定下载速度的 IP，凑够指定数量 [-dn] 才会停止测速；(默认 0.00 MB/s)
-    -dr 5
-        下载测速限速；限制单个测速连接的最高接收速率，单位 Mbps；0 为不限速；(默认 0)
 
     -p 10
         显示结果数量；测速后直接显示指定数量的结果，为 0 时不显示结果直接退出；(默认 10 个)
@@ -95,7 +93,6 @@ https://github.com/XIU2/CloudflareSpeedTest
 	flag.IntVar(&minDelay, "tll", 0, "平均延迟下限")
 	flag.Float64Var(&maxLossRate, "tlr", 1, "丢包几率上限")
 	flag.Float64Var(&task.MinSpeed, "sl", 0, "下载速度下限")
-	flag.Float64Var(&task.MaxRateMbps, "dr", 0, "下载测速限速 Mbps")
 
 	flag.IntVar(&utils.PrintNum, "p", 10, "显示结果数量")
 	flag.StringVar(&task.IPFile, "f", "ip.txt", "IP段数据文件")
