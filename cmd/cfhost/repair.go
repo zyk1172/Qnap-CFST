@@ -67,7 +67,7 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
-	now:=time.Now(); samples:=a.loadSamples(ctx,cfg)
+	now:=time.Now(); samples:=a.loadSamples(ctx,cfg); downloaderFailures:=a.loadDownloaderTrackerFailures(ctx,cfg,samples)
 	a.mu.RLock()
 	current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); cachedState:=append([]Candidate(nil),a.state.Candidates...); lastRefresh:=a.state.LastRefresh
 	a.mu.RUnlock()
@@ -103,6 +103,14 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		refreshable:=domainRefreshable(d,cfg,samples)
 		if !refreshable { statuses[d.Host]="tracker sample missing"; pending=append(pending,pendingDomain{d,currentIP,false}); continue }
 		if currentIP!="" {
+			if failure,exists:=downloaderFailures[d.Host]; exists && downloaderFailureIsNewer(failure,health[d.Host].LastSuccess) {
+				detail:="downloader reported tracker connection failure · "+failure.Detail
+				statuses[d.Host]="current failed · "+detail
+				a.recordTrackerSampleTest(cfg,d,false,detail)
+				a.appendLog("%s current %s failed from downloader runtime: %s",d.Host,currentIP,failure.Detail)
+				pending=append(pending,pendingDomain{d,currentIP,refreshable})
+				continue
+			}
 			ok,detail:=a.verifyDomain(ctx,d,currentIP,cfg,samples)
 			if ok {
 				mappings[d.Host]=currentIP; statuses[d.Host]="retained · "+currentIP+" · "+detail
