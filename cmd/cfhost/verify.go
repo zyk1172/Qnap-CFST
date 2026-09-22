@@ -104,8 +104,17 @@ func verifyHTTPConnectivity(parent context.Context, d Domain, ip string, cfg Con
 	if err != nil { return false, err.Error() }
 	defer resp.Body.Close()
 	_, _ = io.CopyN(io.Discard, resp.Body, 4096)
-	if resp.StatusCode < 100 || resp.StatusCode > 599 { return false, fmt.Sprintf("HTTP %d", resp.StatusCode) }
-	return true, fmt.Sprintf("HTTP %d", resp.StatusCode)
+	return evaluateHTTPConnectivityStatus(resp.StatusCode)
+}
+
+func evaluateHTTPConnectivityStatus(status int) (bool, string) {
+	if status < 100 || status > 599 {
+		return false, fmt.Sprintf("HTTP %d", status)
+	}
+	if status == http.StatusForbidden {
+		return false, fmt.Sprintf("HTTP %d", status)
+	}
+	return true, fmt.Sprintf("HTTP %d", status)
 }
 
 func verifyHTTPDomain(parent context.Context, d Domain, ip string, cfg Config) (bool, string) {
