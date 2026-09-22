@@ -16,10 +16,14 @@ type pendingDomain struct {
 func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 	switch kind {
 	case "run":
+		a.setJobProgress("准备测速", "准备 CFST 参数", 1, 3, 1, 1)
 		a.markRefreshAttempt(time.Now())
+		a.setJobProgress("CFST 测速", "正在测试候选 IP", 2, 3, 0, 0)
 		candidates, err := a.runCFST(ctx, cfg)
 		if err != nil { return err }
+		a.setJobProgress("保存候选", fmt.Sprintf("写入 %d 个候选 IP", len(candidates)), 3, 3, 0, 0)
 		a.storeCandidates(candidates)
+		a.completeJobProgress("完成", fmt.Sprintf("得到 %d 个候选 IP", len(candidates)))
 		return nil
 	case "repair":
 		return a.runSmartRepair(ctx, cfg)
@@ -67,7 +71,10 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
-	now:=time.Now(); samples:=a.loadSamples(ctx,cfg); downloaderFailures:=a.loadDownloaderTrackerFailures(ctx,cfg,samples)
+	now:=time.Now()
+	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 1, 7, 0, 0)
+	samples:=a.loadSamples(ctx,cfg); downloaderFailures:=a.loadDownloaderTrackerFailures(ctx,cfg,samples)
+	a.setJobProgress("读取样本", fmt.Sprintf("样本就绪 · %d 个域名配置", len(cfg.Domains)), 1, 7, 1, 1)
 	a.mu.RLock()
 	current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); cachedState:=append([]Candidate(nil),a.state.Candidates...); lastRefresh:=a.state.LastRefresh
 	a.mu.RUnlock()
@@ -75,7 +82,8 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	a.appendLog("repair: current=%d cached-candidates=%d",len(current),len(cached))
 
 	mappings:=make(map[string]string); statuses:=make(map[string]string); groupIP:=make(map[string]string); pending:=make([]pendingDomain,0); freshDownloaderFailure:=make(map[string]bool)
-	for _,d:=range cfg.Domains {
+	for index,d:=range cfg.Domains {
+		a.setJobDomainProgress("检查当前映射", 2, 7, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; continue }
 		currentIP:=current[d.Host]
 
@@ -123,7 +131,9 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		pending=append(pending,pendingDomain{d,currentIP,refreshable})
 	}
 
-	pending=a.resolvePending(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP)
+	a.setJobProgress("验证缓存候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 3, 7, 0, len(pending))
+	pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,"验证缓存候选",3,7)
+	a.setJobProgress("评估刷新", fmt.Sprintf("仍有 %d 个域名待处理", len(pending)), 4, 7, 0, 0)
 	maxProspective:=0; refreshablePending:=0
 	for _,p:=range pending {
 		if !p.Refreshable { continue }
@@ -151,6 +161,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		backoff=0
 	}
 	var refreshErr error
+	a.setJobProgress("评估刷新", fmt.Sprintf("可刷新 %d 个域名", refreshablePending), 4, 7, 1, 1)
 	if refreshablePending>0 && refreshNow {
 		if forceRuntimeRefresh {
 			a.appendLog("repair: starting CFST refresh immediately after downloader tracker connection failure")
@@ -158,9 +169,20 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			a.appendLog("repair: starting CFST refresh (failure streak=%d, backoff=%s)",maxProspective,backoff)
 		}
 		a.markRefreshAttempt(now); lastRefresh=now.Format(time.RFC3339)
+		a.setJobProgress("CFST 测速", "正在刷新候选 IP 池", 5, 7, 0, 0)
 		newCandidates,err:=a.runCFST(ctx,cfg)
-		if err!=nil { refreshErr=err; a.appendLog("repair: CFST refresh failed: %v",err) } else { a.storeCandidates(newCandidates); pending=a.resolvePending(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP) }
+		if err!=nil {
+			refreshErr=err
+			a.setJobProgress("CFST 测速", "测速失败 · "+err.Error(), 5, 7, 1, 1)
+			a.appendLog("repair: CFST refresh failed: %v",err)
+		} else {
+			a.storeCandidates(newCandidates)
+			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
+			a.setJobProgress("验证新候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 6, 7, 0, len(pending))
+			pending=a.resolvePendingWithProgress(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP,"验证新候选",6,7)
+		}
 	} else if refreshablePending>0 {
+		a.setJobProgress("验证新候选", "无需立即刷新 CFST，保留当前判定", 6, 7, 1, 1)
 		if !nextRefresh.IsZero() { a.appendLog("repair: CFST refresh deferred until %s",nextRefresh.Format(time.RFC3339)) } else { a.appendLog("repair: waiting for failure threshold (%d/%d)",maxProspective,cfg.Repair.FailureThreshold) }
 	}
 
@@ -179,15 +201,25 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		_,nextTime,_:=refreshDecision(finalNow,lastRefresh,maxFinalStreak,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,false)
 		if !nextTime.IsZero(){next=nextTime.Format(time.RFC3339)}
 	}
+	a.setJobProgress("应用结果", fmt.Sprintf("写入 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
 	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,next,false);err!=nil{return err}
 	if refreshErr!=nil{return refreshErr}
+	a.completeJobProgress("完成", fmt.Sprintf("Repair 完成 · %d 个映射", len(mappings)))
 	return nil
 }
 
 func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string) []pendingDomain {
-	if len(pending)==0{return pending}
+	return a.resolvePendingWithProgress(ctx,cfg,samples,candidates,pending,mappings,statuses,groupIP,"验证候选",1,1)
+}
+
+func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string,progressStage string,progressStep,progressSteps int) []pendingDomain {
+	if len(pending)==0{
+		a.setJobProgress(progressStage, "无需处理", progressStep, progressSteps, 1, 1)
+		return pending
+	}
 	remaining:=make([]pendingDomain,0,len(pending))
-	for _,p:=range pending {
+	for index,p:=range pending {
+		a.setJobDomainProgress(progressStage, progressStep, progressSteps, index+1, len(pending), p.Domain.Host)
 		if !p.Refreshable { remaining=append(remaining,p); continue }
 		if p.Domain.Class=="normal" {
 			order:=orderedCandidates(candidates,p.Domain,"","",cfg)

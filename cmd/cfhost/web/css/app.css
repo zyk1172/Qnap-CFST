@@ -189,7 +189,52 @@ svg { display: block; }
 .sidebar-runtime { display: flex; min-width: 0; flex: 1; align-items: center; gap: 9px; }
 .sidebar-runtime-copy { display: grid; min-width: 0; line-height: 1.25; transition: opacity 150ms ease; }
 .sidebar-runtime-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-runtime-copy small { margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-subtitle {
+  display: block;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.sidebar-subtitle-track { display: block; min-width: 0; }
+.sidebar-subtitle-track > span { white-space: nowrap; }
+.sidebar-subtitle.is-progress .sidebar-subtitle-track {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  animation: sidebar-runtime-scroll 9s linear infinite;
+}
+.sidebar-subtitle.is-progress .sidebar-subtitle-track > span {
+  display: block;
+  min-width: max-content;
+  padding-right: 32px;
+}
+@keyframes sidebar-runtime-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.sidebar-progress-track {
+  display: block;
+  width: 100%;
+  height: 2px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(var(--primary-rgb), .12);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.sidebar-progress-track.is-active { opacity: 1; }
+.sidebar-progress-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 280ms var(--ease-standard);
+}
 
 .status-dot {
   display: inline-block;
@@ -915,6 +960,7 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sidebar-subtitle.is-progress .sidebar-subtitle-track { animation: none !important; }
   *, *::before, *::after {
     scroll-behavior: auto !important;
     animation-duration: .001ms !important;

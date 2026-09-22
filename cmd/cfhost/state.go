@@ -45,6 +45,7 @@ func (a *App) persistStateStrict() error {
 	s.Running = false
 	s.CurrentJob = ""
 	s.CurrentDomain = ""
+	s.Progress = JobProgress{}
 	a.mu.RUnlock()
 	return writeJSON(filepath.Join(a.dataDir, "state.json"), s)
 }
