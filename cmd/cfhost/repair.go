@@ -46,9 +46,11 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 	if autoErr!=nil && !os.IsNotExist(autoErr) { a.appendLog("tracker auto samples warning: %v",autoErr) }
 
 	autoSamples:=autoCache
+	discoveredDomains:=[]string{}
 	if cfg.Tracker.AutoDiscover && (cfg.Tracker.Transmission.Enabled || cfg.Tracker.QBittorrent.Enabled) {
 		cache,report:=a.refreshAutoTrackerSamples(ctx,cfg)
 		autoSamples=cache
+		discoveredDomains=append(discoveredDomains,report.Domains...)
 		for _,msg:=range report.Errors { a.appendLog("tracker auto-discovery: %s",msg) }
 		if len(report.Domains)>0 {
 			a.appendLog("tracker auto-discovery: transmission=%d qbittorrent=%d domains=%d",report.Transmission,report.QBittorrent,len(report.Domains))
@@ -59,6 +61,7 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 	// Manually managed samples always take precedence over discovered/cache samples.
 	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
 	a.updateTrackerSampleInventory(cfg,manual,autoSamples)
+	a.markTrackerSamplesPending(discoveredDomains)
 	if len(samples)>0 { a.appendLog("tracker samples ready: %d",len(samples)) }
 	return samples
 }
