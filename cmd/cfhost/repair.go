@@ -74,7 +74,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	cached:=freshCandidates(cachedState,time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute,now)
 	a.appendLog("repair: current=%d cached-candidates=%d",len(current),len(cached))
 
-	mappings:=make(map[string]string); statuses:=make(map[string]string); groupIP:=make(map[string]string); pending:=make([]pendingDomain,0)
+	mappings:=make(map[string]string); statuses:=make(map[string]string); groupIP:=make(map[string]string); pending:=make([]pendingDomain,0); freshDownloaderFailure:=make(map[string]bool)
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { statuses[d.Host]="disabled"; continue }
 		currentIP:=current[d.Host]
@@ -107,6 +107,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 				detail:="downloader reported tracker connection failure · "+failure.Detail
 				statuses[d.Host]="current failed · "+detail
 				a.recordTrackerSampleTest(cfg,d,false,detail)
+				freshDownloaderFailure[d.Host]=downloaderFailureIsNewer(failure,health[d.Host].LastFailure)
 				a.appendLog("%s current %s failed from downloader runtime: %s",d.Host,currentIP,failure.Detail)
 				pending=append(pending,pendingDomain{d,currentIP,refreshable})
 				continue
@@ -137,9 +138,25 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 	bootstrap:=refreshablePending>0 && len(cached)==0 && (len(current)==0 || normalNeedsBootstrap)
 	refreshNow,nextRefresh,backoff:=refreshDecision(now,lastRefresh,maxProspective,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,bootstrap)
+	forceRuntimeRefresh:=false
+	for _,p:=range pending {
+		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
+			forceRuntimeRefresh=true
+			break
+		}
+	}
+	if forceRuntimeRefresh {
+		refreshNow=true
+		nextRefresh=time.Time{}
+		backoff=0
+	}
 	var refreshErr error
 	if refreshablePending>0 && refreshNow {
-		a.appendLog("repair: starting CFST refresh (failure streak=%d, backoff=%s)",maxProspective,backoff)
+		if forceRuntimeRefresh {
+			a.appendLog("repair: starting CFST refresh immediately after downloader tracker connection failure")
+		} else {
+			a.appendLog("repair: starting CFST refresh (failure streak=%d, backoff=%s)",maxProspective,backoff)
+		}
 		a.markRefreshAttempt(now); lastRefresh=now.Format(time.RFC3339)
 		newCandidates,err:=a.runCFST(ctx,cfg)
 		if err!=nil { refreshErr=err; a.appendLog("repair: CFST refresh failed: %v",err) } else { a.storeCandidates(newCandidates); pending=a.resolvePending(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP) }
