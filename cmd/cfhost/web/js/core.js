@@ -79,6 +79,7 @@ const store = {
   configDraft: null,
   domainQuery: '',
   domainFilter: 'all',
+  expandedDomainHost: '',
   candidateSort: 'latency',
   logQuery: '',
   logPaused: false,
