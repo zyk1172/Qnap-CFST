@@ -19,6 +19,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/run", a.handleJob("run"))
 	mux.HandleFunc("/api/repair", a.handleJob("repair"))
 	mux.HandleFunc("/api/optimize", a.handleJob("optimize"))
+	mux.HandleFunc("/api/domain-maintain", a.handleDomainMaintain)
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
@@ -82,6 +83,7 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		a.config = c
 		a.mu.Unlock()
+		a.refreshTrackerSampleInventory(c)
 		a.appendLog("configuration saved")
 		writeResponse(w, c)
 	default:
@@ -102,6 +104,36 @@ func (a *App) handleJob(kind string) http.HandlerFunc {
 		w.WriteHeader(http.StatusAccepted)
 		writeResponse(w, map[string]string{"status": "started", "job": kind})
 	}
+}
+
+func (a *App) handleDomainMaintain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		Host string `json:"host"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.Host = strings.ToLower(strings.TrimSpace(request.Host))
+	if request.Host == "" {
+		http.Error(w, "host is required", http.StatusBadRequest)
+		return
+	}
+	started, err := a.startDomainMaintenance(request.Host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !started {
+		http.Error(w, "another job is running", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	writeResponse(w, map[string]string{"status": "started", "job": "maintain", "host": request.Host})
 }
 
 func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +188,9 @@ func (a *App) handleTrackerSampleDiscovery(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	cache, report := a.refreshAutoTrackerSamples(r.Context(), cfg)
+	a.refreshTrackerSampleInventory(cfg)
+	a.markTrackerSamplesPending(report.Domains)
+	a.persistState()
 	a.appendLog("tracker manual discovery: transmission=%d qbittorrent=%d cached=%d", report.Transmission, report.QBittorrent, len(cache))
 	writeResponse(w, map[string]any{
 		"status":  "ok",

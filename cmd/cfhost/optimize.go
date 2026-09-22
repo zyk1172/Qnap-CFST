@@ -41,7 +41,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		order:=orderedCandidates(candidates,d,preferred,"",cfg)
 		resolved:=false; lastDetail:="no candidate"
 		for _,c:=range order {
-			ok,detail:=verifyConfiguredDomain(ctx,d,c.IP,cfg,samples);lastDetail=detail
+			ok,detail:=a.verifyDomain(ctx,d,c.IP,cfg,samples);lastDetail=detail
 			if !ok{continue}
 			mappings[d.Host]=c.IP;statuses[d.Host]="optimized · "+c.IP+" · "+detail
 			if k:=groupKey(d);k!=""&&groupIP[k]==""{groupIP[k]=c.IP}
@@ -49,7 +49,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		}
 		if !resolved {
 			if oldIP:=current[d.Host];oldIP!="" {
-				ok,detail:=verifyConfiguredDomain(ctx,d,oldIP,cfg,samples)
+				ok,detail:=a.verifyDomain(ctx,d,oldIP,cfg,samples)
 				if ok { mappings[d.Host]=oldIP;statuses[d.Host]="retained after optimize · "+oldIP+" · "+detail;resolved=true }
 			}
 		}

@@ -146,9 +146,10 @@ function historyTimelineItem(item) {
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
   const variant = !success ? 'danger' : unresolved ? 'warning' : 'success'
+  const target = item.targetDomain ? `${esc(item.targetDomain)} · ` : ''
   const summary = success
-    ? `${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
-    : esc(item.error || '执行失败')
+    ? `${target}${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
+    : `${target}${esc(item.error || '执行失败')}`
   const leftover = success && unresolved
     ? `<small class="timeline-warning">${unresolved} 个域名未解析${names.length ? ` · ${esc(names.join('、'))}` : ''}</small>`
     : ''
@@ -181,6 +182,8 @@ function domainRowsHTML(domains, filtered) {
     const realIndex = domains.indexOf(domain)
     const ip = mappings[domain.host]
     const streak = health[domain.host]?.failureStreak || 0
+    const sample = trackerSampleMeta(domain)
+    const maintaining = !!store.state?.running && store.state.currentJob === 'maintain' && store.state.currentDomain === domain.host
     return `
       <tr>
         <td><strong>${esc(domain.host)}</strong><div class="card-subtitle">${esc(domain.endpoint || '/')}</div></td>
@@ -188,16 +191,18 @@ function domainRowsHTML(domains, filtered) {
         <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'}">${esc(domain.class)}</span></td>
         <td>${domain.group ? `<span class="chip">${esc(domain.group)}</span>` : '—'}</td>
         <td class="mono">${ip ? esc(ip) : '—'}</td>
+        <td><span class="chip ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span><div class="card-subtitle">${esc(sample.detail)}</div></td>
         <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>
         <td>${streak ? `<span class="chip danger">${streak}</span>` : '<span class="chip">0</span>'}</td>
         <td><div class="table-actions">
+          <button class="btn secondary small" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只检查并维护这个域名" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}${maintaining ? '维护中' : '维护'}</button>
           <button class="icon-button" data-edit-domain="${realIndex}" aria-label="编辑">${icon('edit')}</button>
           <button class="icon-button" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
           <button class="icon-button" data-delete-domain="${realIndex}" aria-label="删除">${icon('trash')}</button>
         </div></td>
       </tr>
     `
-  }).join('') : '<tr><td colspan="8" class="table-empty">没有符合条件的域名</td></tr>'
+  }).join('') : '<tr><td colspan="9" class="table-empty">没有符合条件的域名</td></tr>'
 }
 
 // Patch only the result region. Re-rendering the whole page would replace the
@@ -229,7 +234,7 @@ function renderDomains() {
         </div>
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>域名</th><th>类型</th><th>策略</th><th>站点组</th><th>当前 IP</th><th>健康</th><th>连续失败</th><th></th></tr></thead>
+            <thead><tr><th>域名</th><th>类型</th><th>策略</th><th>站点组</th><th>当前 IP</th><th>样本</th><th>健康</th><th>连续失败</th><th></th></tr></thead>
             <tbody id="domain-rows">
               ${domainRowsHTML(domains, filtered)}
             </tbody>

@@ -32,7 +32,10 @@ func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 
 func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSample {
 	samples:=map[string]TrackerSample{}
-	if !cfg.Tracker.RealAnnounce { return samples }
+	if !cfg.Tracker.RealAnnounce {
+		a.refreshTrackerSampleInventory(cfg)
+		return samples
+	}
 
 	manual,err:=loadTrackerSamples(cfg.Tracker.SamplesPath)
 	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
@@ -42,8 +45,12 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 	if autoCache!=nil { mergeTrackerSamples(samples,autoCache,false) }
 	if autoErr!=nil && !os.IsNotExist(autoErr) { a.appendLog("tracker auto samples warning: %v",autoErr) }
 
+	autoSamples:=autoCache
+	discoveredDomains:=[]string{}
 	if cfg.Tracker.AutoDiscover && (cfg.Tracker.Transmission.Enabled || cfg.Tracker.QBittorrent.Enabled) {
 		cache,report:=a.refreshAutoTrackerSamples(ctx,cfg)
+		autoSamples=cache
+		discoveredDomains=append(discoveredDomains,report.Domains...)
 		for _,msg:=range report.Errors { a.appendLog("tracker auto-discovery: %s",msg) }
 		if len(report.Domains)>0 {
 			a.appendLog("tracker auto-discovery: transmission=%d qbittorrent=%d domains=%d",report.Transmission,report.QBittorrent,len(report.Domains))
@@ -53,6 +60,8 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 
 	// Manually managed samples always take precedence over discovered/cache samples.
 	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
+	a.updateTrackerSampleInventory(cfg,manual,autoSamples)
+	a.markTrackerSamplesPending(discoveredDomains)
 	if len(samples)>0 { a.appendLog("tracker samples ready: %d",len(samples)) }
 	return samples
 }
@@ -94,7 +103,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		refreshable:=domainRefreshable(d,cfg,samples)
 		if !refreshable { statuses[d.Host]="tracker sample missing"; pending=append(pending,pendingDomain{d,currentIP,false}); continue }
 		if currentIP!="" {
-			ok,detail:=verifyConfiguredDomain(ctx,d,currentIP,cfg,samples)
+			ok,detail:=a.verifyDomain(ctx,d,currentIP,cfg,samples)
 			if ok {
 				mappings[d.Host]=currentIP; statuses[d.Host]="retained · "+currentIP+" · "+detail
 				if k:=groupKey(d); k!="" && groupIP[k]=="" { groupIP[k]=currentIP }
@@ -170,14 +179,14 @@ func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]T
 		}
 		preferred:=groupIP[groupKey(p.Domain)]; resolved:=false; lastDetail:="no candidate"
 		if preferred!="" && preferred!=p.FailedCurrent {
-			ok,detail:=verifyConfiguredDomain(ctx,p.Domain,preferred,cfg,samples); lastDetail=detail
+			ok,detail:=a.verifyDomain(ctx,p.Domain,preferred,cfg,samples); lastDetail=detail
 			if ok { mappings[p.Domain.Host]=preferred; statuses[p.Domain.Host]="verified shared · "+preferred+" · "+detail; a.appendLog("%s -> %s (shared group IP · %s)",p.Domain.Host,preferred,detail); resolved=true }
 		}
 		if resolved{continue}
 		order:=orderedCandidates(candidates,p.Domain,"",p.FailedCurrent,cfg)
 		for _,c:=range order {
 			if c.IP==preferred{continue}
-			ok,detail:=verifyConfiguredDomain(ctx,p.Domain,c.IP,cfg,samples); lastDetail=detail
+			ok,detail:=a.verifyDomain(ctx,p.Domain,c.IP,cfg,samples); lastDetail=detail
 			if !ok{continue}
 			mappings[p.Domain.Host]=c.IP; statuses[p.Domain.Host]="verified · "+c.IP+" · "+detail
 			if k:=groupKey(p.Domain);k!="" && groupIP[k]==""{groupIP[k]=c.IP}

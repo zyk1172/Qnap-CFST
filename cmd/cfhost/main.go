@@ -30,6 +30,7 @@ type DomainHealth struct {
 type RuntimeState struct {
 	Running             bool                    `json:"running"`
 	CurrentJob          string                  `json:"currentJob"`
+	CurrentDomain       string                  `json:"currentDomain,omitempty"`
 	LastRun             string                  `json:"lastRun"`
 	LastSuccess         string                  `json:"lastSuccess"`
 	LastError           string                  `json:"lastError"`
@@ -43,6 +44,7 @@ type RuntimeState struct {
 	Mappings            map[string]string       `json:"mappings"`
 	DomainStatus        map[string]string       `json:"domainStatus"`
 	DomainHealth        map[string]DomainHealth `json:"domainHealth"`
+	TrackerSamples      map[string]TrackerSampleRuntime `json:"trackerSamples"`
 	Sync                SyncRuntimeState        `json:"sync"`
 	History             []RunRecord             `json:"history"`
 	Logs                []string                `json:"logs"`
@@ -55,9 +57,10 @@ func main() {
 	if err != nil { log.Fatal(err) }
 	app := &App{
 		config: cfg, dataDir:dataDir, cfstBin:getenv("CFST_BIN","cfst"),
-		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}},
+		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}, TrackerSamples:map[string]TrackerSampleRuntime{}},
 	}
 	app.loadState()
+	app.refreshTrackerSampleInventory(cfg)
 	if err := app.migrateLegacy(cfg); err != nil { app.appendLog("legacy migration blocked: %v", err) }
 	go app.scheduler()
 
@@ -89,10 +92,11 @@ func (a *App) appendLog(format string,args ...any) {
 func (a *App) loadState() {
 	b,err:=os.ReadFile(filepath.Join(a.dataDir,"state.json")); if err!=nil{return}
 	var s RuntimeState; if decodeJSON(b,&s)!=nil{return}
-	s.Running=false; s.CurrentJob=""
+	s.Running=false; s.CurrentJob=""; s.CurrentDomain=""
 	if s.Mappings==nil{s.Mappings=map[string]string{}}
 	if s.DomainStatus==nil{s.DomainStatus=map[string]string{}}
 	if s.DomainHealth==nil{s.DomainHealth=map[string]DomainHealth{}}
+	if s.TrackerSamples==nil{s.TrackerSamples=map[string]TrackerSampleRuntime{}}
 	if len(s.History)>200{s.History=s.History[len(s.History)-200:]}
 	a.state=s
 }
@@ -131,7 +135,7 @@ func (a *App) scheduler() {
 func (a *App) startJob(kind string) bool {
 	a.mu.Lock()
 	if a.state.Running { a.mu.Unlock(); return false }
-	a.state.Running=true; a.state.CurrentJob=kind; a.state.LastError=""
+	a.state.Running=true; a.state.CurrentJob=kind; a.state.CurrentDomain=""; a.state.LastError=""
 	mappingsBefore:=len(a.state.Mappings); refreshBefore:=a.state.LastRefresh
 	a.mu.Unlock()
 
@@ -142,7 +146,7 @@ func (a *App) startJob(kind string) bool {
 		err:=a.runJob(ctx,kind,cfg)
 		finished:=time.Now(); now:=finished.Format(time.RFC3339)
 		a.mu.Lock()
-		a.state.Running=false; a.state.CurrentJob=""; a.state.LastRun=now
+		a.state.Running=false; a.state.CurrentJob=""; a.state.CurrentDomain=""; a.state.LastRun=now
 		if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
 		record:=RunRecord{Kind:kind,StartedAt:started.Format(time.RFC3339),FinishedAt:now,DurationMS:finished.Sub(started).Milliseconds(),Success:err==nil,MappingsBefore:mappingsBefore,MappingsAfter:len(a.state.Mappings),CandidateCount:len(a.state.Candidates),FullRefresh:a.state.LastRefresh!=refreshBefore}
 		if resolutionJob(kind) {

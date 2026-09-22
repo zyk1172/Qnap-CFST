@@ -32,6 +32,7 @@ func unresolvedDomains(cfg Config, mappings map[string]string) ([]string, int) {
 
 type RunRecord struct {
 	Kind              string   `json:"kind"`
+	TargetDomain      string   `json:"targetDomain,omitempty"`
 	StartedAt         string   `json:"startedAt"`
 	FinishedAt        string   `json:"finishedAt"`
 	DurationMS        int64    `json:"durationMs"`
