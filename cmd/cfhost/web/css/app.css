@@ -474,6 +474,130 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .table-actions { display: flex; justify-content: flex-end; gap: 4px; }
 .table-empty { padding: 42px 16px !important; color: var(--muted); text-align: center; }
 
+/* Domain manager keeps the default view intentionally compact. Extra metadata
+   lives in the expandable detail row so the table never needs horizontal scroll. */
+.domain-table-wrap { overflow: hidden; }
+.domain-table { table-layout: fixed; min-width: 0; }
+.domain-table th, .domain-table td { padding-inline: 10px; }
+.domain-col-host { width: 29%; }
+.domain-col-meta { width: 16%; }
+.domain-col-ip { width: 20%; }
+.domain-col-status { width: auto; }
+.domain-col-actions { width: 148px; }
+
+.domain-primary-cell,
+.domain-meta-cell,
+.domain-ip-cell,
+.domain-status-cell,
+.domain-actions-cell { min-width: 0; }
+
+.domain-expand-button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  cursor: pointer;
+  text-align: left;
+}
+.domain-expand-button:hover { color: var(--primary); }
+.domain-host-text {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.domain-expand-chevron {
+  width: 15px !important;
+  height: 15px !important;
+  flex: 0 0 15px;
+  color: var(--muted);
+  transition: transform 160ms var(--ease-standard), color 140ms ease;
+}
+.domain-main-row.is-expanded .domain-expand-chevron { color: var(--primary); transform: rotate(90deg); }
+
+.domain-compact-chips,
+.domain-status-compact {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.chip.compact { min-height: 21px; padding: 1px 6px; font-size: 9px; }
+.domain-ip-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.domain-actions { flex-wrap: nowrap; gap: 4px; }
+.domain-action {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 9px;
+}
+.domain-action svg { width: 17px; height: 17px; }
+.domain-action.maintain { background: rgba(var(--primary-rgb), .13); color: var(--primary); }
+.domain-action.maintain:hover { background: rgba(var(--primary-rgb), .23); color: var(--primary); }
+.domain-action.edit { background: rgba(var(--info-rgb), .13); color: var(--info); }
+.domain-action.edit:hover { background: rgba(var(--info-rgb), .23); color: var(--info); }
+.domain-action.toggle { background: rgba(var(--warning-rgb), .14); color: var(--warning); }
+.domain-action.toggle:hover { background: rgba(var(--warning-rgb), .25); color: var(--warning); }
+.domain-action.delete { background: rgba(var(--danger-rgb), .12); color: var(--danger); }
+.domain-action.delete:hover { background: rgba(var(--danger-rgb), .22); color: var(--danger); }
+.domain-action:disabled { cursor: not-allowed; filter: saturate(.45); opacity: .42; }
+
+.domain-detail-row td {
+  padding: 0 !important;
+  border-bottom: 1px solid var(--border);
+  background: rgba(var(--primary-rgb), .025);
+}
+.domain-detail-panel {
+  display: grid;
+  gap: 10px;
+  padding: 13px 15px 15px;
+  border-top: 1px dashed var(--border-strong);
+}
+.domain-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.domain-detail-item,
+.domain-detail-wide {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.domain-detail-item span,
+.domain-detail-wide span {
+  display: block;
+  color: var(--muted-2);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .025em;
+}
+.domain-detail-item strong,
+.domain-detail-wide strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 620;
+}
+.domain-detail-wide { padding-block: 10px; }
+
 .chip {
   display: inline-flex;
   min-height: 24px;
@@ -724,6 +848,43 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
 
 @media (max-width: 700px) {
   .page-host { padding: calc(var(--topbar-height) + 18px) 14px 38px; }
+  .domain-table-wrap { overflow: hidden; }
+  .domain-table,
+  .domain-table tbody { display: block; width: 100%; }
+  .domain-table colgroup,
+  .domain-table thead { display: none; }
+  .domain-table .domain-main-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 140px;
+    grid-template-areas:
+      "host actions"
+      "meta actions"
+      "ip status";
+    align-items: center;
+    gap: 3px 8px;
+    padding: 9px 7px;
+    border-bottom: 1px solid var(--border);
+  }
+  .domain-table .domain-main-row > td {
+    display: block;
+    min-width: 0;
+    padding: 2px 3px;
+    border: 0;
+  }
+  .domain-primary-cell { grid-area: host; }
+  .domain-meta-cell { grid-area: meta; }
+  .domain-ip-cell { grid-area: ip; }
+  .domain-status-cell { grid-area: status; }
+  .domain-actions-cell { grid-area: actions; align-self: center; }
+  .domain-actions { justify-content: flex-end; gap: 3px; }
+  .domain-action { width: 31px; height: 31px; flex-basis: 31px; }
+  .domain-status-compact { justify-content: flex-end; }
+  .domain-ip-text { font-size: 10px; }
+  .domain-detail-row { display: block; }
+  .domain-detail-row > td { display: block; width: 100%; }
+  .domain-detail-panel { padding: 10px; }
+  .domain-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   .page-context .page-eyebrow { display: none; }
   .page-header { align-items: stretch; flex-direction: column; }
   .page-actions { width: 100%; }
@@ -741,6 +902,11 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
 }
 
 @media (max-width: 460px) {
+  .domain-table .domain-main-row { grid-template-columns: minmax(0, 1fr) 128px; }
+  .domain-action { width: 29px; height: 29px; flex-basis: 29px; }
+  .domain-action svg { width: 15px; height: 15px; }
+  .chip.compact { padding-inline: 5px; font-size: 8.5px; }
+  .domain-detail-grid { grid-template-columns: minmax(0, 1fr); }
   .quick-grid { grid-template-columns: 1fr 1fr; }
   .topbar-inner { gap: 4px; }
   .page-context strong { font-size: 15px; }

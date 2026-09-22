@@ -181,28 +181,82 @@ function domainRowsHTML(domains, filtered) {
   return filtered.length ? filtered.map(domain => {
     const realIndex = domains.indexOf(domain)
     const ip = mappings[domain.host]
-    const streak = health[domain.host]?.failureStreak || 0
+    const domainHealth = health[domain.host] || {}
+    const streak = domainHealth.failureStreak || 0
     const sample = trackerSampleMeta(domain)
     const maintaining = !!store.state?.running && store.state.currentJob === 'maintain' && store.state.currentDomain === domain.host
+    const expanded = store.expandedDomainHost === domain.host
+    const healthLabel = !domain.enabled ? '停用' : ip ? '正常' : '待处理'
+    const healthVariant = !domain.enabled ? '' : ip ? 'success' : 'warning'
+    const modeLabel = domain.mode === 'tracker' ? 'TRK' : 'HTTP'
+    const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : 'LAT'
+    const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'
+    const currentStatus = statuses[domain.host] || (ip ? '映射可用' : '等待验证')
+    const sampleCompact = domain.mode === 'tracker'
+      ? `<span class="chip compact ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span>`
+      : ''
+    const detailItems = [
+      ['站点组', domain.group || '—'],
+      ['Endpoint', domain.endpoint || '/'],
+      ['类型 / 策略', `${domain.mode.toUpperCase()} · ${domain.class}`],
+      ['当前 IP', ip || '—'],
+      ['样本状态', domain.mode === 'tracker' ? sample.label : '不适用'],
+      ['连续失败', String(streak)],
+      ['最近成功', domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'],
+      ['最近失败', domainHealth.lastFailure ? fmtTime(domainHealth.lastFailure) : '—'],
+    ]
+
     return `
-      <tr>
-        <td><strong>${esc(domain.host)}</strong><div class="card-subtitle">${esc(domain.endpoint || '/')}</div></td>
-        <td><span class="chip ${domain.mode === 'tracker' ? 'primary' : ''}">${esc(domain.mode.toUpperCase())}</span></td>
-        <td><span class="chip ${domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'}">${esc(domain.class)}</span></td>
-        <td>${domain.group ? `<span class="chip">${esc(domain.group)}</span>` : '—'}</td>
-        <td class="mono">${ip ? esc(ip) : '—'}</td>
-        <td><span class="chip ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span><div class="card-subtitle">${esc(sample.detail)}</div></td>
-        <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>
-        <td>${streak ? `<span class="chip danger">${streak}</span>` : '<span class="chip">0</span>'}</td>
-        <td><div class="table-actions">
-          <button class="btn secondary small" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只检查并维护这个域名" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}${maintaining ? '维护中' : '维护'}</button>
-          <button class="icon-button" data-edit-domain="${realIndex}" aria-label="编辑">${icon('edit')}</button>
-          <button class="icon-button" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
-          <button class="icon-button" data-delete-domain="${realIndex}" aria-label="删除">${icon('trash')}</button>
-        </div></td>
+      <tr class="domain-main-row ${expanded ? 'is-expanded' : ''}">
+        <td class="domain-primary-cell">
+          <button class="domain-expand-button" data-domain-expand="${realIndex}" aria-expanded="${expanded ? 'true' : 'false'}" title="${expanded ? '收起详情' : '展开详情'}">
+            <span class="domain-host-text">${esc(domain.host)}</span>
+            ${icon('chevron', 'domain-expand-chevron')}
+          </button>
+        </td>
+        <td class="domain-meta-cell">
+          <div class="domain-compact-chips">
+            <span class="chip compact ${domain.mode === 'tracker' ? 'primary' : ''}">${modeLabel}</span>
+            <span class="chip compact ${classVariant}">${classLabel}</span>
+          </div>
+        </td>
+        <td class="domain-ip-cell mono"><span class="domain-ip-text" title="${esc(ip || '未映射')}">${ip ? esc(ip) : '—'}</span></td>
+        <td class="domain-status-cell">
+          <div class="domain-status-compact">
+            <span class="chip compact ${healthVariant}"><span class="dot"></span>${healthLabel}</span>
+            ${sampleCompact}
+          </div>
+        </td>
+        <td class="domain-actions-cell">
+          <div class="table-actions domain-actions">
+            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只维护这个域名" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}</button>
+            <button class="icon-button domain-action edit" data-edit-domain="${realIndex}" aria-label="编辑 ${esc(domain.host)}" title="编辑">${icon('edit')}</button>
+            <button class="icon-button domain-action toggle" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'} ${esc(domain.host)}" title="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
+            <button class="icon-button domain-action delete" data-delete-domain="${realIndex}" aria-label="删除 ${esc(domain.host)}" title="删除">${icon('trash')}</button>
+          </div>
+        </td>
       </tr>
+      ${expanded ? `
+        <tr class="domain-detail-row">
+          <td colspan="5">
+            <div class="domain-detail-panel">
+              <div class="domain-detail-grid">
+                ${detailItems.map(([label, value]) => `<div class="domain-detail-item"><span>${esc(label)}</span><strong class="${label === '当前 IP' ? 'mono' : ''}">${esc(value)}</strong></div>`).join('')}
+              </div>
+              <div class="domain-detail-wide">
+                <span>样本详情</span>
+                <strong>${esc(sample.detail || (domain.mode === 'tracker' ? sample.label : 'HTTP 域名不使用 Tracker 样本'))}</strong>
+              </div>
+              <div class="domain-detail-wide">
+                <span>最近状态</span>
+                <strong>${esc(currentStatus)}</strong>
+              </div>
+            </div>
+          </td>
+        </tr>
+      ` : ''}
     `
-  }).join('') : '<tr><td colspan="9" class="table-empty">没有符合条件的域名</td></tr>'
+  }).join('') : '<tr><td colspan="5" class="table-empty">没有符合条件的域名</td></tr>'
 }
 
 // Patch only the result region. Re-rendering the whole page would replace the
@@ -232,9 +286,16 @@ function renderDomains() {
           <span class="toolbar-spacer"></span>
           <span id="domain-count" class="chip info">${filtered.length} / ${domains.length}</span>
         </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>域名</th><th>类型</th><th>策略</th><th>站点组</th><th>当前 IP</th><th>样本</th><th>健康</th><th>连续失败</th><th></th></tr></thead>
+        <div class="table-wrap domain-table-wrap">
+          <table class="data-table domain-table">
+            <colgroup>
+              <col class="domain-col-host">
+              <col class="domain-col-meta">
+              <col class="domain-col-ip">
+              <col class="domain-col-status">
+              <col class="domain-col-actions">
+            </colgroup>
+            <thead><tr><th>域名</th><th>类型 / 策略</th><th>当前 IP</th><th>状态</th><th></th></tr></thead>
             <tbody id="domain-rows">
               ${domainRowsHTML(domains, filtered)}
             </tbody>
