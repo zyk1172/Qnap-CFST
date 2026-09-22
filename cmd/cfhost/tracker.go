@@ -199,6 +199,13 @@ func evaluateTrackerResponse(body []byte) trackerProbeVerdict {
 		if reason == "" {
 			reason = "tracker rejected announce"
 		}
+		if trackerFailureIndicatesUnreachable(reason) {
+			return trackerProbeVerdict{
+				Reachable: false,
+				Reason:    reason,
+				Detail:    "tracker unreachable · " + reason,
+			}
+		}
 		return trackerProbeVerdict{
 			Reachable: true,
 			Reason:    reason,
@@ -209,6 +216,29 @@ func evaluateTrackerResponse(body []byte) trackerProbeVerdict {
 		return trackerProbeVerdict{Reachable: true, Accepted: true, Detail: "announce accepted"}
 	}
 	return trackerProbeVerdict{Reachable: true, Detail: "tracker replied · candidate reachable"}
+}
+
+// Some front ends return a syntactically valid Tracker failure dictionary even
+// though they could not establish the upstream Tracker connection. Those errors
+// prove that the HTTP endpoint answered, but not that this candidate can reach
+// the Tracker service, so they must remain candidate failures.
+func trackerFailureIndicatesUnreachable(reason string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(reason), " "))
+	patterns := []string{
+		"could not connect to track",
+		"couldn't connect to track",
+		"cannot connect to track",
+		"can't connect to track",
+		"failed to connect to track",
+		"unable to connect to track",
+		"tracker connection failed",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(normalized, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseTrackerDictionary validates the complete top-level bencoded dictionary
