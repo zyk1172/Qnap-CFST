@@ -231,6 +231,9 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	if detected, ok := parseCFSTRateLimitSignal(output); ok {
 		signal = &detected
 	}
+	if degraded && signal != nil {
+		return nil, signal, fmt.Errorf("CFST degraded probe is still rate limited")
+	}
 	if cmdErr != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, signal, fmt.Errorf("CFST timed out")
