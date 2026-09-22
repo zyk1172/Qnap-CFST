@@ -542,3 +542,74 @@ func TestTrackerFailureConnectivityClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCFSTRateLimitSignal(t *testing.T) {
+	got, ok := parseCFSTRateLimitSignal("noise\nCFST_RATE_LIMIT status=429 retry_after=\"551\"\n")
+	if !ok || got.StatusCode != 429 || got.RetryAfter != "551" {
+		t.Fatalf("unexpected rate-limit signal: ok=%v got=%#v", ok, got)
+	}
+}
+
+func TestRetryAfterDeadline(t *testing.T) {
+	now := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	until, seconds := retryAfterDeadline(now, "551", 15*time.Minute)
+	if seconds != 551 || !until.Equal(now.Add(551*time.Second)) {
+		t.Fatalf("seconds Retry-After parsed incorrectly: until=%v seconds=%d", until, seconds)
+	}
+	until, seconds = retryAfterDeadline(now, "", 15*time.Minute)
+	if seconds != 900 || !until.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("fallback cooldown parsed incorrectly: until=%v seconds=%d", until, seconds)
+	}
+}
+
+func TestBuildCFSTArgsDegraded(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CFST.DownloadCount = 20
+	cfg.CFST.DownloadSeconds = 5
+	cfg.CFST.MinSpeedMB = 2
+	cfg.CFST.DegradedDownloadCount = 5
+	cfg.CFST.DegradedDownloadSeconds = 2
+	cfg.CFST.DegradedRateMbps = 5
+
+	args := buildCFSTArgs(cfg, "/app/ip.txt", "/data/result.csv", true)
+	value := func(flag string) string {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == flag {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	if value("-dn") != "5" || value("-dt") != "2" || value("-sl") != "0" || value("-dr") != "5" {
+		t.Fatalf("unexpected degraded args: %v", args)
+	}
+}
+
+func TestLegacyCFSTConfigEnablesAdaptiveRateLimit(t *testing.T) {
+	dir := t.TempDir()
+	content := `{
+  "listen": ":8080",
+  "cfst": {
+    "threads": 200,
+    "pingTimes": 4,
+    "downloadCount": 20,
+    "downloadSeconds": 5,
+    "maxDelayMs": 350,
+    "maxLossRate": 0.2,
+    "minSpeedMB": 0.1,
+    "downloadUrl": "https://cf.xiu2.xyz/url",
+    "ipv6": false,
+    "runTimeoutMinutes": 30
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.CFST.AdaptiveRateLimit || cfg.CFST.DegradedRateMbps != 5 || cfg.CFST.DegradedDownloadCount != 5 {
+		t.Fatalf("legacy config did not receive adaptive rate-limit defaults: %#v", cfg.CFST)
+	}
+}

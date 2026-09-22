@@ -10,16 +10,21 @@ import (
 )
 
 type CFSTConfig struct {
-	Threads           int     `json:"threads"`
-	PingTimes         int     `json:"pingTimes"`
-	DownloadCount     int     `json:"downloadCount"`
-	DownloadSeconds   int     `json:"downloadSeconds"`
-	MaxDelayMS        int     `json:"maxDelayMs"`
-	MaxLossRate       float64 `json:"maxLossRate"`
-	MinSpeedMB        float64 `json:"minSpeedMB"`
-	DownloadURL       string  `json:"downloadUrl"`
-	IPv6              bool    `json:"ipv6"`
-	RunTimeoutMinutes int     `json:"runTimeoutMinutes"`
+	Threads                  int     `json:"threads"`
+	PingTimes                int     `json:"pingTimes"`
+	DownloadCount            int     `json:"downloadCount"`
+	DownloadSeconds          int     `json:"downloadSeconds"`
+	MaxDelayMS               int     `json:"maxDelayMs"`
+	MaxLossRate              float64 `json:"maxLossRate"`
+	MinSpeedMB               float64 `json:"minSpeedMB"`
+	DownloadURL              string  `json:"downloadUrl"`
+	IPv6                     bool    `json:"ipv6"`
+	RunTimeoutMinutes        int     `json:"runTimeoutMinutes"`
+	AdaptiveRateLimit        bool    `json:"adaptiveRateLimit"`
+	DegradedRateMbps         float64 `json:"degradedRateMbps"`
+	DegradedDownloadCount    int     `json:"degradedDownloadCount"`
+	DegradedDownloadSeconds  int     `json:"degradedDownloadSeconds"`
+	RateLimitFallbackMinutes int     `json:"rateLimitFallbackMinutes"`
 }
 
 type RepairConfig struct {
@@ -130,8 +135,13 @@ func defaultConfig() Config {
 			MaxDelayMS:        350,
 			MaxLossRate:       0.2,
 			MinSpeedMB:        0.1,
-			DownloadURL:       "https://cf.xiu2.xyz/url",
-			RunTimeoutMinutes: 30,
+			DownloadURL:              "https://cf.xiu2.xyz/url",
+			RunTimeoutMinutes:        30,
+			AdaptiveRateLimit:        true,
+			DegradedRateMbps:         5,
+			DegradedDownloadCount:    5,
+			DegradedDownloadSeconds:  2,
+			RateLimitFallbackMinutes: 15,
 		},
 		Repair: RepairConfig{
 			CandidateTTLMinutes:      1440,
@@ -214,6 +224,10 @@ func normalizeConfig(c *Config) error {
 	if c.CFST.MaxLossRate < 0 || c.CFST.MaxLossRate > 1 { return errors.New("maxLossRate must be between 0 and 1") }
 	if c.CFST.MinSpeedMB < 0 { return errors.New("minSpeedMB cannot be negative") }
 	if c.CFST.RunTimeoutMinutes < 1 { c.CFST.RunTimeoutMinutes = 30 }
+	if c.CFST.DegradedRateMbps <= 0 { c.CFST.DegradedRateMbps = 5 }
+	if c.CFST.DegradedDownloadCount < 1 { c.CFST.DegradedDownloadCount = 5 }
+	if c.CFST.DegradedDownloadSeconds < 1 { c.CFST.DegradedDownloadSeconds = 2 }
+	if c.CFST.RateLimitFallbackMinutes < 1 { c.CFST.RateLimitFallbackMinutes = 15 }
 
 	if c.Repair.CandidateTTLMinutes < 1 { c.Repair.CandidateTTLMinutes = 1440 }
 	if c.Repair.FailureThreshold < 1 { c.Repair.FailureThreshold = 2 }
@@ -308,6 +322,17 @@ func loadConfig(dataDir string) (Config, error) {
 	var raw map[string]json.RawMessage
 	_ = json.Unmarshal(b, &raw)
 	d := defaultConfig()
+	if cfstRaw, ok := raw["cfst"]; !ok {
+		c.CFST = d.CFST
+	} else {
+		var cfstFields map[string]json.RawMessage
+		_ = json.Unmarshal(cfstRaw, &cfstFields)
+		if _, ok := cfstFields["adaptiveRateLimit"]; !ok { c.CFST.AdaptiveRateLimit = d.CFST.AdaptiveRateLimit }
+		if _, ok := cfstFields["degradedRateMbps"]; !ok { c.CFST.DegradedRateMbps = d.CFST.DegradedRateMbps }
+		if _, ok := cfstFields["degradedDownloadCount"]; !ok { c.CFST.DegradedDownloadCount = d.CFST.DegradedDownloadCount }
+		if _, ok := cfstFields["degradedDownloadSeconds"]; !ok { c.CFST.DegradedDownloadSeconds = d.CFST.DegradedDownloadSeconds }
+		if _, ok := cfstFields["rateLimitFallbackMinutes"]; !ok { c.CFST.RateLimitFallbackMinutes = d.CFST.RateLimitFallbackMinutes }
+	}
 	if _, ok := raw["verify"]; !ok { c.Verify = d.Verify }
 	if _, ok := raw["bandwidth"]; !ok { c.Bandwidth = d.Bandwidth }
 	if _, ok := raw["optimize"]; !ok { c.Optimize = d.Optimize }

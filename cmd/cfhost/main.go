@@ -27,6 +27,16 @@ type DomainHealth struct {
 	LastFailure   string `json:"lastFailure"`
 }
 
+type CFSTRateLimitRuntime struct {
+	Active            bool   `json:"active"`
+	Mode              string `json:"mode"`
+	StatusCode        int    `json:"statusCode,omitempty"`
+	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
+	Until             string `json:"until,omitempty"`
+	DetectedAt        string `json:"detectedAt,omitempty"`
+	LastEvent         string `json:"lastEvent,omitempty"`
+}
+
 type RuntimeState struct {
 	Running             bool                    `json:"running"`
 	CurrentJob          string                  `json:"currentJob"`
@@ -46,6 +56,7 @@ type RuntimeState struct {
 	DomainStatus        map[string]string       `json:"domainStatus"`
 	DomainHealth        map[string]DomainHealth `json:"domainHealth"`
 	TrackerSamples      map[string]TrackerSampleRuntime `json:"trackerSamples"`
+	CFSTRateLimit       CFSTRateLimitRuntime    `json:"cfstRateLimit"`
 	Sync                SyncRuntimeState        `json:"sync"`
 	History             []RunRecord             `json:"history"`
 	Logs                []string                `json:"logs"`
@@ -98,6 +109,7 @@ func (a *App) loadState() {
 	if s.DomainStatus==nil{s.DomainStatus=map[string]string{}}
 	if s.DomainHealth==nil{s.DomainHealth=map[string]DomainHealth{}}
 	if s.TrackerSamples==nil{s.TrackerSamples=map[string]TrackerSampleRuntime{}}
+	if s.CFSTRateLimit.Mode=="" { s.CFSTRateLimit.Mode="normal" }
 	if len(s.History)>200{s.History=s.History[len(s.History)-200:]}
 	a.state=s
 }

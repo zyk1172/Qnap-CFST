@@ -22,9 +22,14 @@ function renderSettings() {
             ${numberField('cfst.downloadCount', '下载测速数量', config.cfst.downloadCount)}
             ${numberField('cfst.downloadSeconds', '单 IP 下载时长', config.cfst.downloadSeconds, '秒')}
             ${numberField('cfst.runTimeoutMinutes', '完整任务超时', config.cfst.runTimeoutMinutes, '分钟')}
+            ${numberField('cfst.degradedRateMbps', '限流期下载上限', config.cfst.degradedRateMbps, 'Mbps', '0.5')}
+            ${numberField('cfst.degradedDownloadCount', '限流期测速数量', config.cfst.degradedDownloadCount, '个')}
+            ${numberField('cfst.degradedDownloadSeconds', '限流期单 IP 时长', config.cfst.degradedDownloadSeconds, '秒')}
+            ${numberField('cfst.rateLimitFallbackMinutes', '无 Retry-After 时冷却', config.cfst.rateLimitFallbackMinutes, '分钟')}
             ${textField('cfst.downloadUrl', '下载测速 URL', config.cfst.downloadUrl, '', 'span-2')}
           </div>
           ${switchRow('cfst.ipv6', 'IPv6 IP 池', '开启后 CFST 使用 ipv6.txt 候选池。', config.cfst.ipv6)}
+          ${switchRow('cfst.adaptiveRateLimit', '测速地址限流自适应', '检测到 429 或带 Retry-After 的 503 后记录解封时间；解封前自动使用低流量降级测速，避免 Repair 反复触发完整测速。', config.cfst.adaptiveRateLimit)}
         `)}
 
         ${settingsSection('verify', '域名验证', '决定候选 IP 是否真正适用于目标站点，严格 HTTP 会识别挑战页和占位页。', `
