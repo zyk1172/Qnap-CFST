@@ -44,6 +44,7 @@ func (a *App) persistStateStrict() error {
 	s := a.state
 	s.Running = false
 	s.CurrentJob = ""
+	s.CurrentDomain = ""
 	a.mu.RUnlock()
 	return writeJSON(filepath.Join(a.dataDir, "state.json"), s)
 }
