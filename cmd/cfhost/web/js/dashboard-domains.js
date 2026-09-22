@@ -146,7 +146,7 @@ function historyTimelineItem(item) {
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
   const variant = !success ? 'danger' : unresolved ? 'warning' : 'success'
-  const target = item.targetDomain ? `${item.targetDomain} · ` : ''
+  const target = item.targetDomain ? `${esc(item.targetDomain)} · ` : ''
   const summary = success
     ? `${target}${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
     : `${target}${esc(item.error || '执行失败')}`
