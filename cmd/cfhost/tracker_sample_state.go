@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 )
@@ -127,14 +126,4 @@ func (a *App) verifyDomain(ctx context.Context, d Domain, ip string, cfg Config,
 		}
 	}
 	return ok, detail
-}
-
-// loadTrackerSamplesQuiet keeps startup/status inventory checks from treating a
-// missing optional sample file as an error.
-func loadTrackerSamplesQuiet(path string) map[string]TrackerSample {
-	samples, err := loadTrackerSamples(path)
-	if err != nil && !os.IsNotExist(err) {
-		return samples
-	}
-	return samples
 }
