@@ -36,6 +36,7 @@ Tracker 可选真实 announce
 - **严格 HTTP 验证**：支持重试、跳转、正文大小、Challenge / 占位页识别。
 - **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
+- **Transmission 实际 Tracker 健康反馈**：Repair 会读取样本种子的 `tracker_stats`；Transmission 实际报告 `Could not connect to tracker` / timeout 等连接错误时，即使 CFHost 自身 probe 能通，也会把当前映射视为失效并修复。
 - **样本状态可见**：域名页直接显示 `未获取 / 已获取待测试 / 样本通过 / 样本失败`，并标明手工或下载器来源。
 - **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名；即使需要刷新 CFST，也不会重新选择其他域名的映射。
 - **QNAP Hosts 管理**
@@ -277,6 +278,8 @@ Transmission 自动发现：
 - 只选已完成 / 正在做种的 40 位 v1 info-hash
 - 分批读取 Tracker，避免一次拉取整个 PT 库的 tracker 数组
 - **每个目标 Tracker 域名找到 1 个样本后就停止继续寻找该域名**
+- Repair / 单域名维护会针对这个样本种子额外读取 `tracker_stats`，检查 Transmission 真实做种路径的最近 announce 状态
+- `Could not connect to tracker`、announce timeout 等连接层错误会直接触发当前域名修复；普通 Tracker 业务拒绝不会误触发
 
 
 ### 在域名页查看样本状态
@@ -381,7 +384,9 @@ C 当前 IP 正常 → 保持 C 原 IP
 B 的修复流程：
 
 ```text
-当前 IP
+Transmission 样本种子的真实 tracker_stats
+  ↓ 明确连接失败时直接判当前 IP 失效
+CFHost 当前 IP 主动验证
   ↓ 失败
 同站点组已验证 IP
   ↓ 不可用
@@ -390,6 +395,8 @@ B 的修复流程：
 达到 failure threshold + cooldown
   ↓
 完整 CFST 刷新候选池
+
+如果是 Transmission 新出现的明确连接错误（例如 Could not connect to tracker），缓存候选仍无法解决时会立即刷新一次 CFST，不等待 failure threshold。旧的 Transmission 错误会用 last_announce_time 与最近成功修复时间比较，避免刚换 IP 后被旧错误再次触发。
   ↓
 只继续解决仍 unresolved 的域名
 ```

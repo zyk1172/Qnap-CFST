@@ -57,6 +57,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	scopeCfg := cfg
 	scopeCfg.Domains = []Domain{d}
 	samples := a.loadSamples(ctx, scopeCfg)
+	downloaderFailures := a.loadDownloaderTrackerFailures(ctx, scopeCfg, samples)
 	now := time.Now()
 
 	a.mu.RLock()
@@ -136,15 +137,23 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	}
 
 	if currentIP != "" {
-		ok, detail := a.verifyDomain(ctx, d, currentIP, cfg, samples)
-		if ok {
-			statuses[d.Host] = "manual retained · " + currentIP + " · " + detail
-			a.appendLog("%s retained %s (manual maintain · %s)", d.Host, currentIP, detail)
-			return finish(true, "")
+		if failure, exists := downloaderFailures[d.Host]; exists && downloaderFailureIsNewer(failure, health[d.Host].LastSuccess) {
+			detail := "downloader reported tracker connection failure · " + failure.Detail
+			statuses[d.Host] = "manual current failed · " + detail
+			a.recordTrackerSampleTest(cfg, d, false, detail)
+			a.appendLog("%s current %s failed during manual maintain from downloader runtime: %s", d.Host, currentIP, failure.Detail)
+			delete(mappings, d.Host)
+		} else {
+			ok, detail := a.verifyDomain(ctx, d, currentIP, cfg, samples)
+			if ok {
+				statuses[d.Host] = "manual retained · " + currentIP + " · " + detail
+				a.appendLog("%s retained %s (manual maintain · %s)", d.Host, currentIP, detail)
+				return finish(true, "")
+			}
+			statuses[d.Host] = "manual current failed · " + detail
+			a.appendLog("%s current %s failed during manual maintain: %s", d.Host, currentIP, detail)
+			delete(mappings, d.Host)
 		}
-		statuses[d.Host] = "manual current failed · " + detail
-		a.appendLog("%s current %s failed during manual maintain: %s", d.Host, currentIP, detail)
-		delete(mappings, d.Host)
 	}
 
 	tryCandidates := func(candidates []Candidate) (bool, string) {
