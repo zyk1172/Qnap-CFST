@@ -193,9 +193,13 @@ function pageRefreshSignature(page = store.page, state = store.state) {
     break
   case 'domains':
     snapshot = {
+      running: state.running,
+      currentJob: state.currentJob,
+      currentDomain: state.currentDomain,
       mappings: state.mappings,
       domainStatus: state.domainStatus,
       domainHealth: state.domainHealth,
+      trackerSamples: state.trackerSamples,
     }
     break
   case 'candidates':
@@ -287,7 +291,9 @@ function updateShellStatus() {
         ? '有域名待处理'
         : '运行正常'
   const subtitle = running
-    ? '任务执行中'
+    ? (store.state.currentJob === 'maintain' && store.state.currentDomain
+        ? `正在维护 ${store.state.currentDomain}`
+        : '任务执行中')
     : error
       ? String(error)
       : unresolved
@@ -356,6 +362,38 @@ function statusCounts() {
   const mapped = store.state.mappings || {}
   const ok = enabled.filter(domain => !!mapped[domain.host]).length
   return { total: enabled.length, ok, failed: Math.max(enabled.length - ok, 0), disabled: domains.length - enabled.length }
+}
+
+function trackerSampleMeta(domain) {
+  if (domain.mode !== 'tracker') {
+    return { label: '不适用', variant: '', detail: 'HTTP 域名不使用 Tracker 样本' }
+  }
+  if (domain.class === 'normal') {
+    return { label: '无需样本', variant: '', detail: 'normal 策略跳过 Tracker 样本验证' }
+  }
+  if (!store.config?.tracker?.realAnnounce) {
+    return { label: '无需样本', variant: '', detail: 'Tracker 真实 announce 已关闭' }
+  }
+
+  const sample = store.state?.trackerSamples?.[domain.host]
+  if (!sample?.available) {
+    return { label: '未获取', variant: 'warning', detail: '尚未从手工文件或下载器取得测试样本' }
+  }
+
+  const source = sample.source === 'manual'
+    ? '手工样本'
+    : sample.source === 'auto'
+      ? '下载器样本'
+      : '样本'
+  if (!sample.tested) {
+    return { label: '已获取 · 待测试', variant: 'info', detail: `${source} · 点击“维护”进行单域名样本验证` }
+  }
+
+  const testedAt = sample.lastTest ? ` · ${fmtTime(sample.lastTest, true)}` : ''
+  if (sample.passed) {
+    return { label: '样本通过', variant: 'success', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
+  }
+  return { label: '样本失败', variant: 'danger', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
 }
 
 function candidateStats() {
