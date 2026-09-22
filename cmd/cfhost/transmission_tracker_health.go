@@ -250,7 +250,7 @@ func downloaderFailureIsNewer(failure downloaderTrackerFailure, lastSuccess stri
 	return failure.LastAnnounceTime > successAt.Unix()
 }
 
-func loadDownloaderTrackerFailures(ctx context.Context, cfg Config, samples map[string]TrackerSample) map[string]downloaderTrackerFailure {
+func (a *App) loadDownloaderTrackerFailures(ctx context.Context, cfg Config, samples map[string]TrackerSample) map[string]downloaderTrackerFailure {
 	out := make(map[string]downloaderTrackerFailure)
 	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled {
 		return out
@@ -263,7 +263,11 @@ func loadDownloaderTrackerFailures(ctx context.Context, cfg Config, samples map[
 	defer cancel()
 	failures, err := transmissionTrackerConnectionFailures(probeCtx, cfg.Tracker.Transmission, samples)
 	if err != nil {
+		a.appendLog("Transmission tracker health warning: %v", err)
 		return out
+	}
+	if len(failures) > 0 {
+		a.appendLog("Transmission tracker health: %d domain(s) report connection failure", len(failures))
 	}
 	return failures
 }
