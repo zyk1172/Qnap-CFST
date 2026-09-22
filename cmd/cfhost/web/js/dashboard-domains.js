@@ -195,7 +195,7 @@ function domainRowsHTML(domains, filtered) {
         <td><span class="chip ${!domain.enabled ? '' : ip ? 'success' : 'warning'}"><span class="dot"></span>${!domain.enabled ? '停用' : ip ? '正常' : '待处理'}</span><div class="card-subtitle">${esc(statuses[domain.host] || '')}</div></td>
         <td>${streak ? `<span class="chip danger">${streak}</span>` : '<span class="chip">0</span>'}</td>
         <td><div class="table-actions">
-          <button class="icon-button" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只维护这个域名" ${!domain.enabled || (store.state?.running && !maintaining) ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}</button>
+          <button class="btn secondary small" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只检查并维护这个域名" ${!domain.enabled || (store.state?.running && !maintaining) ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}${maintaining ? '维护中' : '维护'}</button>
           <button class="icon-button" data-edit-domain="${realIndex}" aria-label="编辑">${icon('edit')}</button>
           <button class="icon-button" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
           <button class="icon-button" data-delete-domain="${realIndex}" aria-label="删除">${icon('trash')}</button>
