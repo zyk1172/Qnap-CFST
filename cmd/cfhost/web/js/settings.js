@@ -82,7 +82,7 @@ function renderSettings() {
             ${textField('tracker.peerIdPrefix', 'Peer ID 前缀', config.tracker.peerIdPrefix)}
           </div>
           ${switchRow('autoApply', 'Repair 后自动应用 Hosts', '成功解析后自动写入宿主机 Hosts Marker。', config.autoApply)}
-          ${switchRow('tracker.realAnnounce', 'Tracker 真实 announce', '通过候选 IP 连接 Tracker。只要收到 HTTP 200 且返回合法 bencode 字典，即视为候选可达；Tracker 返回 failure reason 等业务错误也算通过，不再因错误内容更换候选 IP。', config.tracker.realAnnounce)}
+          ${switchRow('tracker.realAnnounce', 'Tracker 真实 announce', '通过候选 IP 连接 Tracker。收到 HTTP 200 + 合法 bencode 后，一般 Tracker 业务错误仍算候选可达；但 Could not connect to tracker / Failed to connect to tracker 等明确上游连接失败的错误仍判失败并继续换候选。', config.tracker.realAnnounce)}
           ${switchRow('tracker.autoDiscover', '自动从下载器发现 Tracker 测试种子', 'Repair / Full Optimize 前自动读取已完成种子；不会暂停、重启、reannounce 或修改下载器任务。', config.tracker.autoDiscover)}
 
           <div class="alert info" style="margin-top:14px">
