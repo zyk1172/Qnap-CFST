@@ -36,6 +36,8 @@ Tracker 可选真实 announce
 - **严格 HTTP 验证**：支持重试、跳转、正文大小、Challenge / 占位页识别。
 - **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
+- **样本状态可见**：域名页直接显示 `未获取 / 已获取待测试 / 样本通过 / 样本失败`，并标明手工或下载器来源。
+- **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名；即使需要刷新 CFST，也不会重新选择其他域名的映射。
 - **QNAP Hosts 管理**
   - 只管理自己的 Marker
   - 保留非受管内容
@@ -276,6 +278,29 @@ Transmission 自动发现：
 - 分批读取 Tracker，避免一次拉取整个 PT 库的 tracker 数组
 - **每个目标 Tracker 域名找到 1 个样本后就停止继续寻找该域名**
 
+
+### 在域名页查看样本状态
+
+自动发现完成后，不需要再去查看 `tracker-samples.auto.tsv` 判断是否成功。域名管理表会直接显示：
+
+```text
+未获取
+已获取 · 待测试
+样本通过
+样本失败
+无需样本
+```
+
+其中：
+
+- `已获取 · 待测试`：已经从 Transmission / qBittorrent 或手工文件取得样本，但还没有对当前候选 IP 做真实 announce。
+- `样本通过`：已通过样本连接到 Tracker。Tracker 返回业务错误也属于“候选可达”，仍显示通过。
+- `样本失败`：网络/TLS/HTTP/Tracker 响应格式层面没有打通。
+- `无需样本`：HTTP 域名、关闭真实 announce，或使用 `normal` 策略的 Tracker。
+
+编辑 Tracker 域名时，同样会在表单底部显示该域名当前的样本状态。
+
+
 ## 从 qBittorrent 自动发现
 
 填写 qBittorrent WebUI 地址、用户名和密码，例如：
@@ -314,14 +339,18 @@ domain<TAB>announce_path<TAB>40位 info_hash<TAB>完整 HTTPS announce URL
 tracker-samples.example.tsv
 ```
 
-真实 announce 成功要求：
+Tracker 样本验证的“候选可达”要求：
 
 - TCP 实际连接指定候选 Cloudflare IP
 - TLS Host / SNI 仍使用 Tracker 域名
 - HTTP 200
-- 返回合法 bencode dictionary
-- 包含 `interval` 或 `peers`
-- 不包含 `failure reason`
+- 返回完整、合法的 bencode dictionary
+
+只要已经收到 Tracker 的合法业务响应，就证明这个候选 IP 能到达 Tracker。因此：
+
+- 正常 `interval / peers / peers6` 响应：样本通过。
+- `failure reason`、`Missing key peer_id`、站点反作弊等业务错误：**仍记为样本通过 / candidate reachable**，不会因此继续更换 Cloudflare IP。
+- TCP/TLS 失败、HTTP 非 200、HTML Challenge、空响应或非法/截断 bencode：样本失败。
 
 默认：
 
@@ -365,6 +394,28 @@ B 的修复流程：
 ```
 
 即使 B 触发了新的 CFST，A / C 也不会因此重新选择 IP。
+
+### 手动单域名维护
+
+域名管理表每一行都有“维护”按钮。
+
+单域名维护遵循 Smart Repair 的低扰动原则：
+
+```text
+只检查选中的域名
+  ↓
+Tracker 缺样本时只为该域名尝试自动发现
+  ↓
+先验证当前 IP
+  ↓
+失败后尝试同组 IP / 缓存候选
+  ↓
+仍失败则立即刷新一次 CFST
+  ↓
+只修改这个域名的映射
+```
+
+CFST 候选池属于全局测速结果，因此必要时会刷新候选池；但其他域名的当前 Hosts 映射不会因为这次手动维护而重新选择。
 
 默认：
 
