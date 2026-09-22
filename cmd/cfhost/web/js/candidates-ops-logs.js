@@ -125,7 +125,7 @@ function historyRow(item) {
     ? `<span class="chip warning" title="${esc(names.join('、'))}">${unresolved}</span>`
     : '—'
   return `
-    <tr><td><strong>${esc(jobLabel(item.kind))}</strong></td><td>${fmtTime(item.startedAt)}</td><td>${fmtDuration(item.durationMs)}</td><td><span class="chip ${verdict.cls}"><span class="dot"></span>${verdict.label}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${unresolvedCell}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
+    <tr><td><strong>${esc(jobLabel(item.kind))}</strong>${item.targetDomain ? `<div class="card-subtitle mono">${esc(item.targetDomain)}</div>` : ''}</td><td>${fmtTime(item.startedAt)}</td><td>${fmtDuration(item.durationMs)}</td><td><span class="chip ${verdict.cls}"><span class="dot"></span>${verdict.label}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${unresolvedCell}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
   `
 }
 
