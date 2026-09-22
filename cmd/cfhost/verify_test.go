@@ -19,3 +19,12 @@ func TestEvaluateStrictHTTPResponse(t *testing.T) {
 	if ok,_:=evaluateStrictHTTPResponse(200,[]byte("short"),"https://example.com/",cfg);ok{t.Fatal("undersized 200 page accepted")}
 	if ok,_:=evaluateStrictHTTPResponse(204,nil,"https://example.com/api",cfg);!ok{t.Fatal("valid 204 response rejected")}
 }
+
+func TestEvaluateHTTPConnectivityStatusRejects403(t *testing.T) {
+	if ok, detail := evaluateHTTPConnectivityStatus(403); ok || detail != "HTTP 403" {
+		t.Fatalf("403 must fail connectivity verification: ok=%v detail=%q", ok, detail)
+	}
+	if ok, detail := evaluateHTTPConnectivityStatus(200); !ok || detail != "HTTP 200" {
+		t.Fatalf("200 must remain accepted: ok=%v detail=%q", ok, detail)
+	}
+}
