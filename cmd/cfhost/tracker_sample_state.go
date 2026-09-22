@@ -20,22 +20,34 @@ func (a *App) refreshTrackerSampleInventory(cfg Config) {
 	manual, _ := loadTrackerSamples(cfg.Tracker.SamplesPath)
 	auto, _ := loadTrackerSamples(cfg.Tracker.AutoSamplesPath)
 	a.updateTrackerSampleInventory(cfg, manual, auto)
+
+	keep := make(map[string]bool)
+	for _, d := range cfg.Domains {
+		if d.Mode == "tracker" {
+			keep[d.Host] = true
+		}
+	}
+	a.mu.Lock()
+	for host := range a.state.TrackerSamples {
+		if !keep[host] {
+			delete(a.state.TrackerSamples, host)
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *App) updateTrackerSampleInventory(cfg Config, manual, auto map[string]TrackerSample) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	old := a.state.TrackerSamples
-	if old == nil {
-		old = map[string]TrackerSampleRuntime{}
+	if a.state.TrackerSamples == nil {
+		a.state.TrackerSamples = map[string]TrackerSampleRuntime{}
 	}
-	next := make(map[string]TrackerSampleRuntime)
 	for _, d := range cfg.Domains {
 		if d.Mode != "tracker" {
 			continue
 		}
-		st := old[d.Host]
+		st := a.state.TrackerSamples[d.Host]
 		source := ""
 		if _, ok := manual[d.Host]; ok {
 			source = "manual"
@@ -50,9 +62,8 @@ func (a *App) updateTrackerSampleInventory(cfg Config, manual, auto map[string]T
 			st.Detail = ""
 			st.LastTest = ""
 		}
-		next[d.Host] = st
+		a.state.TrackerSamples[d.Host] = st
 	}
-	a.state.TrackerSamples = next
 }
 
 func (a *App) markTrackerSamplesPending(domains []string) {
