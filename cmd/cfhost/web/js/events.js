@@ -63,6 +63,17 @@ document.addEventListener('click', async event => {
     return
   }
 
+  const expandDomain = event.target.closest('[data-domain-expand]')
+  if (expandDomain) {
+    const index = Number(expandDomain.dataset.domainExpand)
+    const domain = store.config?.domains?.[index]
+    if (domain) {
+      store.expandedDomainHost = store.expandedDomainHost === domain.host ? '' : domain.host
+      updateDomainResults()
+    }
+    return
+  }
+
   const maintain = event.target.closest('[data-maintain-domain]')
   if (maintain) {
     await maintainDomain(Number(maintain.dataset.maintainDomain))
