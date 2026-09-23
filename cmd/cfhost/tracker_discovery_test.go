@@ -508,8 +508,11 @@ func TestTransmissionTrackerStatusLabelErrors(t *testing.T) {
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceTimedOut:true}); got != "Timeout" {
 		t.Fatalf("timeout label=%q", got)
 	}
-	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"HTTP 403"}); got != "ConnectedError" {
-		t.Fatalf("HTTP response proves Transmission reached the Tracker endpoint, label=%q", got)
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Tracker gave HTTP response code 403"}); got != "Disconnected" {
+		t.Fatalf("HTTP 403 must be treated as a failed connection for keepalive, label=%q", got)
+	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceSucceeded:true, LastAnnounceResult:"HTTP 403 Forbidden"}); got != "Disconnected" {
+		t.Fatalf("HTTP 403 must override a succeeded flag, label=%q", got)
 	}
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Could not connect to tracker"}); got != "Disconnected" {
 		t.Fatalf("unreachable label=%q", got)
@@ -691,6 +694,7 @@ func TestTrackerKeepaliveWaitsThreeLowFrequencyReannouncesBeforeRepair(t *testin
 	cfg.Tracker.RealAnnounce=true
 	samples:=map[string]TrackerSample{"tracker.example.com":{Domain:"tracker.example.com"}}
 	a:=&App{state:RuntimeState{
+		Mappings:map[string]string{"tracker.example.com":"104.16.0.10"},
 		TrackerSamples:map[string]TrackerSampleRuntime{"tracker.example.com":{Available:true,Tested:true,Passed:true,LastTest:"2026-09-24T00:00:00Z"}},
 		TrackerKeepalive:map[string]TrackerKeepaliveRuntime{},
 		Logs:[]string{},
@@ -711,7 +715,28 @@ func TestTrackerKeepaliveWaitsThreeLowFrequencyReannouncesBeforeRepair(t *testin
 	if !ok || !strings.Contains(failure.Detail,"keepalive exhausted"){
 		t.Fatalf("third observation must escalate to Repair: %#v",failures)
 	}
+	if failure.RejectedIP!="104.16.0.10"{
+		t.Fatalf("Repair must receive the exhausted mapping as rejected IP, got %q",failure.RejectedIP)
+	}
+	state:=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.RejectedIP!="104.16.0.10" || state.RejectedAt==""{
+		t.Fatalf("rejected mapping must persist across Repair cycles: %#v",state)
+	}
 	if got:=reannounceCalls.Load();got!=3{t.Fatalf("must not reannounce a fourth time, got %d",got)}
+}
+
+func TestRejectedTrackerIPIsExcludedFromCandidateOrder(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Verify.CandidateLimit=10
+	d:=Domain{Host:"tracker.example.com",Class:"latency",Mode:"tracker",Enabled:true}
+	candidates:=[]Candidate{
+		{IP:"104.16.0.10",DelayMS:5,LossRate:0,SpeedMB:100},
+		{IP:"104.16.0.11",DelayMS:10,LossRate:0,SpeedMB:90},
+	}
+	order:=orderedCandidates(candidates,d,"","104.16.0.10",cfg)
+	if len(order)!=1 || order[0].IP!="104.16.0.11"{
+		t.Fatalf("rejected IP re-entered candidate order: %#v",order)
+	}
 }
 
 func containsString(values []string, want string) bool {
