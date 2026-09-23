@@ -257,6 +257,27 @@ function updateSaveBar() {
   $('#save-bar')?.classList.toggle('is-visible', store.dirty)
 }
 
+async function loadTrackerRuntime(domain) {
+  if (!domain || domain.mode !== 'tracker') return
+  const host = domain.host
+  if (!host) return
+  if (!store.config?.tracker?.transmission?.enabled) {
+    store.trackerRuntime[host] = { loading: false, error: 'Transmission 未启用' }
+    updateDomainResults()
+    return
+  }
+
+  store.trackerRuntime[host] = { loading: true, error: '', data: null }
+  updateDomainResults()
+  try {
+    const data = await api(`/api/tracker-runtime?host=${encodeURIComponent(host)}`)
+    store.trackerRuntime[host] = { loading: false, error: '', data }
+  } catch (error) {
+    store.trackerRuntime[host] = { loading: false, error: error.message || '读取 Transmission 状态失败', data: null }
+  }
+  if (store.page === 'domains' && store.expandedDomainHost === host) updateDomainResults()
+}
+
 async function maintainDomain(index) {
   const domain = store.config?.domains?.[index]
   if (!domain) return

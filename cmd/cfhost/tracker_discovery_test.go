@@ -409,6 +409,132 @@ func TestTransmissionTimedOutTrackerIsConnectionFailure(t *testing.T) {
 	}
 }
 
+
+func TestParseTransmissionTrackerRuntimeFieldsModern(t *testing.T) {
+	body := []byte(`{
+		"jsonrpc":"2.0",
+		"result":{"torrents":[{
+			"hash_string":"0123456789abcdef0123456789abcdef01234567",
+			"status":6,
+			"tracker_stats":[{
+				"announce":"https://tracker.example.com/announce",
+				"host":"tracker.example.com",
+				"announce_state":1,
+				"has_announced":true,
+				"last_announce_result":"Success",
+				"last_announce_succeeded":true,
+				"last_announce_timed_out":false,
+				"last_announce_time":1700000000,
+				"next_announce_time":1700001800,
+				"last_announce_peer_count":12,
+				"seeder_count":34,
+				"leecher_count":5
+			}]
+		}]},
+		"id":1
+	}`)
+	rows, err := parseTransmissionTrackerStats(body, true)
+	if err != nil { t.Fatal(err) }
+	if len(rows) != 1 || rows[0].Status != 6 || len(rows[0].TrackerStats) != 1 {
+		t.Fatalf("unexpected parsed rows: %#v", rows)
+	}
+	stat := rows[0].TrackerStats[0]
+	if stat.AnnounceState != 1 || stat.NextAnnounceTime != 1700001800 || stat.LastAnnouncePeerCount != 12 || stat.SeederCount != 34 || stat.LeecherCount != 5 {
+		t.Fatalf("tracker runtime fields not parsed: %#v", stat)
+	}
+	if got := transmissionTrackerStatusLabel(stat); got != "Working" {
+		t.Fatalf("successful announce status=%q, want Working", got)
+	}
+}
+
+func TestTransmissionTrackerRuntimeForDomainWorking(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "runtime-ui-session")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			Method  string `json:"method"`
+			Params struct {
+				Fields []string `json:"fields"`
+				IDs []string `json:"ids"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if req.JSONRPC != "2.0" || req.Method != "torrent_get" {
+			t.Fatalf("unexpected request: %#v", req)
+		}
+		if !containsString(req.Params.Fields, "status") || !containsString(req.Params.Fields, "tracker_stats") {
+			t.Fatalf("runtime fields missing: %#v", req.Params.Fields)
+		}
+		if len(req.Params.IDs) != 1 || req.Params.IDs[0] != testHashA {
+			t.Fatalf("unexpected ids: %#v", req.Params.IDs)
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"jsonrpc":"2.0",
+			"result":{"torrents":[{
+				"hash_string":"%s",
+				"status":6,
+				"tracker_stats":[{
+					"announce":"https://tracker.m-team.cc/announce?passkey=hidden",
+					"host":"tracker.m-team.cc",
+					"announce_state":1,
+					"has_announced":true,
+					"last_announce_result":"Working",
+					"last_announce_succeeded":true,
+					"last_announce_timed_out":false,
+					"last_announce_time":1700000000,
+					"next_announce_time":1700001800,
+					"last_announce_peer_count":8,
+					"seeder_count":20,
+					"leecher_count":3
+				}]
+			}]},
+			"id":1
+		}`, testHashA)))
+	}))
+	defer srv.Close()
+
+	hash, err := decodeInfoHash(testHashA)
+	if err != nil { t.Fatal(err) }
+	runtime, err := transmissionTrackerRuntimeForDomain(context.Background(), DownloaderClientConfig{
+		Enabled:true,
+		URL:srv.URL,
+	}, TrackerSample{
+		Domain:"tracker.m-team.cc",
+		HashHex:testHashA,
+		Hash:hash,
+		URL:"https://tracker.m-team.cc/announce?passkey=hidden",
+	}, "tracker.m-team.cc")
+	if err != nil { t.Fatal(err) }
+	if !runtime.Available || !runtime.Seeding || runtime.TorrentStatus != 6 || runtime.TrackerStatus != "Working" {
+		t.Fatalf("unexpected runtime: %#v", runtime)
+	}
+	if runtime.LastAnnouncePeerCount != 8 || runtime.SeederCount != 20 || runtime.LeecherCount != 3 {
+		t.Fatalf("peer stats missing: %#v", runtime)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("expected session negotiation + one status query, got %d", requests.Load())
+	}
+}
+
+func TestTransmissionTrackerStatusLabelErrors(t *testing.T) {
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceTimedOut:true}); got != "Timeout" {
+		t.Fatalf("timeout label=%q", got)
+	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"HTTP 403"}); got != "Error" {
+		t.Fatalf("error label=%q", got)
+	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{}); got != "Waiting" {
+		t.Fatalf("waiting label=%q", got)
+	}
+}
+
 func TestDownloaderTrackerFailureStalenessGuard(t *testing.T) {
 	failure := downloaderTrackerFailure{LastAnnounceTime: 1_800_000_000}
 	before := time.Unix(failure.LastAnnounceTime-10, 0).UTC().Format(time.RFC3339)

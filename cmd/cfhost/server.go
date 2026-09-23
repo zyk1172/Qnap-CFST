@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 )
 
 //go:embed web
@@ -23,6 +25,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
+	mux.HandleFunc("/api/tracker-runtime", a.handleTrackerRuntime)
 
 	webRoot, err := fs.Sub(webAssets, "web")
 	if err != nil {
@@ -197,6 +200,62 @@ func (a *App) handleTrackerSampleDiscovery(w http.ResponseWriter, r *http.Reques
 		"cached":  len(cache),
 		"report":  report,
 	})
+}
+
+
+func (a *App) handleTrackerRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	host := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
+	if host == "" {
+		http.Error(w, "host is required", http.StatusBadRequest)
+		return
+	}
+	cfg := a.snapshotConfig()
+	var domain *Domain
+	for i := range cfg.Domains {
+		d := &cfg.Domains[i]
+		if d.Enabled && d.Mode == "tracker" && strings.EqualFold(d.Host, host) {
+			domain = d
+			break
+		}
+	}
+	if domain == nil {
+		http.Error(w, "tracker domain is not enabled", http.StatusNotFound)
+		return
+	}
+	if !cfg.Tracker.Transmission.Enabled {
+		http.Error(w, "Transmission tracker status is disabled", http.StatusBadRequest)
+		return
+	}
+
+	samples := map[string]TrackerSample{}
+	if auto, err := loadTrackerSamples(cfg.Tracker.AutoSamplesPath); err == nil || auto != nil {
+		mergeTrackerSamples(samples, auto, false)
+	}
+	if manual, err := loadTrackerSamples(cfg.Tracker.SamplesPath); err == nil || manual != nil {
+		mergeTrackerSamples(samples, manual, true)
+	}
+	sample, ok := samples[host]
+	if !ok {
+		http.Error(w, "tracker sample is unavailable", http.StatusNotFound)
+		return
+	}
+
+	timeout := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	runtime, err := transmissionTrackerRuntimeForDomain(ctx, cfg.Tracker.Transmission, sample, host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeResponse(w, runtime)
 }
 
 func writeResponse(w http.ResponseWriter, v any) {

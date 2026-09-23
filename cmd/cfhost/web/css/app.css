@@ -648,6 +648,30 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 .domain-detail-wide { padding-block: 10px; }
 
+.tracker-runtime-panel {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+.tracker-runtime-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+.tracker-runtime-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tracker-result.success { border-color: rgba(var(--success-rgb), .28); background: rgba(var(--success-rgb), .055); }
+.tracker-result.warning { border-color: rgba(var(--warning-rgb), .30); background: rgba(var(--warning-rgb), .055); }
+.tracker-result.danger { border-color: rgba(var(--danger-rgb), .28); background: rgba(var(--danger-rgb), .05); }
+.domain-detail-item strong.success { color: var(--success); }
+.domain-detail-item strong.warning { color: var(--warning); }
+.domain-detail-item strong.danger { color: var(--danger); }
+
 .chip {
   display: inline-flex;
   min-height: 24px;
@@ -934,6 +958,8 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
   .domain-detail-row > td { display: block; width: 100%; }
   .domain-detail-panel { padding: 10px; }
   .domain-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-runtime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-runtime-head { align-items: flex-start; flex-direction: column; }
 
   .page-context .page-eyebrow { display: none; }
   .page-header { align-items: stretch; flex-direction: column; }
@@ -957,6 +983,7 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
   .domain-action svg { width: 15px; height: 15px; }
   .chip.compact { padding-inline: 5px; font-size: 8.5px; }
   .domain-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .tracker-runtime-grid { grid-template-columns: minmax(0, 1fr); }
   .quick-grid { grid-template-columns: 1fr 1fr; }
   .topbar-inner { gap: 4px; }
   .page-context strong { font-size: 15px; }

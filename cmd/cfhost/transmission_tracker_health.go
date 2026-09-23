@@ -20,16 +20,41 @@ type downloaderTrackerFailure struct {
 type transmissionTrackerStat struct {
 	Announce              string
 	Host                  string
+	AnnounceState         int
 	HasAnnounced          bool
 	LastAnnounceResult    string
 	LastAnnounceSucceeded bool
 	LastAnnounceTimedOut  bool
 	LastAnnounceTime      int64
+	NextAnnounceTime      int64
+	LastAnnouncePeerCount int
+	SeederCount           int
+	LeecherCount          int
 }
 
 type transmissionTrackerStatsRow struct {
 	HashString   string
+	Status       int
 	TrackerStats []transmissionTrackerStat
+}
+
+type transmissionTrackerRuntime struct {
+	Available             bool   `json:"available"`
+	Source                string `json:"source"`
+	TorrentStatus         int    `json:"torrentStatus"`
+	Seeding               bool   `json:"seeding"`
+	TrackerStatus         string `json:"trackerStatus"`
+	AnnounceState         int    `json:"announceState"`
+	HasAnnounced          bool   `json:"hasAnnounced"`
+	LastAnnounceResult    string `json:"lastAnnounceResult"`
+	LastAnnounceSucceeded bool   `json:"lastAnnounceSucceeded"`
+	LastAnnounceTimedOut  bool   `json:"lastAnnounceTimedOut"`
+	LastAnnounceTime      int64  `json:"lastAnnounceTime"`
+	NextAnnounceTime      int64  `json:"nextAnnounceTime"`
+	LastAnnouncePeerCount int    `json:"lastAnnouncePeerCount"`
+	SeederCount           int    `json:"seederCount"`
+	LeecherCount          int    `json:"leecherCount"`
+	CheckedAt             string `json:"checkedAt"`
 }
 
 func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrackerStatsRow, error) {
@@ -71,29 +96,40 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 		if modern {
 			var v struct {
 				HashString   string `json:"hash_string"`
+				Status       int    `json:"status"`
 				TrackerStats []struct {
 					Announce              string `json:"announce"`
 					Host                  string `json:"host"`
+					AnnounceState         int    `json:"announce_state"`
 					HasAnnounced          bool   `json:"has_announced"`
 					LastAnnounceResult    string `json:"last_announce_result"`
 					LastAnnounceSucceeded bool   `json:"last_announce_succeeded"`
 					LastAnnounceTimedOut  bool   `json:"last_announce_timed_out"`
 					LastAnnounceTime      int64  `json:"last_announce_time"`
+					NextAnnounceTime      int64  `json:"next_announce_time"`
+					LastAnnouncePeerCount int    `json:"last_announce_peer_count"`
+					SeederCount           int    `json:"seeder_count"`
+					LeecherCount          int    `json:"leecher_count"`
 				} `json:"tracker_stats"`
 			}
 			if json.Unmarshal(row, &v) != nil {
 				continue
 			}
-			item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString)}
+			item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString), Status: v.Status}
 			for _, stat := range v.TrackerStats {
 				item.TrackerStats = append(item.TrackerStats, transmissionTrackerStat{
 					Announce:              stat.Announce,
 					Host:                  stat.Host,
+					AnnounceState:         stat.AnnounceState,
 					HasAnnounced:          stat.HasAnnounced,
 					LastAnnounceResult:    stat.LastAnnounceResult,
 					LastAnnounceSucceeded: stat.LastAnnounceSucceeded,
 					LastAnnounceTimedOut:  stat.LastAnnounceTimedOut,
 					LastAnnounceTime:      stat.LastAnnounceTime,
+					NextAnnounceTime:      stat.NextAnnounceTime,
+					LastAnnouncePeerCount: stat.LastAnnouncePeerCount,
+					SeederCount:           stat.SeederCount,
+					LeecherCount:          stat.LeecherCount,
 				})
 			}
 			out = append(out, item)
@@ -102,33 +138,136 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 
 		var v struct {
 			HashString   string `json:"hashString"`
+			Status       int    `json:"status"`
 			TrackerStats []struct {
 				Announce              string `json:"announce"`
 				Host                  string `json:"host"`
+				AnnounceState         int    `json:"announceState"`
 				HasAnnounced          bool   `json:"hasAnnounced"`
 				LastAnnounceResult    string `json:"lastAnnounceResult"`
 				LastAnnounceSucceeded bool   `json:"lastAnnounceSucceeded"`
 				LastAnnounceTimedOut  bool   `json:"lastAnnounceTimedOut"`
 				LastAnnounceTime      int64  `json:"lastAnnounceTime"`
+				NextAnnounceTime      int64  `json:"nextAnnounceTime"`
+				LastAnnouncePeerCount int    `json:"lastAnnouncePeerCount"`
+				SeederCount           int    `json:"seederCount"`
+				LeecherCount          int    `json:"leecherCount"`
 			} `json:"trackerStats"`
 		}
 		if json.Unmarshal(row, &v) != nil {
 			continue
 		}
-		item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString)}
+		item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString), Status: v.Status}
 		for _, stat := range v.TrackerStats {
 			item.TrackerStats = append(item.TrackerStats, transmissionTrackerStat{
 				Announce:              stat.Announce,
 				Host:                  stat.Host,
+				AnnounceState:         stat.AnnounceState,
 				HasAnnounced:          stat.HasAnnounced,
 				LastAnnounceResult:    stat.LastAnnounceResult,
 				LastAnnounceSucceeded: stat.LastAnnounceSucceeded,
 				LastAnnounceTimedOut:  stat.LastAnnounceTimedOut,
 				LastAnnounceTime:      stat.LastAnnounceTime,
+				NextAnnounceTime:      stat.NextAnnounceTime,
+				LastAnnouncePeerCount: stat.LastAnnouncePeerCount,
+				SeederCount:           stat.SeederCount,
+				LeecherCount:          stat.LeecherCount,
 			})
 		}
 		out = append(out, item)
 	}
+	return out, nil
+}
+
+
+func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
+	if stat.LastAnnounceSucceeded {
+		return "Working"
+	}
+	if stat.LastAnnounceTimedOut {
+		return "Timeout"
+	}
+	if stat.HasAnnounced {
+		return "Error"
+	}
+	return "Waiting"
+}
+
+func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClientConfig, sample TrackerSample, domain string) (transmissionTrackerRuntime, error) {
+	out := transmissionTrackerRuntime{Source: "Transmission", CheckedAt: time.Now().Format(time.RFC3339)}
+	if !cfg.Enabled {
+		return out, fmt.Errorf("Transmission is disabled")
+	}
+	endpoint, err := normalizeTransmissionURL(cfg.URL)
+	if err != nil {
+		return out, err
+	}
+	hash := strings.ToLower(strings.TrimSpace(sample.HashHex))
+	if len(hash) != 40 {
+		return out, fmt.Errorf("tracker sample hash is unavailable")
+	}
+	rpc := &transmissionRPCClient{
+		endpoint: endpoint,
+		cfg:      cfg,
+		client:   &http.Client{},
+	}
+	body, err := rpc.call(
+		ctx,
+		"torrent-get",
+		"torrent_get",
+		map[string]any{
+			"ids":    []string{hash},
+			"fields": []string{"hashString", "status", "trackerStats"},
+		},
+		map[string]any{
+			"ids":    []string{hash},
+			"fields": []string{"hash_string", "status", "tracker_stats"},
+		},
+	)
+	if err != nil {
+		return out, err
+	}
+	rows, err := parseTransmissionTrackerStats(body, rpc.modern)
+	if err != nil {
+		return out, err
+	}
+	target := strings.ToLower(strings.TrimSpace(domain))
+	var selected *transmissionTrackerStat
+	var torrentStatus int
+	for _, row := range rows {
+		if !strings.EqualFold(row.HashString, hash) {
+			continue
+		}
+		torrentStatus = row.Status
+		for i := range row.TrackerStats {
+			stat := row.TrackerStats[i]
+			if transmissionTrackerStatDomain(stat) != target {
+				continue
+			}
+			if selected == nil || stat.LastAnnounceTime >= selected.LastAnnounceTime {
+				copyStat := stat
+				selected = &copyStat
+			}
+		}
+	}
+	if selected == nil {
+		return out, fmt.Errorf("Transmission sample torrent has no tracker entry for %s", target)
+	}
+	reason := sanitizeTrackerReason([]byte(selected.LastAnnounceResult))
+	out.Available = true
+	out.TorrentStatus = torrentStatus
+	out.Seeding = torrentStatus == 6
+	out.TrackerStatus = transmissionTrackerStatusLabel(*selected)
+	out.AnnounceState = selected.AnnounceState
+	out.HasAnnounced = selected.HasAnnounced
+	out.LastAnnounceResult = reason
+	out.LastAnnounceSucceeded = selected.LastAnnounceSucceeded
+	out.LastAnnounceTimedOut = selected.LastAnnounceTimedOut
+	out.LastAnnounceTime = selected.LastAnnounceTime
+	out.NextAnnounceTime = selected.NextAnnounceTime
+	out.LastAnnouncePeerCount = selected.LastAnnouncePeerCount
+	out.SeederCount = selected.SeederCount
+	out.LeecherCount = selected.LeecherCount
 	return out, nil
 }
 
