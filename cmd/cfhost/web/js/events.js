@@ -68,8 +68,10 @@ document.addEventListener('click', async event => {
     const index = Number(expandDomain.dataset.domainExpand)
     const domain = store.config?.domains?.[index]
     if (domain) {
-      store.expandedDomainHost = store.expandedDomainHost === domain.host ? '' : domain.host
+      const opening = store.expandedDomainHost !== domain.host
+      store.expandedDomainHost = opening ? domain.host : ''
       updateDomainResults()
+      if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)
     }
     return
   }
