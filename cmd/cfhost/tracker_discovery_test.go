@@ -638,10 +638,15 @@ func TestTransmissionReannounceUsesReannounceAction(t *testing.T) {
 	}
 }
 
-func TestTrackerKeepaliveWaitsThreeLowFrequencyReannouncesBeforeRepair(t *testing.T) {
+func TestTrackerKeepaliveObservesTwoMinutesAndKeepsThirtyMinuteReannounceInterval(t *testing.T) {
 	oldInterval:=trackerKeepaliveInterval
+	oldObservation:=trackerKeepaliveObservationDelay
 	trackerKeepaliveInterval=time.Hour
-	defer func(){trackerKeepaliveInterval=oldInterval}()
+	trackerKeepaliveObservationDelay=time.Hour
+	defer func(){
+		trackerKeepaliveInterval=oldInterval
+		trackerKeepaliveObservationDelay=oldObservation
+	}()
 
 	var reannounceCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
@@ -700,30 +705,93 @@ func TestTrackerKeepaliveWaitsThreeLowFrequencyReannouncesBeforeRepair(t *testin
 		Logs:[]string{},
 	}}
 
-	for attempt:=1;attempt<=3;attempt++{
-		failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples)
-		if len(failures)!=0{t.Fatalf("attempt %d escalated too early: %#v",attempt,failures)}
-		state:=a.state.TrackerKeepalive["tracker.example.com"]
-		if state.Attempts!=attempt{t.Fatalf("attempt count=%d want %d",state.Attempts,attempt)}
-		state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
-		a.state.TrackerKeepalive["tracker.example.com"]=state
+	// First failure starts reannounce 1/3 and enters an observation window.
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("first reannounce escalated too early: %#v",failures)
 	}
+	state:=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts!=1 || state.Status!="observing" || state.NextCheck=="" || state.NextReannounce==""{
+		t.Fatalf("first reannounce timing state is wrong: %#v",state)
+	}
+	if got:=reannounceCalls.Load();got!=1{t.Fatalf("reannounce calls=%d want 1",got)}
+
+	// Even if the sample-test timestamp changes, the same keepalive cycle must
+	// not reset while waiting for Transmission to update its announce state.
+	sampleState:=a.state.TrackerSamples["tracker.example.com"]
+	sampleState.LastTest="2026-09-24T00:01:00Z"
+	a.state.TrackerSamples["tracker.example.com"]=sampleState
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("observation window escalated early: %#v",failures)
+	}
+	state=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts!=1 || state.Status!="observing"{
+		t.Fatalf("observation window or sample timestamp reset the cycle: %#v",state)
+	}
+	if got:=reannounceCalls.Load();got!=1{t.Fatalf("must not reannounce inside observation window, got %d",got)}
+
+	// Observation is due, but 30-minute minimum interval is not. It should only
+	// record that the status is still unhealthy and wait for NextReannounce.
+	state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	state.NextReannounce=time.Now().Add(time.Hour).Format(time.RFC3339)
+	a.state.TrackerKeepalive["tracker.example.com"]=state
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("first post-reannounce observation escalated early: %#v",failures)
+	}
+	state=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts!=1 || state.Status!="waiting" || state.NextCheck!=state.NextReannounce{
+		t.Fatalf("must wait for low-frequency interval after observation: %#v",state)
+	}
+	if got:=reannounceCalls.Load();got!=1{t.Fatalf("observation must not trigger second reannounce, got %d",got)}
+
+	// Reannounce 2/3.
+	state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	state.NextReannounce=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	a.state.TrackerKeepalive["tracker.example.com"]=state
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("second reannounce escalated early: %#v",failures)
+	}
+	state=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts!=2 || state.Status!="observing"{t.Fatalf("second reannounce state: %#v",state)}
+
+	// Observe attempt 2, then wait until the next low-frequency slot.
+	state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	state.NextReannounce=time.Now().Add(time.Hour).Format(time.RFC3339)
+	a.state.TrackerKeepalive["tracker.example.com"]=state
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("second observation escalated early: %#v",failures)
+	}
+	state=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Status!="waiting" || state.Attempts!=2{t.Fatalf("second observation wait state: %#v",state)}
+
+	// Reannounce 3/3.
+	state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	state.NextReannounce=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	a.state.TrackerKeepalive["tracker.example.com"]=state
+	if failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples);len(failures)!=0{
+		t.Fatalf("third reannounce escalated before observation: %#v",failures)
+	}
+	state=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts!=3 || state.Status!="observing"{t.Fatalf("third reannounce state: %#v",state)}
 	if got:=reannounceCalls.Load();got!=3{t.Fatalf("reannounce calls=%d want 3",got)}
 
+	// Only after the post-third observation window may Repair be triggered.
+	state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+	a.state.TrackerKeepalive["tracker.example.com"]=state
 	failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples)
 	failure,ok:=failures["tracker.example.com"]
 	if !ok || !strings.Contains(failure.Detail,"keepalive exhausted"){
-		t.Fatalf("third observation must escalate to Repair: %#v",failures)
+		t.Fatalf("third post-reannounce observation must escalate to Repair: %#v",failures)
 	}
 	if failure.RejectedIP!="104.16.0.10"{
 		t.Fatalf("Repair must receive the exhausted mapping as rejected IP, got %q",failure.RejectedIP)
 	}
-	state:=a.state.TrackerKeepalive["tracker.example.com"]
+	state=a.state.TrackerKeepalive["tracker.example.com"]
 	if state.RejectedIP!="104.16.0.10" || state.RejectedAt==""{
 		t.Fatalf("rejected mapping must persist across Repair cycles: %#v",state)
 	}
 	if got:=reannounceCalls.Load();got!=3{t.Fatalf("must not reannounce a fourth time, got %d",got)}
 }
+
 
 func TestRejectedTrackerIPIsExcludedFromCandidateOrder(t *testing.T) {
 	cfg:=defaultConfig()
