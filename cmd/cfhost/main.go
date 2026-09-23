@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,6 +43,7 @@ type TrackerKeepaliveRuntime struct {
 	StartedAt          string  `json:"startedAt,omitempty"`
 	LastReannounce     string  `json:"lastReannounce,omitempty"`
 	NextCheck          string  `json:"nextCheck,omitempty"`
+	NextReannounce     string  `json:"nextReannounce,omitempty"`
 	SampleTestAt       string  `json:"sampleTestAt,omitempty"`
 	RejectedIP         string  `json:"rejectedIP,omitempty"`
 	RejectedAt         string  `json:"rejectedAt,omitempty"`
@@ -148,14 +150,29 @@ func optimizeDue(now time.Time,lastOptimize,lastAttempt,lastRefresh string,cfg O
 	return now.Sub(base)>=time.Duration(cfg.IntervalMinutes)*time.Minute
 }
 
+func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveRuntime) bool {
+	for _, state := range states {
+		if strings.TrimSpace(state.NextCheck) == "" {
+			continue
+		}
+		next, err := time.Parse(time.RFC3339, state.NextCheck)
+		if err == nil && !now.Before(next) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) scheduler() {
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
 		cfg:=a.snapshotConfig()
 		a.mu.RLock()
 		running:=a.state.Running; lastRun:=a.state.LastRun; lastOptimize:=a.state.LastOptimize; lastAttempt:=a.state.LastOptimizeAttempt; lastRefresh:=a.state.LastRefresh
+		keepalive:=copyTrackerKeepalive(a.state.TrackerKeepalive)
 		a.mu.RUnlock()
 		if running { continue }
+		if trackerKeepaliveCheckDue(now,keepalive) { a.startJob("repair"); continue }
 		if optimizeDue(now,lastOptimize,lastAttempt,lastRefresh,cfg.Optimize) { a.startJob("optimize"); continue }
 		if !cfg.AutoRepair { continue }
 		lastTime,_:=time.Parse(time.RFC3339,lastRun)
