@@ -140,20 +140,51 @@ func verifyHTTPConnectivity(parent context.Context, d Domain, ip string, cfg Con
 	timeout := time.Duration(cfg.VerifyTimeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	dialer := &net.Dialer{Timeout: timeout}
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ip, "443"))
-	}}
+
+	baseDialer := &net.Dialer{Timeout: timeout}
+	transport := &http.Transport{
+		ForceAttemptHTTP2: true,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err == nil && strings.EqualFold(host, d.Host) && port == "443" {
+				return baseDialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
+			}
+			return baseDialer.DialContext(ctx, network, address)
+		},
+	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Host+d.Endpoint, nil)
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > cfg.Verify.MaxRedirects {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+	endpoint := d.Endpoint
+	if endpoint == "" { endpoint = "/" }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Host+endpoint, nil)
 	if err != nil { return false, "request error" }
 	req.Header.Set("User-Agent", "CFHost/0.4")
 	resp, err := client.Do(req)
 	if err != nil { return false, err.Error() }
 	defer resp.Body.Close()
 	_, _ = io.CopyN(io.Discard, resp.Body, 4096)
-	return evaluateHTTPConnectivityStatus(resp.StatusCode)
+
+	ok, detail := evaluateHTTPConnectivityStatus(resp.StatusCode)
+	if !ok {
+		if resp.Request != nil && resp.Request.URL != nil {
+			return false, fmt.Sprintf("%s final=%s", detail, resp.Request.URL.String())
+		}
+		return false, detail
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		return true, fmt.Sprintf("%s final=%s", detail, resp.Request.URL.String())
+	}
+	return true, detail
 }
 
 type httpProbeDisposition int
