@@ -243,14 +243,16 @@ function trackerRuntimePanel(domain) {
   const keepaliveLabel = ({
     healthy: '健康',
     acceptable: '少量失败，暂不处理',
-    waiting: '等待重新汇报结果',
-    'waiting-after-third': '第 3 次后观察中',
+    waiting: '等待下次低频汇报',
+    observing: '重新汇报后观察中',
+    observed: '观察完成',
     'reannounce-due': '准备重新汇报',
     'reannounce-error': '重新汇报 RPC 失败',
     repair: '需要 Repair',
     idle: '空闲',
   })[keepalive.status] || (keepalive.status || '未触发')
   const keepaliveNext = keepalive.nextCheck ? fmtTime(keepalive.nextCheck) : '—'
+  const nextReannounce = keepalive.nextReannounce ? fmtTime(keepalive.nextReannounce) : '—'
   const rejectedIP = keepalive.rejectedIP || ''
 
   return `
@@ -273,7 +275,8 @@ function trackerRuntimePanel(domain) {
         <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
         <div class="domain-detail-item"><span>来源</span><strong>Transmission 活跃种子聚合</strong></div>
         <div class="domain-detail-item"><span>做种保活</span><strong>${esc(keepaliveLabel)} · ${Number(keepalive.attempts) || 0}/3</strong></div>
-        <div class="domain-detail-item"><span>下次保活检查</span><strong>${esc(keepaliveNext)}</strong></div>
+        <div class="domain-detail-item"><span>下次状态检查</span><strong>${esc(keepaliveNext)}</strong></div>
+        <div class="domain-detail-item"><span>最早下次重新汇报</span><strong>${esc(nextReannounce)}</strong></div>
         <div class="domain-detail-item"><span>Repair 排除 IP</span><strong>${rejectedIP ? esc(rejectedIP) : '—'}</strong></div>
       </div>
       ${issues.length ? `
@@ -293,7 +296,7 @@ function trackerRuntimePanel(domain) {
       `}
       <div class="domain-detail-wide tracker-runtime-note">
         <span>状态说明</span>
-        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。403 计为连接失败。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair；保活耗尽的旧 IP 会持续排除，直到成功切换映射。</strong>
+        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。每次重新汇报后等待 2 分钟再读取新状态，两次重新汇报至少间隔 30 分钟。403 计为连接失败。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair；保活耗尽的旧 IP 会持续排除，直到成功切换映射。</strong>
       </div>
     </div>
   `

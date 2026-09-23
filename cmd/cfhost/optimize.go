@@ -83,6 +83,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		order:=orderedCandidates(candidates,d,preferred,"",cfg)
 		resolved:=false
 		lastDetail:="no candidate"
+		oldHardFailed:=false
 		tried:=make(map[string]bool)
 		for _,candidate:=range order {
 			if domainCtx.Err()!=nil {break}
@@ -93,6 +94,9 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 			if !ok {
 				if verificationHardFailure(detail) {
 					markGroupHardFailure(groupHardFailures,key,candidate.IP)
+					if d.Mode=="http" && candidate.IP==oldIP {
+						oldHardFailed=true
+					}
 				}
 				continue
 			}
@@ -111,6 +115,9 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 				resolved=true
 			} else if verificationHardFailure(detail) {
 				markGroupHardFailure(groupHardFailures,key,oldIP)
+				if d.Mode=="http" {
+					oldHardFailed=true
+				}
 			}
 		}
 		domainErr:=domainCtx.Err()
@@ -120,12 +127,16 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 				lastDetail=fmt.Sprintf("domain verification budget exceeded · %s",budget.Round(time.Second))
 				a.appendLog("%s optimize verification budget exhausted after %s; continuing",d.Host,budget.Round(time.Second))
 			}
-			if oldIP!="" {
+			if oldIP!="" && !oldHardFailed {
 				mappings[d.Host]=oldIP
 				statuses[d.Host]="optimize unresolved · "+lastDetail+" · retained last-known-good · "+oldIP
 			} else {
 				delete(mappings,d.Host)
-				statuses[d.Host]="optimize unresolved · "+lastDetail
+				if oldIP!="" && oldHardFailed {
+					statuses[d.Host]="optimize unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+lastDetail
+				} else {
+					statuses[d.Host]="optimize unresolved · "+lastDetail
+				}
 			}
 			h.FailureStreak++;h.LastFailure=now
 		} else {

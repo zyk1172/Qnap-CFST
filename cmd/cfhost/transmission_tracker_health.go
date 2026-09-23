@@ -45,7 +45,10 @@ const (
 	trackerKeepaliveMinConnectedPct   = 90.0
 	trackerKeepaliveMaxFailures       = 5
 )
-var trackerKeepaliveInterval = 30 * time.Minute
+var (
+	trackerKeepaliveInterval = 30 * time.Minute
+	trackerKeepaliveObservationDelay = 2 * time.Minute
+)
 
 type transmissionDomainHealth struct {
 	Matched            int
@@ -678,7 +681,6 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 	dueDomains := make([]string, 0)
 	dueTorrentIDs := make([]int, 0)
 	healthByDomain := make(map[string]transmissionDomainHealth, len(samples))
-	samplePassedByDomain := make(map[string]bool, len(samples))
 
 	for rawDomain := range samples {
 		domain := strings.ToLower(strings.TrimSpace(rawDomain))
@@ -689,7 +691,6 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		health := transmissionDomainHealthForTarget(rows, domain)
 		healthByDomain[domain] = health
 		samplePassed, sampleTestAt := a.trackerSamplePassInfo(domain)
-		samplePassedByDomain[domain] = samplePassed
 
 		state := states[domain]
 		currentIP := currentMappings[domain]
@@ -699,14 +700,10 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 				Status:       "healthy",
 				LastEvent:    fmt.Sprintf("mapping changed from rejected %s to %s; keepalive rejection cleared", state.RejectedIP, currentIP),
 			}
-		} else if state.SampleTestAt != sampleTestAt {
-			// A new sample result alone must not clear a rejected mapping. The
-			// old IP stays blocked until the committed mapping actually changes.
-			if state.RejectedIP == "" {
-				state = TrackerKeepaliveRuntime{SampleTestAt: sampleTestAt}
-			} else {
-				state.SampleTestAt = sampleTestAt
-			}
+		} else {
+			// Re-testing the same sample updates LastTest on every verification.
+			// That timestamp must not reset a 1/3, 2/3, 3/3 keepalive cycle.
+			state.SampleTestAt = sampleTestAt
 		}
 		state.MatchedTorrents = health.Matched
 		state.EvaluatedTorrents = health.Evaluated
@@ -714,10 +711,17 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		state.ConnectionFailures = health.ConnectionFailures
 		state.ConnectedPercent = health.ConnectedPercent
 
+		if state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
+			state.LastEvent=fmt.Sprintf("waiting 2-minute post-reannounce observation window · current snapshot connected %.1f%% · failures %d (not evaluated yet)",health.ConnectedPercent,health.ConnectionFailures)
+			states[domain]=state
+			continue
+		}
+
 		if health.Matched == 0 || health.Evaluated == 0 {
 			state.Attempts = 0
 			state.Status = "idle"
 			state.NextCheck = ""
+			state.NextReannounce = ""
 			state.LastEvent = "no announced active torrents for this Tracker"
 			states[domain] = state
 			continue
@@ -726,6 +730,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		if trackerDomainHealthAcceptable(health) {
 			state.Attempts = 0
 			state.NextCheck = ""
+			state.NextReannounce = ""
 			if health.ConnectionFailures > 0 {
 				state.Status = "acceptable"
 				state.LastEvent = fmt.Sprintf("acceptable residual failures · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
@@ -740,6 +745,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		if !samplePassed {
 			state.Status = "repair"
 			state.NextCheck = ""
+			state.NextReannounce = ""
 			state.LastEvent = fmt.Sprintf("sample not confirmed healthy · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
 			states[domain] = state
 			failure := health.LatestFailure
@@ -754,34 +760,41 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 			continue
 		}
 
+		if state.Status=="observing" {
+			// The two-minute observation window has elapsed because the early
+			// gate above no longer applies. Evaluate the fresh Transmission state.
+			state.Status="observed"
+			state.NextCheck=""
+		}
+
 		if state.Attempts >= trackerKeepaliveMaxAttempts {
-			if !trackerKeepaliveNextDue(state, now) {
-				state.Status = "waiting-after-third"
-				state.LastEvent = fmt.Sprintf("waiting for third reannounce result · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
-				states[domain] = state
-				continue
-			}
 			state.Status = "repair"
 			if currentIP != "" {
 				state.RejectedIP = currentIP
 				state.RejectedAt = now.Format(time.RFC3339)
 			}
-			state.LastEvent = fmt.Sprintf("keepalive exhausted · connected %.1f%% · failures %d · rejected IP %s", health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP)
+			state.NextCheck = ""
+			state.NextReannounce = ""
+			state.LastEvent = fmt.Sprintf("keepalive exhausted after post-reannounce observation · connected %.1f%% · failures %d · rejected IP %s", health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP)
 			states[domain] = state
 			out[domain] = downloaderTrackerFailure{
 				Source:           "Transmission keepalive",
-				Detail:           fmt.Sprintf("Transmission keepalive exhausted after %d reannounce attempts · %.1f%% connected · %d connection failures · rejected IP %s", trackerKeepaliveMaxAttempts, health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP),
+				Detail:           fmt.Sprintf("Transmission keepalive exhausted after %d reannounce attempts and 2-minute observation · %.1f%% connected · %d connection failures · rejected IP %s", trackerKeepaliveMaxAttempts, health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP),
 				LastAnnounceTime: now.Unix(),
 				RejectedIP:       state.RejectedIP,
 			}
 			continue
 		}
 
-		if !trackerKeepaliveNextDue(state, now) {
-			state.Status = "waiting"
-			state.LastEvent = fmt.Sprintf("waiting for next low-frequency reannounce · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
-			states[domain] = state
-			continue
+		if strings.TrimSpace(state.NextReannounce)!="" {
+			nextReannounce,err:=time.Parse(time.RFC3339,state.NextReannounce)
+			if err==nil && now.Before(nextReannounce) {
+				state.Status="waiting"
+				state.NextCheck=state.NextReannounce
+				state.LastEvent=fmt.Sprintf("post-reannounce observation still unhealthy; waiting for 30-minute minimum announce interval · connected %.1f%% · failures %d",health.ConnectedPercent,health.ConnectionFailures)
+				states[domain]=state
+				continue
+			}
 		}
 
 		if len(health.FailureTorrentIDs) > 0 {
@@ -798,24 +811,28 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		err := transmissionReannounce(reannounceCtx, cfg.Tracker.Transmission, dueTorrentIDs)
 		reannounceCancel()
 		stamp := now.Format(time.RFC3339)
-		next := now.Add(trackerKeepaliveInterval).Format(time.RFC3339)
+		observeAt := now.Add(trackerKeepaliveObservationDelay).Format(time.RFC3339)
+		nextReannounce := now.Add(trackerKeepaliveInterval).Format(time.RFC3339)
 		for _, domain := range dueDomains {
 			state := states[domain]
 			state.LastReannounce = stamp
-			state.NextCheck = next
+			state.NextCheck = observeAt
+			state.NextReannounce = nextReannounce
 			if state.StartedAt == "" {
 				state.StartedAt = stamp
 			}
 			health := healthByDomain[domain]
 			if err != nil {
 				state.Status = "reannounce-error"
-				state.LastEvent = "Transmission reannounce RPC failed · " + err.Error()
-				a.appendLog("tracker keepalive %s: reannounce RPC failed: %v", domain, err)
+				state.NextCheck = nextReannounce
+				state.NextReannounce = nextReannounce
+				state.LastEvent = "Transmission reannounce RPC failed; low-frequency retry deferred until " + nextReannounce + " · " + err.Error()
+				a.appendLog("tracker keepalive %s: reannounce RPC failed; retry no earlier than %s: %v", domain, nextReannounce, err)
 			} else {
 				state.Attempts++
-				state.Status = "waiting"
-				state.LastEvent = fmt.Sprintf("reannounce %d/%d sent for %d connection-failed torrents; next check after %s", state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), next)
-				a.appendLog("tracker keepalive %s: torrent-reannounce %d/%d sent for %d torrent(s); next check %s", domain, state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), next)
+				state.Status = "observing"
+				state.LastEvent = fmt.Sprintf("reannounce %d/%d sent for %d connection-failed torrents; observe after %s; next reannounce no earlier than %s", state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), observeAt, nextReannounce)
+				a.appendLog("tracker keepalive %s: torrent-reannounce %d/%d sent for %d torrent(s); observe at %s; next reannounce no earlier than %s", domain, state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), observeAt, nextReannounce)
 			}
 			states[domain] = state
 		}
