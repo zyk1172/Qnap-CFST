@@ -287,64 +287,79 @@ func TestTransmissionTrackerConnectionFailureFeedsRepairSignal(t *testing.T) {
 			Method  string `json:"method"`
 			Params struct {
 				Fields []string `json:"fields"`
-				IDs []string `json:"ids"`
+				IDs []int `json:"ids"`
 			} `json:"params"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
 		if req.JSONRPC != "2.0" || req.Method != "torrent_get" {
 			t.Fatalf("unexpected modern request %#v", req)
 		}
-		if len(req.Params.IDs) != 1 || req.Params.IDs[0] != testHashA {
-			t.Fatalf("expected sample hash lookup, got %#v", req.Params.IDs)
-		}
 		if !containsString(req.Params.Fields, "tracker_stats") {
-			t.Fatalf("tracker_stats not requested: %#v", req.Params.Fields)
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"jsonrpc":"2.0",
+				"result":{"torrents":[
+					{"id":11,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":500},
+					{"id":12,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":400}
+				]},
+				"id":1
+			}`, testHashA, testHashB)))
+			return
 		}
 		now := time.Now().Unix()
 		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"jsonrpc":"2.0",
-			"result":{"torrents":[{
-				"hash_string":"%s",
-				"tracker_stats":[{
-					"announce":"https://tracker.m-team.cc/announce?passkey=secret",
-					"host":"tracker.m-team.cc",
-					"has_announced":true,
-					"last_announce_result":"Could not connect to tracker",
-					"last_announce_succeeded":false,
-					"last_announce_timed_out":false,
-					"last_announce_time":%d
-				}]
-			}]},
+			"result":{"torrents":[
+				{
+					"hash_string":"%s",
+					"status":6,
+					"tracker_stats":[{
+						"announce":"https://tracker.m-team.cc/announce?passkey=sample",
+						"host":"tracker.m-team.cc",
+						"has_announced":true,
+						"last_announce_result":"Working",
+						"last_announce_succeeded":true,
+						"last_announce_timed_out":false,
+						"last_announce_time":%d
+					}]
+				},
+				{
+					"hash_string":"%s",
+					"status":6,
+					"tracker_stats":[{
+						"announce":"https://tracker.m-team.cc/announce?passkey=other",
+						"host":"tracker.m-team.cc",
+						"has_announced":true,
+						"last_announce_result":"Could not connect to tracker",
+						"last_announce_succeeded":false,
+						"last_announce_timed_out":false,
+						"last_announce_time":%d
+					}]
+				}
+			]},
 			"id":1
-		}`, testHashA, now)))
+		}`, testHashA, now-10, testHashB, now)))
 	}))
 	defer srv.Close()
 
-	hash, err := decodeInfoHash(testHashA)
-	if err != nil { t.Fatal(err) }
 	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
 		Enabled: true,
 		URL: srv.URL,
 	}, map[string]TrackerSample{
-		"tracker.m-team.cc": {
-			Domain:"tracker.m-team.cc",
-			HashHex:testHashA,
-			Hash:hash,
-			URL:"https://tracker.m-team.cc/announce?passkey=secret",
-		},
-	})
+		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA},
+	}, 200)
 	if err != nil { t.Fatal(err) }
 	failure, ok := failures["tracker.m-team.cc"]
 	if !ok {
-		t.Fatal("Transmission runtime connection failure was not surfaced")
+		t.Fatal("non-sample active torrent connection failure was not surfaced")
 	}
 	if !strings.Contains(failure.Detail, "Could not connect to tracker") {
 		t.Fatalf("unexpected failure detail %q", failure.Detail)
 	}
-	if requests.Load() != 2 {
-		t.Fatalf("expected 409 negotiation + one tracker_stats request, got %d", requests.Load())
+	if requests.Load() != 3 {
+		t.Fatalf("expected 409 negotiation + active list + tracker_stats batch, got %d", requests.Load())
 	}
 }
+
 
 func TestTransmissionBusinessTrackerErrorDoesNotInvalidateCandidate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,10 +369,25 @@ func TestTransmissionBusinessTrackerErrorDoesNotInvalidateCandidate(t *testing.T
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
+		var req struct {
+			Params struct {
+				Fields []string `json:"fields"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if !containsString(req.Params.Fields, "tracker_stats") {
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"jsonrpc":"2.0",
+				"result":{"torrents":[{"id":11,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":500}]},
+				"id":1
+			}`, testHashA)))
+			return
+		}
 		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"jsonrpc":"2.0",
 			"result":{"torrents":[{
 				"hash_string":"%s",
+				"status":6,
 				"tracker_stats":[{
 					"announce":"https://tracker.m-team.cc/announce?passkey=secret",
 					"host":"tracker.m-team.cc",
@@ -373,17 +403,17 @@ func TestTransmissionBusinessTrackerErrorDoesNotInvalidateCandidate(t *testing.T
 	}))
 	defer srv.Close()
 
-	hash, _ := decodeInfoHash(testHashA)
 	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
 		Enabled:true, URL:srv.URL,
 	}, map[string]TrackerSample{
-		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA, Hash:hash, URL:"https://tracker.m-team.cc/announce"},
-	})
+		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA},
+	}, 200)
 	if err != nil { t.Fatal(err) }
 	if _, exists := failures["tracker.m-team.cc"]; exists {
 		t.Fatal("business-level Tracker rejection must not invalidate the candidate")
 	}
 }
+
 
 func TestTransmissionTimedOutTrackerIsConnectionFailure(t *testing.T) {
 	body := []byte(`{
