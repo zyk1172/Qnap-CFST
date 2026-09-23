@@ -681,7 +681,6 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 	dueDomains := make([]string, 0)
 	dueTorrentIDs := make([]int, 0)
 	healthByDomain := make(map[string]transmissionDomainHealth, len(samples))
-	samplePassedByDomain := make(map[string]bool, len(samples))
 
 	for rawDomain := range samples {
 		domain := strings.ToLower(strings.TrimSpace(rawDomain))
@@ -692,7 +691,6 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		health := transmissionDomainHealthForTarget(rows, domain)
 		healthByDomain[domain] = health
 		samplePassed, sampleTestAt := a.trackerSamplePassInfo(domain)
-		samplePassedByDomain[domain] = samplePassed
 
 		state := states[domain]
 		currentIP := currentMappings[domain]
@@ -713,18 +711,19 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		state.ConnectionFailures = health.ConnectionFailures
 		state.ConnectedPercent = health.ConnectedPercent
 
+		if state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
+			state.LastEvent=fmt.Sprintf("waiting 2-minute post-reannounce observation window · current snapshot connected %.1f%% · failures %d (not evaluated yet)",health.ConnectedPercent,health.ConnectionFailures)
+			states[domain]=state
+			continue
+		}
+
 		if health.Matched == 0 || health.Evaluated == 0 {
 			state.Attempts = 0
 			state.Status = "idle"
 			state.NextCheck = ""
+			state.NextReannounce = ""
 			state.LastEvent = "no announced active torrents for this Tracker"
 			states[domain] = state
-			continue
-		}
-
-		if state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
-			state.LastEvent=fmt.Sprintf("waiting 2-minute post-reannounce observation window · connected %.1f%% · failures %d",health.ConnectedPercent,health.ConnectionFailures)
-			states[domain]=state
 			continue
 		}
 
@@ -746,6 +745,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		if !samplePassed {
 			state.Status = "repair"
 			state.NextCheck = ""
+			state.NextReannounce = ""
 			state.LastEvent = fmt.Sprintf("sample not confirmed healthy · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
 			states[domain] = state
 			failure := health.LatestFailure
