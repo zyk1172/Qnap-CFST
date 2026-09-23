@@ -47,6 +47,7 @@ type TrackerKeepaliveRuntime struct {
 	SampleTestAt       string  `json:"sampleTestAt,omitempty"`
 	RejectedIP         string  `json:"rejectedIP,omitempty"`
 	RejectedAt         string  `json:"rejectedAt,omitempty"`
+	FastRetry          bool    `json:"fastRetry,omitempty"`
 	Status             string  `json:"status,omitempty"`
 	MatchedTorrents    int     `json:"matchedTorrents,omitempty"`
 	EvaluatedTorrents  int     `json:"evaluatedTorrents,omitempty"`
