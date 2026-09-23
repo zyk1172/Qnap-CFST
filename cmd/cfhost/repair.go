@@ -228,17 +228,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	for _,p:=range pending {
 		unresolved[p.Domain.Host]=true
 		if p.Refreshable{refreshableUnresolved[p.Domain.Host]=true}
-		if oldIP:=current[p.Domain.Host]; oldIP!="" {
-			detail:=statuses[p.Domain.Host]
-			if detail=="" {detail="no verified candidate"}
-			if confirmedUnusableCurrent[p.Domain.Host] {
-				delete(mappings,p.Domain.Host)
-				statuses[p.Domain.Host]="unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+detail
-			} else {
-				mappings[p.Domain.Host]=oldIP
-				statuses[p.Domain.Host]="stale retained · "+oldIP+" · "+detail
-			}
-		}
+		finalizeUnresolvedMapping(mappings,current,statuses,p,confirmedUnusableCurrent)
 	}
 
 	finalNow:=time.Now(); configured:=make(map[string]bool)
@@ -363,6 +353,20 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 		remaining=append(remaining,p)
 	}
 	return remaining
+}
+
+func finalizeUnresolvedMapping(mappings,current map[string]string,statuses map[string]string,p pendingDomain,confirmedUnusableCurrent map[string]bool){
+	oldIP:=current[p.Domain.Host]
+	if oldIP=="" {return}
+	detail:=statuses[p.Domain.Host]
+	if detail=="" {detail="no verified candidate"}
+	if confirmedUnusableCurrent[p.Domain.Host] {
+		delete(mappings,p.Domain.Host)
+		statuses[p.Domain.Host]="unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+detail
+		return
+	}
+	mappings[p.Domain.Host]=oldIP
+	statuses[p.Domain.Host]="stale retained · "+oldIP+" · "+detail
 }
 
 func refreshDecision(now time.Time,lastRefresh string,failureStreak,threshold int,base,maxBackoff time.Duration,bootstrap bool)(bool,time.Time,time.Duration){
