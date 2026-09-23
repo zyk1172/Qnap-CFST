@@ -37,6 +37,21 @@ type CFSTRateLimitRuntime struct {
 	LastEvent         string `json:"lastEvent,omitempty"`
 }
 
+type TrackerKeepaliveRuntime struct {
+	Attempts           int     `json:"attempts"`
+	StartedAt          string  `json:"startedAt,omitempty"`
+	LastReannounce     string  `json:"lastReannounce,omitempty"`
+	NextCheck          string  `json:"nextCheck,omitempty"`
+	SampleTestAt       string  `json:"sampleTestAt,omitempty"`
+	Status             string  `json:"status,omitempty"`
+	MatchedTorrents    int     `json:"matchedTorrents,omitempty"`
+	EvaluatedTorrents  int     `json:"evaluatedTorrents,omitempty"`
+	ConnectedTorrents  int     `json:"connectedTorrents,omitempty"`
+	ConnectionFailures int     `json:"connectionFailures,omitempty"`
+	ConnectedPercent   float64 `json:"connectedPercent,omitempty"`
+	LastEvent          string  `json:"lastEvent,omitempty"`
+}
+
 type RuntimeState struct {
 	Running             bool                    `json:"running"`
 	CurrentJob          string                  `json:"currentJob"`
@@ -55,8 +70,9 @@ type RuntimeState struct {
 	Mappings            map[string]string       `json:"mappings"`
 	DomainStatus        map[string]string       `json:"domainStatus"`
 	DomainHealth        map[string]DomainHealth `json:"domainHealth"`
-	TrackerSamples      map[string]TrackerSampleRuntime `json:"trackerSamples"`
-	CFSTRateLimit       CFSTRateLimitRuntime    `json:"cfstRateLimit"`
+	TrackerSamples      map[string]TrackerSampleRuntime    `json:"trackerSamples"`
+	TrackerKeepalive    map[string]TrackerKeepaliveRuntime `json:"trackerKeepalive"`
+	CFSTRateLimit       CFSTRateLimitRuntime               `json:"cfstRateLimit"`
 	Sync                SyncRuntimeState        `json:"sync"`
 	History             []RunRecord             `json:"history"`
 	Logs                []string                `json:"logs"`
@@ -69,7 +85,7 @@ func main() {
 	if err != nil { log.Fatal(err) }
 	app := &App{
 		config: cfg, dataDir:dataDir, cfstBin:getenv("CFST_BIN","cfst"),
-		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}, TrackerSamples:map[string]TrackerSampleRuntime{}},
+		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}, TrackerSamples:map[string]TrackerSampleRuntime{}, TrackerKeepalive:map[string]TrackerKeepaliveRuntime{}},
 	}
 	app.loadState()
 	app.refreshTrackerSampleInventory(cfg)
@@ -109,6 +125,7 @@ func (a *App) loadState() {
 	if s.DomainStatus==nil{s.DomainStatus=map[string]string{}}
 	if s.DomainHealth==nil{s.DomainHealth=map[string]DomainHealth{}}
 	if s.TrackerSamples==nil{s.TrackerSamples=map[string]TrackerSampleRuntime{}}
+	if s.TrackerKeepalive==nil{s.TrackerKeepalive=map[string]TrackerKeepaliveRuntime{}}
 	if s.CFSTRateLimit.Mode=="" { s.CFSTRateLimit.Mode="normal" }
 	if len(s.History)>200{s.History=s.History[len(s.History)-200:]}
 	a.state=s
