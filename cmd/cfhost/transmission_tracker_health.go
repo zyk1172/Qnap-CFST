@@ -534,55 +534,273 @@ func transmissionTrackerStatDomain(stat transmissionTrackerStat) string {
 	return host
 }
 
-func transmissionTrackerConnectionFailures(ctx context.Context, cfg DownloaderClientConfig, samples map[string]TrackerSample, maxTrackerLookups int) (map[string]downloaderTrackerFailure, error) {
-	out := make(map[string]downloaderTrackerFailure)
-	if !cfg.Enabled || len(samples) == 0 {
-		return out, nil
-	}
-	targets := make(map[string]bool, len(samples))
-	for domain := range samples {
-		domain = strings.ToLower(strings.TrimSpace(domain))
-		if domain != "" {
-			targets[domain] = true
+func parseTransmissionActionResult(body []byte, modern bool) error {
+	if modern {
+		var response struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
 		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return fmt.Errorf("Transmission action JSON-RPC response: %w", err)
+		}
+		if response.Error != nil {
+			return fmt.Errorf("Transmission JSON-RPC: %s", response.Error.Message)
+		}
+		return nil
 	}
-	if len(targets) == 0 {
-		return out, nil
+	var response struct {
+		Result string `json:"result"`
 	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("Transmission action response: %w", err)
+	}
+	if response.Result != "" && response.Result != "success" {
+		return fmt.Errorf("Transmission RPC: %s", response.Result)
+	}
+	return nil
+}
 
-	rows, _, _, _, err := transmissionActiveTrackerStats(ctx, cfg, maxTrackerLookups)
-	if err != nil {
-		return out, err
+func transmissionReannounce(ctx context.Context, cfg DownloaderClientConfig, ids []int) error {
+	if len(ids) == 0 {
+		return nil
 	}
-	for _, row := range rows {
-		if row.Status != 5 && row.Status != 6 {
+	endpoint, err := normalizeTransmissionURL(cfg.URL)
+	if err != nil {
+		return err
+	}
+	uniq := make([]int, 0, len(ids))
+	seen := map[int]bool{}
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
 			continue
 		}
-		for _, stat := range row.TrackerStats {
-			domain := transmissionTrackerStatDomain(stat)
-			if !targets[domain] || !stat.HasAnnounced {
-				continue
+		seen[id] = true
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+	sort.Ints(uniq)
+	rpc := &transmissionRPCClient{
+		endpoint: endpoint,
+		cfg:      cfg,
+		client:   &http.Client{},
+	}
+	body, err := rpc.call(
+		ctx,
+		"torrent-reannounce",
+		"torrent_reannounce",
+		map[string]any{"ids": uniq},
+		map[string]any{"ids": uniq},
+	)
+	if err != nil {
+		return err
+	}
+	return parseTransmissionActionResult(body, rpc.modern)
+}
+
+func (a *App) trackerSamplePassInfo(domain string) (bool, string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	sample, ok := a.state.TrackerSamples[domain]
+	if !ok {
+		return false, ""
+	}
+	return sample.Tested && sample.Passed, sample.LastTest
+}
+
+func copyTrackerKeepalive(in map[string]TrackerKeepaliveRuntime) map[string]TrackerKeepaliveRuntime {
+	out := make(map[string]TrackerKeepaliveRuntime, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func trackerKeepaliveNextDue(state TrackerKeepaliveRuntime, now time.Time) bool {
+	if strings.TrimSpace(state.NextCheck) == "" {
+		return true
+	}
+	next, err := time.Parse(time.RFC3339, state.NextCheck)
+	return err != nil || !now.Before(next)
+}
+
+func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Config, samples map[string]TrackerSample) map[string]downloaderTrackerFailure {
+	out := make(map[string]downloaderTrackerFailure)
+	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled || len(samples) == 0 {
+		return out
+	}
+
+	// Runtime health is deliberately uncapped. maxTrackerLookups=200 remains
+	// limited to sample discovery; health/keepalive must see every active seed.
+	timeout := 60 * time.Second
+	if configured := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second; configured > timeout {
+		timeout = configured
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	rows, totalActive, checked, _, err := transmissionActiveTrackerStats(probeCtx, cfg.Tracker.Transmission, 0)
+	if err != nil {
+		a.appendLog("Transmission tracker health warning: %v", err)
+		return out
+	}
+	a.appendLog("Transmission tracker health: scanned %d/%d active seeding torrents", checked, totalActive)
+
+	a.mu.RLock()
+	states := copyTrackerKeepalive(a.state.TrackerKeepalive)
+	a.mu.RUnlock()
+
+	now := time.Now()
+	targets := make(map[string]bool, len(samples))
+	dueDomains := make([]string, 0)
+	dueTorrentIDs := make([]int, 0)
+	healthByDomain := make(map[string]transmissionDomainHealth, len(samples))
+	samplePassedByDomain := make(map[string]bool, len(samples))
+
+	for rawDomain := range samples {
+		domain := strings.ToLower(strings.TrimSpace(rawDomain))
+		if domain == "" {
+			continue
+		}
+		targets[domain] = true
+		health := transmissionDomainHealthForTarget(rows, domain)
+		healthByDomain[domain] = health
+		samplePassed, sampleTestAt := a.trackerSamplePassInfo(domain)
+		samplePassedByDomain[domain] = samplePassed
+
+		state := states[domain]
+		if state.SampleTestAt != sampleTestAt {
+			state = TrackerKeepaliveRuntime{SampleTestAt: sampleTestAt}
+		}
+		state.MatchedTorrents = health.Matched
+		state.EvaluatedTorrents = health.Evaluated
+		state.ConnectedTorrents = health.Connected
+		state.ConnectionFailures = health.ConnectionFailures
+		state.ConnectedPercent = health.ConnectedPercent
+
+		if health.Matched == 0 || health.Evaluated == 0 {
+			state.Attempts = 0
+			state.Status = "idle"
+			state.NextCheck = ""
+			state.LastEvent = "no announced active torrents for this Tracker"
+			states[domain] = state
+			continue
+		}
+
+		if trackerDomainHealthAcceptable(health) {
+			state.Attempts = 0
+			state.NextCheck = ""
+			if health.ConnectionFailures > 0 {
+				state.Status = "acceptable"
+				state.LastEvent = fmt.Sprintf("acceptable residual failures · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+			} else {
+				state.Status = "healthy"
+				state.LastEvent = fmt.Sprintf("connected %.1f%% · no connection failures", health.ConnectedPercent)
 			}
-			reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
-			connectionFailed := stat.LastAnnounceTimedOut || trackerFailureIndicatesUnreachable(reason)
-			if !connectionFailed {
-				continue
-			}
-			if reason == "" {
-				reason = "tracker announce timed out"
-			}
-			detail := "Transmission · " + reason
-			old, exists := out[domain]
-			if !exists || stat.LastAnnounceTime >= old.LastAnnounceTime {
-				out[domain] = downloaderTrackerFailure{
+			states[domain] = state
+			continue
+		}
+
+		if !samplePassed {
+			state.Status = "repair"
+			state.NextCheck = ""
+			state.LastEvent = fmt.Sprintf("sample not confirmed healthy · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+			states[domain] = state
+			failure := health.LatestFailure
+			if failure.Detail == "" {
+				failure = downloaderTrackerFailure{
 					Source:           "Transmission",
-					Detail:           detail,
-					LastAnnounceTime: stat.LastAnnounceTime,
+					Detail:           fmt.Sprintf("Transmission · connection health below threshold · %.1f%% connected · %d failures", health.ConnectedPercent, health.ConnectionFailures),
+					LastAnnounceTime: now.Unix(),
 				}
 			}
+			out[domain] = failure
+			continue
+		}
+
+		if state.Attempts >= trackerKeepaliveMaxAttempts {
+			if !trackerKeepaliveNextDue(state, now) {
+				state.Status = "waiting-after-third"
+				state.LastEvent = fmt.Sprintf("waiting for third reannounce result · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+				states[domain] = state
+				continue
+			}
+			state.Status = "repair"
+			state.LastEvent = fmt.Sprintf("keepalive exhausted · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+			states[domain] = state
+			out[domain] = downloaderTrackerFailure{
+				Source:           "Transmission keepalive",
+				Detail:           fmt.Sprintf("Transmission keepalive exhausted after %d reannounce attempts · %.1f%% connected · %d connection failures", trackerKeepaliveMaxAttempts, health.ConnectedPercent, health.ConnectionFailures),
+				LastAnnounceTime: now.Unix(),
+			}
+			continue
+		}
+
+		if !trackerKeepaliveNextDue(state, now) {
+			state.Status = "waiting"
+			state.LastEvent = fmt.Sprintf("waiting for next low-frequency reannounce · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+			states[domain] = state
+			continue
+		}
+
+		if len(health.FailureTorrentIDs) > 0 {
+			dueDomains = append(dueDomains, domain)
+			dueTorrentIDs = append(dueTorrentIDs, health.FailureTorrentIDs...)
+			state.Status = "reannounce-due"
+			state.LastEvent = fmt.Sprintf("sample passed; %d connection-failed torrents are due for reannounce", len(health.FailureTorrentIDs))
+			states[domain] = state
 		}
 	}
-	return out, nil
+
+	if len(dueDomains) > 0 {
+		reannounceCtx, reannounceCancel := context.WithTimeout(ctx, 20*time.Second)
+		err := transmissionReannounce(reannounceCtx, cfg.Tracker.Transmission, dueTorrentIDs)
+		reannounceCancel()
+		stamp := now.Format(time.RFC3339)
+		next := now.Add(trackerKeepaliveInterval).Format(time.RFC3339)
+		for _, domain := range dueDomains {
+			state := states[domain]
+			state.LastReannounce = stamp
+			state.NextCheck = next
+			if state.StartedAt == "" {
+				state.StartedAt = stamp
+			}
+			health := healthByDomain[domain]
+			if err != nil {
+				state.Status = "reannounce-error"
+				state.LastEvent = "Transmission reannounce RPC failed · " + err.Error()
+				a.appendLog("tracker keepalive %s: reannounce RPC failed: %v", domain, err)
+			} else {
+				state.Attempts++
+				state.Status = "waiting"
+				state.LastEvent = fmt.Sprintf("reannounce %d/%d sent for %d connection-failed torrents; next check after %s", state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), next)
+				a.appendLog("tracker keepalive %s: torrent-reannounce %d/%d sent for %d torrent(s); next check %s", domain, state.Attempts, trackerKeepaliveMaxAttempts, len(health.FailureTorrentIDs), next)
+			}
+			states[domain] = state
+		}
+	}
+
+	a.mu.Lock()
+	if a.state.TrackerKeepalive == nil {
+		a.state.TrackerKeepalive = map[string]TrackerKeepaliveRuntime{}
+	}
+	for domain := range a.state.TrackerKeepalive {
+		if !targets[domain] {
+			delete(a.state.TrackerKeepalive, domain)
+		}
+	}
+	for domain, state := range states {
+		if targets[domain] {
+			a.state.TrackerKeepalive[domain] = state
+		}
+	}
+	a.mu.Unlock()
+
+	if len(out) > 0 {
+		a.appendLog("Transmission tracker health: %d domain(s) crossed keepalive threshold and require Repair", len(out))
+	}
+	return out
 }
 
 // downloaderFailureIsNewer prevents a stale Transmission error from repeatedly
@@ -604,23 +822,5 @@ func downloaderFailureIsNewer(failure downloaderTrackerFailure, lastSuccess stri
 }
 
 func (a *App) loadDownloaderTrackerFailures(ctx context.Context, cfg Config, samples map[string]TrackerSample) map[string]downloaderTrackerFailure {
-	out := make(map[string]downloaderTrackerFailure)
-	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled {
-		return out
-	}
-	timeout := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 15 * time.Second
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	failures, err := transmissionTrackerConnectionFailures(probeCtx, cfg.Tracker.Transmission, samples, cfg.Tracker.MaxTrackerLookups)
-	if err != nil {
-		a.appendLog("Transmission tracker health warning: %v", err)
-		return out
-	}
-	if len(failures) > 0 {
-		a.appendLog("Transmission tracker health: %d domain(s) report connection failure", len(failures))
-	}
-	return failures
+	return a.evaluateTransmissionTrackerKeepalive(ctx, cfg, samples)
 }
