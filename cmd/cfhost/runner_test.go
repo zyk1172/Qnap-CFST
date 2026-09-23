@@ -705,6 +705,44 @@ func TestCommitResolutionRejectsExpiredContextWithoutMutatingMappings(t *testing
 	}
 }
 
+func TestCommitResolutionClearsRejectedIPOnlyAfterReplacement(t *testing.T) {
+	dir:=t.TempDir()
+	cfg:=defaultConfig()
+	cfg.AutoApply=false
+	cfg.Sync.Enabled=false
+
+	a:=&App{
+		dataDir:dir,
+		state:RuntimeState{
+			Mappings:map[string]string{"tracker.example.com":"104.16.0.10"},
+			DomainStatus:map[string]string{},
+			DomainHealth:map[string]DomainHealth{},
+			TrackerSamples:map[string]TrackerSampleRuntime{},
+			TrackerKeepalive:map[string]TrackerKeepaliveRuntime{
+				"tracker.example.com":{RejectedIP:"104.16.0.10",RejectedAt:"2026-09-24T00:00:00Z",Attempts:3,Status:"repair"},
+			},
+		},
+	}
+
+	if err:=a.commitResolution(context.Background(),cfg,
+		map[string]string{"tracker.example.com":"104.16.0.10"},
+		map[string]string{},map[string]DomainHealth{},"",false);err!=nil{t.Fatal(err)}
+	if got:=a.state.TrackerKeepalive["tracker.example.com"].RejectedIP;got!="104.16.0.10"{
+		t.Fatalf("same mapping must remain rejected, got %q",got)
+	}
+
+	if err:=a.commitResolution(context.Background(),cfg,
+		map[string]string{"tracker.example.com":"104.16.0.11"},
+		map[string]string{},map[string]DomainHealth{},"",false);err!=nil{t.Fatal(err)}
+	state:=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.RejectedIP!=""{
+		t.Fatalf("rejected IP must clear only after replacement commits: %#v",state)
+	}
+	if state.Status!="healthy" || !strings.Contains(state.LastEvent,"104.16.0.11"){
+		t.Fatalf("replacement clear state missing: %#v",state)
+	}
+}
+
 func TestSmartRepairRetainsLastKnownGoodWhenTrackerSampleMissing(t *testing.T) {
 	dir:=t.TempDir()
 	cfg:=defaultConfig()
