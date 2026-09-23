@@ -129,8 +129,10 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 				statuses[d.Host]="current failed · "+detail
 				a.recordTrackerSampleTest(cfg,d,false,detail)
 				freshDownloaderFailure[d.Host]=downloaderFailureIsNewer(failure,health[d.Host].LastFailure)
-				a.appendLog("%s current %s failed from downloader runtime: %s",d.Host,currentIP,failure.Detail)
-				pending=append(pending,pendingDomain{d,currentIP,refreshable})
+				skipIP:=currentIP
+				if failure.RejectedIP!="" { skipIP=failure.RejectedIP }
+				a.appendLog("%s current %s failed from downloader runtime: %s · excluded candidate=%s",d.Host,currentIP,failure.Detail,skipIP)
+				pending=append(pending,pendingDomain{d,skipIP,refreshable})
 				continue
 			}
 			domainCtx,cancel,budget,hasBudget:=domainVerificationContext(ctx,len(cfg.Domains)-index)
