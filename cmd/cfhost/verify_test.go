@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,31 @@ func TestEvaluateHTTPConnectivityStatusPolicy(t *testing.T) {
 		if ok, detail := evaluateHTTPConnectivityStatus(status); ok || !strings.Contains(detail, "temporary failure") {
 			t.Fatalf("HTTP %d must fail temporarily: ok=%v detail=%q", status, ok, detail)
 		}
+	}
+}
+
+
+func TestHTTPStrategiesRejectForbiddenButNormalStillSkipsVerification(t *testing.T) {
+	cfg := defaultConfig()
+
+	for _, class := range []string{"latency", "bandwidth"} {
+		d := Domain{Host:"example.com", Class:class, Mode:"http", Endpoint:"/", Enabled:true}
+		if got := classifyHTTPConnectivityStatus(http.StatusForbidden); got != httpProbeHardFailure {
+			t.Fatalf("%s HTTP strategy must classify 403 as hard failure, got %v", class, got)
+		}
+		if ok, detail := evaluateHTTPConnectivityStatus(http.StatusForbidden); ok || !strings.Contains(detail, "blocked/unusable") {
+			t.Fatalf("%s HTTP strategy must reject 403: ok=%v detail=%q", class, ok, detail)
+		}
+		if ok, _ := evaluateStrictHTTPResponse(http.StatusForbidden, []byte("forbidden"), "https://example.com/login", cfg); ok {
+			t.Fatalf("%s strict HTTP strategy must reject final 403", class)
+		}
+		_ = d
+	}
+
+	normal := Domain{Host:"example.com", Class:"normal", Mode:"http", Endpoint:"/", Enabled:true}
+	ok, detail := verifyConfiguredDomain(t.Context(), normal, "192.0.2.1", cfg, nil)
+	if !ok || !strings.Contains(detail, "verification skipped") {
+		t.Fatalf("normal HTTP must remain unprobed: ok=%v detail=%q", ok, detail)
 	}
 }
 
