@@ -88,6 +88,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	statuses:=make(map[string]string)
 	groupIP:=make(map[string]string)
 	groupHardFailures:=make(map[string]map[string]bool)
+	confirmedUnusableCurrent:=make(map[string]bool)
 	pending:=make([]pendingDomain,0)
 	freshDownloaderFailure:=make(map[string]bool)
 	for index,d:=range cfg.Domains {
@@ -154,6 +155,10 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			}
 			if verificationHardFailure(detail) {
 				markGroupHardFailure(groupHardFailures,groupKey(d),currentIP)
+				if d.Mode=="http" {
+					confirmedUnusableCurrent[d.Host]=true
+					delete(mappings,d.Host)
+				}
 			}
 			statuses[d.Host]="current failed · "+detail
 			a.appendLog("%s current %s failed: %s",d.Host,currentIP,detail)
@@ -224,10 +229,15 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		unresolved[p.Domain.Host]=true
 		if p.Refreshable{refreshableUnresolved[p.Domain.Host]=true}
 		if oldIP:=current[p.Domain.Host]; oldIP!="" {
-			mappings[p.Domain.Host]=oldIP
 			detail:=statuses[p.Domain.Host]
 			if detail=="" {detail="no verified candidate"}
-			statuses[p.Domain.Host]="stale retained · "+oldIP+" · "+detail
+			if confirmedUnusableCurrent[p.Domain.Host] {
+				delete(mappings,p.Domain.Host)
+				statuses[p.Domain.Host]="unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+detail
+			} else {
+				mappings[p.Domain.Host]=oldIP
+				statuses[p.Domain.Host]="stale retained · "+oldIP+" · "+detail
+			}
 		}
 	}
 
