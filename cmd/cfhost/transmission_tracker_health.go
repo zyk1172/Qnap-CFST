@@ -225,53 +225,59 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		if row.Status != 5 && row.Status != 6 {
 			continue
 		}
-		matchedRow := false
+		var selected *transmissionTrackerStat
 		for i := range row.TrackerStats {
 			stat := row.TrackerStats[i]
 			if transmissionTrackerStatDomain(stat) != target {
 				continue
 			}
-			if !matchedRow {
-				out.MatchedTorrents++
-				if row.Status == 6 {
-					out.SeedingTorrents++
-				} else {
-					out.QueuedTorrents++
-				}
-				matchedRow = true
-			}
-			label := transmissionTrackerStatusLabel(stat)
-			switch label {
-			case "Working":
-				out.WorkingTorrents++
-			case "Timeout":
-				out.TimeoutTorrents++
-			case "Error":
-				out.ErrorTorrents++
-			default:
-				out.WaitingTorrents++
-			}
-			reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
-			if label == "Timeout" || label == "Error" {
-				if reason == "" {
-					if label == "Timeout" {
-						reason = "Tracker announce timed out"
-					} else {
-						reason = "Tracker announce failed"
-					}
-				}
-				issues = append(issues, transmissionTrackerRuntimeIssue{
-					Result:           reason,
-					LastAnnounceTime: stat.LastAnnounceTime,
-					TorrentStatus:    row.Status,
-					TimedOut:         label == "Timeout",
-				})
-			}
-			if latest == nil || stat.LastAnnounceTime >= latest.LastAnnounceTime {
+			if selected == nil || stat.LastAnnounceTime >= selected.LastAnnounceTime {
 				copyStat := stat
-				latest = &copyStat
-				out.TorrentStatus = row.Status
+				selected = &copyStat
 			}
+		}
+		if selected == nil {
+			continue
+		}
+
+		out.MatchedTorrents++
+		if row.Status == 6 {
+			out.SeedingTorrents++
+		} else {
+			out.QueuedTorrents++
+		}
+
+		label := transmissionTrackerStatusLabel(*selected)
+		switch label {
+		case "Working":
+			out.WorkingTorrents++
+		case "Timeout":
+			out.TimeoutTorrents++
+		case "Error":
+			out.ErrorTorrents++
+		default:
+			out.WaitingTorrents++
+		}
+		reason := sanitizeTrackerReason([]byte(selected.LastAnnounceResult))
+		if label == "Timeout" || label == "Error" {
+			if reason == "" {
+				if label == "Timeout" {
+					reason = "Tracker announce timed out"
+				} else {
+					reason = "Tracker announce failed"
+				}
+			}
+			issues = append(issues, transmissionTrackerRuntimeIssue{
+				Result:           reason,
+				LastAnnounceTime: selected.LastAnnounceTime,
+				TorrentStatus:    row.Status,
+				TimedOut:         label == "Timeout",
+			})
+		}
+		if latest == nil || selected.LastAnnounceTime >= latest.LastAnnounceTime {
+			copyStat := *selected
+			latest = &copyStat
+			out.TorrentStatus = row.Status
 		}
 	}
 
@@ -364,7 +370,8 @@ func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClie
 		return active[i].ActivityDate > active[j].ActivityDate
 	})
 
-	limit := len(active)
+	totalActive := len(active)
+	limit := totalActive
 	truncated := false
 	if limit > maxTrackerLookups {
 		limit = maxTrackerLookups
@@ -406,7 +413,7 @@ func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClie
 		rows = append(rows, batchRows...)
 	}
 
-	return aggregateTransmissionTrackerRuntime(rows, domain, len(active), len(active), truncated), nil
+	return aggregateTransmissionTrackerRuntime(rows, domain, totalActive, len(active), truncated), nil
 }
 
 func transmissionTrackerStatDomain(stat transmissionTrackerStat) string {
