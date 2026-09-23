@@ -15,6 +15,7 @@ type downloaderTrackerFailure struct {
 	Source           string
 	Detail           string
 	LastAnnounceTime int64
+	RejectedIP       string
 }
 
 type transmissionTrackerStat struct {
@@ -226,6 +227,23 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 }
 
 
+func trackerFailureIndicatesForbidden(reason string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(reason), " "))
+	patterns := []string{
+		"http 403",
+		"http response code 403",
+		"response code 403",
+		"status 403",
+		"403 forbidden",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(normalized, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
 	if stat.LastAnnounceSucceeded {
 		return "Working"
@@ -235,7 +253,7 @@ func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
 	}
 	if stat.HasAnnounced {
 		reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
-		if trackerFailureIndicatesUnreachable(reason) {
+		if trackerFailureIndicatesUnreachable(reason) || trackerFailureIndicatesForbidden(reason) {
 			return "Disconnected"
 		}
 		return "ConnectedError"
@@ -649,6 +667,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 
 	a.mu.RLock()
 	states := copyTrackerKeepalive(a.state.TrackerKeepalive)
+	currentMappings := copyMappings(a.state.Mappings)
 	a.mu.RUnlock()
 
 	now := time.Now()
@@ -670,8 +689,21 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		samplePassedByDomain[domain] = samplePassed
 
 		state := states[domain]
-		if state.SampleTestAt != sampleTestAt {
-			state = TrackerKeepaliveRuntime{SampleTestAt: sampleTestAt}
+		currentIP := currentMappings[domain]
+		if state.RejectedIP != "" && currentIP != "" && currentIP != state.RejectedIP {
+			state = TrackerKeepaliveRuntime{
+				SampleTestAt: sampleTestAt,
+				Status:       "healthy",
+				LastEvent:    fmt.Sprintf("mapping changed from rejected %s to %s; keepalive rejection cleared", state.RejectedIP, currentIP),
+			}
+		} else if state.SampleTestAt != sampleTestAt {
+			// A new sample result alone must not clear a rejected mapping. The
+			// old IP stays blocked until the committed mapping actually changes.
+			if state.RejectedIP == "" {
+				state = TrackerKeepaliveRuntime{SampleTestAt: sampleTestAt}
+			} else {
+				state.SampleTestAt = sampleTestAt
+			}
 		}
 		state.MatchedTorrents = health.Matched
 		state.EvaluatedTorrents = health.Evaluated
@@ -727,12 +759,17 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 				continue
 			}
 			state.Status = "repair"
-			state.LastEvent = fmt.Sprintf("keepalive exhausted · connected %.1f%% · failures %d", health.ConnectedPercent, health.ConnectionFailures)
+			if currentIP != "" {
+				state.RejectedIP = currentIP
+				state.RejectedAt = now.Format(time.RFC3339)
+			}
+			state.LastEvent = fmt.Sprintf("keepalive exhausted · connected %.1f%% · failures %d · rejected IP %s", health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP)
 			states[domain] = state
 			out[domain] = downloaderTrackerFailure{
 				Source:           "Transmission keepalive",
-				Detail:           fmt.Sprintf("Transmission keepalive exhausted after %d reannounce attempts · %.1f%% connected · %d connection failures", trackerKeepaliveMaxAttempts, health.ConnectedPercent, health.ConnectionFailures),
+				Detail:           fmt.Sprintf("Transmission keepalive exhausted after %d reannounce attempts · %.1f%% connected · %d connection failures · rejected IP %s", trackerKeepaliveMaxAttempts, health.ConnectedPercent, health.ConnectionFailures, state.RejectedIP),
 				LastAnnounceTime: now.Unix(),
+				RejectedIP:       state.RejectedIP,
 			}
 			continue
 		}
