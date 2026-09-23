@@ -80,6 +80,7 @@ const store = {
   domainQuery: '',
   domainFilter: 'all',
   expandedDomainHost: '',
+  trackerRuntime: {},
   candidateSort: 'latency',
   logQuery: '',
   logPaused: false,
