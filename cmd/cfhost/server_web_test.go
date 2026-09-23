@@ -352,7 +352,8 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
 			t.Fatalf("expanded detail is missing %q", want)
 		}
 	}
-	if !strings.Contains(eventsJS, "store.expandedDomainHost === domain.host ? '' : domain.host") {
+	if !strings.Contains(eventsJS, "const opening = store.expandedDomainHost !== domain.host") ||
+		!strings.Contains(eventsJS, "store.expandedDomainHost = opening ? domain.host : ''") {
 		t.Fatal("clicking a domain must toggle its detail row")
 	}
 	if !strings.Contains(cssText, ".domain-table-wrap { overflow: hidden; }") ||
@@ -364,6 +365,38 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
       "meta actions"
       "ip status";`) {
 		t.Fatal("mobile domain rows must switch to a compact grid")
+	}
+}
+
+func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
+	domains, err := webAssets.ReadFile("web/js/dashboard-domains.js")
+	if err != nil { t.Fatal(err) }
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil { t.Fatal(err) }
+	interactions, err := webAssets.ReadFile("web/js/interactions.js")
+	if err != nil { t.Fatal(err) }
+
+	domainsJS := string(domains)
+	eventsJS := string(events)
+	interactionsJS := string(interactions)
+
+	for _, want := range []string{
+		`data-domain-filter="tracker"`,
+		`store.domainFilter === 'tracker' && domain.mode !== 'tracker'`,
+		`Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')`,
+		`Transmission 做种状态`,
+		`trackerStatus === 'Working'`,
+		`最近 Tracker 返回`,
+	} {
+		if !strings.Contains(domainsJS, want) {
+			t.Fatalf("Tracker domain UI is missing %q", want)
+		}
+	}
+	if !strings.Contains(eventsJS, "if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)") {
+		t.Fatal("Tracker runtime must load lazily when a Tracker row is expanded")
+	}
+	if !strings.Contains(interactionsJS, "/api/tracker-runtime?host=") {
+		t.Fatal("Tracker expansion must query the runtime endpoint")
 	}
 }
 
