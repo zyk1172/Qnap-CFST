@@ -33,6 +33,7 @@ type transmissionTrackerStat struct {
 }
 
 type transmissionTrackerStatsRow struct {
+	ID           int
 	HashString   string
 	Status       int
 	TrackerStats []transmissionTrackerStat
@@ -72,6 +73,7 @@ type transmissionTrackerRuntime struct {
 	SeederCount           int                               `json:"seederCount"`
 	LeecherCount          int                               `json:"leecherCount"`
 	Issues                []transmissionTrackerRuntimeIssue `json:"issues,omitempty"`
+	Keepalive             TrackerKeepaliveRuntime           `json:"keepalive"`
 	CheckedAt             string                            `json:"checkedAt"`
 }
 
@@ -113,6 +115,7 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 	for _, row := range rows {
 		if modern {
 			var v struct {
+				ID           int    `json:"id"`
 				HashString   string `json:"hash_string"`
 				Status       int    `json:"status"`
 				TrackerStats []struct {
@@ -133,7 +136,7 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 			if json.Unmarshal(row, &v) != nil {
 				continue
 			}
-			item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString), Status: v.Status}
+			item := transmissionTrackerStatsRow{ID: v.ID, HashString: strings.ToLower(v.HashString), Status: v.Status}
 			for _, stat := range v.TrackerStats {
 				item.TrackerStats = append(item.TrackerStats, transmissionTrackerStat{
 					Announce:              stat.Announce,
@@ -155,6 +158,7 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 		}
 
 		var v struct {
+			ID           int    `json:"id"`
 			HashString   string `json:"hashString"`
 			Status       int    `json:"status"`
 			TrackerStats []struct {
@@ -175,7 +179,7 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 		if json.Unmarshal(row, &v) != nil {
 			continue
 		}
-		item := transmissionTrackerStatsRow{HashString: strings.ToLower(v.HashString), Status: v.Status}
+		item := transmissionTrackerStatsRow{ID: v.ID, HashString: strings.ToLower(v.HashString), Status: v.Status}
 		for _, stat := range v.TrackerStats {
 			item.TrackerStats = append(item.TrackerStats, transmissionTrackerStat{
 				Announce:              stat.Announce,
@@ -335,10 +339,6 @@ func transmissionActiveTrackerStats(ctx context.Context, cfg DownloaderClientCon
 	if err != nil {
 		return nil, 0, 0, false, err
 	}
-	if maxTrackerLookups < 1 {
-		maxTrackerLookups = 200
-	}
-
 	rpc := &transmissionRPCClient{
 		endpoint: endpoint,
 		cfg:      cfg,
@@ -377,7 +377,7 @@ func transmissionActiveTrackerStats(ctx context.Context, cfg DownloaderClientCon
 	totalActive := len(active)
 	limit := totalActive
 	truncated := false
-	if limit > maxTrackerLookups {
+	if maxTrackerLookups > 0 && limit > maxTrackerLookups {
 		limit = maxTrackerLookups
 		truncated = true
 	}
@@ -400,11 +400,11 @@ func transmissionActiveTrackerStats(ctx context.Context, cfg DownloaderClientCon
 			"torrent_get",
 			map[string]any{
 				"ids":    ids,
-				"fields": []string{"hashString", "status", "trackerStats"},
+				"fields": []string{"id", "hashString", "status", "trackerStats"},
 			},
 			map[string]any{
 				"ids":    ids,
-				"fields": []string{"hash_string", "status", "tracker_stats"},
+				"fields": []string{"id", "hash_string", "status", "tracker_stats"},
 			},
 		)
 		if err != nil {
