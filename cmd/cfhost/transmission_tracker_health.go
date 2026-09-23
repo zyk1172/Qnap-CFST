@@ -245,17 +245,20 @@ func trackerFailureIndicatesForbidden(reason string) bool {
 }
 
 func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
-	if stat.LastAnnounceSucceeded {
-		return "Working"
+	reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
+	if trackerFailureIndicatesForbidden(reason) {
+		return "Disconnected"
 	}
 	if stat.LastAnnounceTimedOut {
 		return "Timeout"
 	}
+	if trackerFailureIndicatesUnreachable(reason) {
+		return "Disconnected"
+	}
+	if stat.LastAnnounceSucceeded {
+		return "Working"
+	}
 	if stat.HasAnnounced {
-		reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
-		if trackerFailureIndicatesUnreachable(reason) || trackerFailureIndicatesForbidden(reason) {
-			return "Disconnected"
-		}
 		return "ConnectedError"
 	}
 	return "Waiting"
