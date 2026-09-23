@@ -162,15 +162,105 @@ function historyTimelineItem(item) {
   `
 }
 
+function trackerTorrentStatusLabel(status) {
+  return ({
+    0: '已停止',
+    1: '等待校验',
+    2: '校验中',
+    3: '等待下载',
+    4: '下载中',
+    5: '等待做种',
+    6: '做种中',
+  })[Number(status)] || `未知（${status ?? '—'}）`
+}
+
+function trackerAnnounceStateLabel(state) {
+  return ({
+    0: 'Inactive',
+    1: 'Waiting',
+    2: 'Queued',
+    3: 'Active',
+  })[Number(state)] || `Unknown（${state ?? '—'}）`
+}
+
+function trackerUnixTime(value) {
+  const seconds = Number(value) || 0
+  return seconds > 0 ? fmtTime(new Date(seconds * 1000).toISOString()) : '—'
+}
+
+function trackerRuntimePanel(domain) {
+  if (domain.mode !== 'tracker') return ''
+  const entry = store.trackerRuntime?.[domain.host]
+  if (!entry || entry.loading) {
+    return `
+      <div class="tracker-runtime-panel">
+        <div class="tracker-runtime-head"><span>Transmission 做种状态</span><span class="chip info"><span class="dot"></span>读取中</span></div>
+        <div class="domain-detail-wide"><span>实时状态</span><strong>正在从 Transmission 读取样本种子的 Tracker 状态…</strong></div>
+      </div>
+    `
+  }
+  if (entry.error || !entry.data) {
+    return `
+      <div class="tracker-runtime-panel">
+        <div class="tracker-runtime-head"><span>Transmission 做种状态</span><span class="chip warning"><span class="dot"></span>不可用</span></div>
+        <div class="domain-detail-wide"><span>状态读取</span><strong>${esc(entry.error || '没有可用状态')}</strong></div>
+      </div>
+    `
+  }
+
+  const runtime = entry.data
+  const trackerStatus = runtime.trackerStatus || 'Waiting'
+  const trackerVariant = trackerStatus === 'Working' ? 'success' : trackerStatus === 'Waiting' ? 'warning' : 'danger'
+  const torrentVariant = runtime.seeding ? 'success' : Number(runtime.torrentStatus) === 5 ? 'warning' : ''
+  const result = runtime.lastAnnounceResult || (runtime.lastAnnounceSucceeded ? 'Working' : runtime.hasAnnounced ? '—' : '尚未 Announce')
+  const peers = Number(runtime.lastAnnouncePeerCount) || 0
+  const seeders = Number(runtime.seederCount) || 0
+  const leechers = Number(runtime.leecherCount) || 0
+
+  return `
+    <div class="tracker-runtime-panel">
+      <div class="tracker-runtime-head">
+        <span>Transmission 做种状态</span>
+        <div class="domain-compact-chips">
+          <span class="chip ${torrentVariant}"><span class="dot"></span>${esc(trackerTorrentStatusLabel(runtime.torrentStatus))}</span>
+          <span class="chip ${trackerVariant}"><span class="dot"></span>${esc(trackerStatus)}</span>
+        </div>
+      </div>
+      <div class="domain-detail-grid tracker-runtime-grid">
+        <div class="domain-detail-item"><span>任务状态</span><strong>${esc(trackerTorrentStatusLabel(runtime.torrentStatus))}</strong></div>
+        <div class="domain-detail-item"><span>Tracker 状态</span><strong class="${trackerVariant}">${esc(trackerStatus)}</strong></div>
+        <div class="domain-detail-item"><span>Announce 状态</span><strong>${esc(trackerAnnounceStateLabel(runtime.announceState))}</strong></div>
+        <div class="domain-detail-item"><span>最近 Peers</span><strong>${peers} · S ${seeders} / L ${leechers}</strong></div>
+        <div class="domain-detail-item"><span>最近 Announce</span><strong>${esc(trackerUnixTime(runtime.lastAnnounceTime))}</strong></div>
+        <div class="domain-detail-item"><span>下次 Announce</span><strong>${esc(trackerUnixTime(runtime.nextAnnounceTime))}</strong></div>
+        <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
+        <div class="domain-detail-item"><span>来源</span><strong>${esc(runtime.source || 'Transmission')}</strong></div>
+      </div>
+      <div class="domain-detail-wide tracker-result ${trackerVariant}">
+        <span>最近 Tracker 返回</span>
+        <strong>${esc(result)}</strong>
+      </div>
+    </div>
+  `
+}
+
 function filteredDomains() {
   const domains = store.config.domains || []
   const query = store.domainQuery.trim().toLowerCase()
-  const filtered = domains.filter(domain => {
-    if (store.domainFilter === 'enabled' && !domain.enabled) return false
-    if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host]) return false
-    if (!query) return true
-    return [domain.host, domain.group, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
-  })
+  const filtered = domains
+    .map((domain, index) => ({ domain, index }))
+    .filter(({ domain }) => {
+      if (store.domainFilter === 'tracker' && domain.mode !== 'tracker') return false
+      if (store.domainFilter === 'enabled' && !domain.enabled) return false
+      if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host]) return false
+      if (!query) return true
+      return [domain.host, domain.group, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
+    })
+    .sort((a, b) => {
+      const trackerOrder = Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')
+      return trackerOrder || a.index - b.index
+    })
+    .map(item => item.domain)
   return { domains, filtered }
 }
 
@@ -251,6 +341,7 @@ function domainRowsHTML(domains, filtered) {
                 <span>最近状态</span>
                 <strong>${esc(currentStatus)}</strong>
               </div>
+              ${trackerRuntimePanel(domain)}
             </div>
           </td>
         </tr>
@@ -280,6 +371,7 @@ function renderDomains() {
           <div class="search-field">${icon('search')}<input id="domain-search" type="search" value="${esc(store.domainQuery)}" placeholder="搜索域名或分组"></div>
           <div class="segmented">
             <button data-domain-filter="all" class="${store.domainFilter === 'all' ? 'is-active' : ''}">全部</button>
+            <button data-domain-filter="tracker" class="${store.domainFilter === 'tracker' ? 'is-active' : ''}">Tracker</button>
             <button data-domain-filter="enabled" class="${store.domainFilter === 'enabled' ? 'is-active' : ''}">已启用</button>
             <button data-domain-filter="failed" class="${store.domainFilter === 'failed' ? 'is-active' : ''}">待处理</button>
           </div>
