@@ -668,6 +668,9 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .tracker-result.success { border-color: rgba(var(--success-rgb), .28); background: rgba(var(--success-rgb), .055); }
 .tracker-result.warning { border-color: rgba(var(--warning-rgb), .30); background: rgba(var(--warning-rgb), .055); }
 .tracker-result.danger { border-color: rgba(var(--danger-rgb), .28); background: rgba(var(--danger-rgb), .05); }
+.tracker-issue-list { display: grid; gap: 8px; }
+.tracker-runtime-note { background: var(--surface-soft); }
+.tracker-runtime-note strong { color: var(--muted); font-weight: 560; }
 .domain-detail-item strong.success { color: var(--success); }
 .domain-detail-item strong.warning { color: var(--warning); }
 .domain-detail-item strong.danger { color: var(--danger); }
