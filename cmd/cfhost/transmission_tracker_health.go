@@ -327,14 +327,13 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 	return out
 }
 
-func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClientConfig, domain string, maxTrackerLookups int) (transmissionTrackerRuntime, error) {
-	out := transmissionTrackerRuntime{Source: "Transmission", CheckedAt: time.Now().Format(time.RFC3339)}
+func transmissionActiveTrackerStats(ctx context.Context, cfg DownloaderClientConfig, maxTrackerLookups int) ([]transmissionTrackerStatsRow, int, int, bool, error) {
 	if !cfg.Enabled {
-		return out, fmt.Errorf("Transmission is disabled")
+		return nil, 0, 0, false, fmt.Errorf("Transmission is disabled")
 	}
 	endpoint, err := normalizeTransmissionURL(cfg.URL)
 	if err != nil {
-		return out, err
+		return nil, 0, 0, false, err
 	}
 	if maxTrackerLookups < 1 {
 		maxTrackerLookups = 200
@@ -345,7 +344,6 @@ func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClie
 		cfg:      cfg,
 		client:   &http.Client{},
 	}
-
 	body, err := rpc.call(
 		ctx,
 		"torrent-get",
@@ -354,11 +352,11 @@ func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClie
 		map[string]any{"fields": []string{"id", "hash_string", "left_until_done", "is_finished", "status", "activity_date"}},
 	)
 	if err != nil {
-		return out, err
+		return nil, 0, 0, false, err
 	}
 	torrents, err := parseTransmissionTorrentList(body, rpc.modern)
 	if err != nil {
-		return out, err
+		return nil, 0, 0, false, err
 	}
 
 	active := make([]transmissionTorrentSummary, 0)
@@ -410,16 +408,24 @@ func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClie
 			},
 		)
 		if err != nil {
-			return out, err
+			return nil, totalActive, len(active), truncated, err
 		}
 		batchRows, err := parseTransmissionTrackerStats(body, rpc.modern)
 		if err != nil {
-			return out, err
+			return nil, totalActive, len(active), truncated, err
 		}
 		rows = append(rows, batchRows...)
 	}
+	return rows, totalActive, len(active), truncated, nil
+}
 
-	return aggregateTransmissionTrackerRuntime(rows, domain, totalActive, len(active), truncated), nil
+func transmissionTrackerRuntimeForDomain(ctx context.Context, cfg DownloaderClientConfig, domain string, maxTrackerLookups int) (transmissionTrackerRuntime, error) {
+	out := transmissionTrackerRuntime{Source: "Transmission", CheckedAt: time.Now().Format(time.RFC3339)}
+	rows, totalActive, checked, truncated, err := transmissionActiveTrackerStats(ctx, cfg, maxTrackerLookups)
+	if err != nil {
+		return out, err
+	}
+	return aggregateTransmissionTrackerRuntime(rows, domain, totalActive, checked, truncated), nil
 }
 
 func transmissionTrackerStatDomain(stat transmissionTrackerStat) string {
@@ -435,63 +441,28 @@ func transmissionTrackerStatDomain(stat transmissionTrackerStat) string {
 	return host
 }
 
-func transmissionTrackerConnectionFailures(ctx context.Context, cfg DownloaderClientConfig, samples map[string]TrackerSample) (map[string]downloaderTrackerFailure, error) {
+func transmissionTrackerConnectionFailures(ctx context.Context, cfg DownloaderClientConfig, samples map[string]TrackerSample, maxTrackerLookups int) (map[string]downloaderTrackerFailure, error) {
 	out := make(map[string]downloaderTrackerFailure)
 	if !cfg.Enabled || len(samples) == 0 {
 		return out, nil
 	}
-	endpoint, err := normalizeTransmissionURL(cfg.URL)
-	if err != nil {
-		return out, err
-	}
-
-	hashes := make([]string, 0, len(samples))
-	targetByHash := make(map[string]map[string]bool)
-	for domain, sample := range samples {
-		hash := strings.ToLower(strings.TrimSpace(sample.HashHex))
-		if len(hash) != 40 {
-			continue
+	targets := make(map[string]bool, len(samples))
+	for domain := range samples {
+		domain = strings.ToLower(strings.TrimSpace(domain))
+		if domain != "" {
+			targets[domain] = true
 		}
-		if targetByHash[hash] == nil {
-			targetByHash[hash] = make(map[string]bool)
-			hashes = append(hashes, hash)
-		}
-		targetByHash[hash][strings.ToLower(strings.TrimSpace(domain))] = true
 	}
-	if len(hashes) == 0 {
+	if len(targets) == 0 {
 		return out, nil
 	}
-	sort.Strings(hashes)
 
-	rpc := &transmissionRPCClient{
-		endpoint: endpoint,
-		cfg:      cfg,
-		client:   &http.Client{},
-	}
-	body, err := rpc.call(
-		ctx,
-		"torrent-get",
-		"torrent_get",
-		map[string]any{
-			"ids":    hashes,
-			"fields": []string{"hashString", "trackerStats"},
-		},
-		map[string]any{
-			"ids":    hashes,
-			"fields": []string{"hash_string", "tracker_stats"},
-		},
-	)
+	rows, _, _, _, err := transmissionActiveTrackerStats(ctx, cfg, maxTrackerLookups)
 	if err != nil {
 		return out, err
 	}
-	rows, err := parseTransmissionTrackerStats(body, rpc.modern)
-	if err != nil {
-		return out, err
-	}
-
 	for _, row := range rows {
-		targets := targetByHash[strings.ToLower(row.HashString)]
-		if len(targets) == 0 {
+		if row.Status != 5 && row.Status != 6 {
 			continue
 		}
 		for _, stat := range row.TrackerStats {
@@ -499,7 +470,6 @@ func transmissionTrackerConnectionFailures(ctx context.Context, cfg DownloaderCl
 			if !targets[domain] || !stat.HasAnnounced {
 				continue
 			}
-
 			reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
 			connectionFailed := stat.LastAnnounceTimedOut || trackerFailureIndicatesUnreachable(reason)
 			if !connectionFailed {
@@ -551,7 +521,7 @@ func (a *App) loadDownloaderTrackerFailures(ctx context.Context, cfg Config, sam
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	failures, err := transmissionTrackerConnectionFailures(probeCtx, cfg.Tracker.Transmission, samples)
+	failures, err := transmissionTrackerConnectionFailures(probeCtx, cfg.Tracker.Transmission, samples, cfg.Tracker.MaxTrackerLookups)
 	if err != nil {
 		a.appendLog("Transmission tracker health warning: %v", err)
 		return out
