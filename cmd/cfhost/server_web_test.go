@@ -389,6 +389,8 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 		`部分连接失败`,
 		`issues.map(issue =>`,
 		`Transmission 保活只调用 torrent-reannounce`,
+		`403 计为连接失败`,
+		`Repair 排除 IP`,
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("Tracker domain UI is missing %q", want)
