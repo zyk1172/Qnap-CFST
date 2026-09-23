@@ -251,6 +251,7 @@ function trackerRuntimePanel(domain) {
     idle: '空闲',
   })[keepalive.status] || (keepalive.status || '未触发')
   const keepaliveNext = keepalive.nextCheck ? fmtTime(keepalive.nextCheck) : '—'
+  const rejectedIP = keepalive.rejectedIP || ''
 
   return `
     <div class="tracker-runtime-panel">
@@ -273,6 +274,7 @@ function trackerRuntimePanel(domain) {
         <div class="domain-detail-item"><span>来源</span><strong>Transmission 活跃种子聚合</strong></div>
         <div class="domain-detail-item"><span>做种保活</span><strong>${esc(keepaliveLabel)} · ${Number(keepalive.attempts) || 0}/3</strong></div>
         <div class="domain-detail-item"><span>下次保活检查</span><strong>${esc(keepaliveNext)}</strong></div>
+        <div class="domain-detail-item"><span>Repair 排除 IP</span><strong>${rejectedIP ? esc(rejectedIP) : '—'}</strong></div>
       </div>
       ${issues.length ? `
         <div class="tracker-issue-list">
@@ -291,7 +293,7 @@ function trackerRuntimePanel(domain) {
       `}
       <div class="domain-detail-wide tracker-runtime-note">
         <span>状态说明</span>
-        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair。</strong>
+        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。403 计为连接失败。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair；保活耗尽的旧 IP 会持续排除，直到成功切换映射。</strong>
       </div>
     </div>
   `
