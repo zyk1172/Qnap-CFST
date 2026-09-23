@@ -387,7 +387,7 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 		`Transmission 域名状态`,
 		`trackerStatus === 'Working'`,
 		`部分异常`,
-		`Could not connect`,
+		`issues.map(issue =>`,
 		`CFHost 探测是对候选 IP 的独立验证`,
 	} {
 		if !strings.Contains(domainsJS, want) {
