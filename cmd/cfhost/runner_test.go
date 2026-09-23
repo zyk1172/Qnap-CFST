@@ -665,3 +665,86 @@ func TestLegacyDegradedRateMigratesToDownloadMB(t *testing.T) {
 		t.Fatalf("legacy degradedRateMbps was not migrated: %#v", cfg.CFST)
 	}
 }
+
+func TestRetainEnabledMappings(t *testing.T) {
+	cfg := Config{Domains: []Domain{
+		{Host:"a.example",Enabled:true},
+		{Host:"b.example",Enabled:false},
+	}}
+	got := retainEnabledMappings(map[string]string{
+		"a.example":"1.1.1.1",
+		"b.example":"2.2.2.2",
+		"removed.example":"3.3.3.3",
+	}, cfg)
+	if len(got)!=1 || got["a.example"]!="1.1.1.1" {
+		t.Fatalf("unexpected retained mappings: %#v", got)
+	}
+}
+
+func TestCommitResolutionRejectsExpiredContextWithoutMutatingMappings(t *testing.T) {
+	dir:=t.TempDir()
+	a:=&App{
+		dataDir:dir,
+		state:RuntimeState{
+			Mappings:map[string]string{"a.example":"1.1.1.1"},
+			DomainStatus:map[string]string{"a.example":"old"},
+			DomainHealth:map[string]DomainHealth{},
+			TrackerSamples:map[string]TrackerSampleRuntime{},
+		},
+	}
+	cfg:=defaultConfig()
+	cfg.AutoApply=false
+	ctx,cancel:=context.WithCancel(context.Background())
+	cancel()
+	err:=a.commitResolution(ctx,cfg,map[string]string{"a.example":"2.2.2.2"},map[string]string{"a.example":"new"},map[string]DomainHealth{},"",false)
+	if err==nil {
+		t.Fatal("expired context must block commit")
+	}
+	if got:=a.state.Mappings["a.example"];got!="1.1.1.1" {
+		t.Fatalf("mapping mutated despite blocked commit: %q",got)
+	}
+}
+
+func TestSmartRepairRetainsLastKnownGoodWhenTrackerSampleMissing(t *testing.T) {
+	dir:=t.TempDir()
+	cfg:=defaultConfig()
+	cfg.AutoApply=false
+	cfg.Sync.Enabled=false
+	cfg.Tracker.AutoDiscover=false
+	cfg.Tracker.SamplesPath=filepath.Join(dir,"missing-manual.tsv")
+	cfg.Tracker.AutoSamplesPath=filepath.Join(dir,"missing-auto.tsv")
+	cfg.Domains=[]Domain{{Host:"tracker.example.com",Group:"example",Class:"latency",Mode:"tracker",Endpoint:"/announce",Enabled:true}}
+	a:=&App{
+		config:cfg,
+		dataDir:dir,
+		state:RuntimeState{
+			Mappings:map[string]string{"tracker.example.com":"1.1.1.1"},
+			DomainStatus:map[string]string{},
+			DomainHealth:map[string]DomainHealth{},
+			TrackerSamples:map[string]TrackerSampleRuntime{},
+		},
+	}
+	if err:=a.runSmartRepair(context.Background(),cfg);err!=nil {
+		t.Fatal(err)
+	}
+	if got:=a.state.Mappings["tracker.example.com"];got!="1.1.1.1" {
+		t.Fatalf("last-known-good mapping was removed: %q",got)
+	}
+	if !strings.Contains(a.state.DomainStatus["tracker.example.com"],"stale retained") {
+		t.Fatalf("status must expose stale retention: %q",a.state.DomainStatus["tracker.example.com"])
+	}
+	if a.state.DomainHealth["tracker.example.com"].FailureStreak!=1 {
+		t.Fatalf("retained stale mapping must still count as failed health: %#v",a.state.DomainHealth["tracker.example.com"])
+	}
+}
+
+func TestGroupHardFailureCache(t *testing.T) {
+	cache:=map[string]map[string]bool{}
+	markGroupHardFailure(cache,"mteam|latency","104.16.0.1")
+	if !groupHardFailed(cache,"mteam|latency","104.16.0.1") {
+		t.Fatal("hard failure was not cached")
+	}
+	if groupHardFailed(cache,"ptcafe|latency","104.16.0.1") {
+		t.Fatal("hard failure leaked across groups")
+	}
+}

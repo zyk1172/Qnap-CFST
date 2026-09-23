@@ -87,6 +87,55 @@ func groupKey(d Domain) string {
 	return d.Group + "|" + d.Class
 }
 
+func verificationHardFailure(detail string) bool {
+	fields := strings.Fields(detail)
+	for i := 0; i+1 < len(fields); i++ {
+		if strings.EqualFold(strings.Trim(fields[i], "·:()[]"), "HTTP") {
+			code := strings.Trim(fields[i+1], "·:()[];,")
+			switch code {
+			case "403", "421", "451":
+				return true
+			}
+		}
+	}
+	return strings.Contains(strings.ToLower(detail), "blocked/unusable")
+}
+
+func domainVerificationContext(parent context.Context, domainsLeft int) (context.Context, context.CancelFunc, time.Duration, bool) {
+	if parent == nil || parent.Err() != nil {
+		return nil, func(){}, 0, false
+	}
+	if domainsLeft < 1 {
+		domainsLeft = 1
+	}
+	deadline, ok := parent.Deadline()
+	if !ok {
+		ctx, cancel := context.WithCancel(parent)
+		return ctx, cancel, 0, true
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return nil, func(){}, 0, false
+	}
+	reserve := remaining / 10
+	if reserve < 5*time.Second {
+		reserve = 5 * time.Second
+	}
+	if reserve > 30*time.Second {
+		reserve = 30 * time.Second
+	}
+	usable := remaining - reserve
+	if usable < time.Second {
+		return nil, func(){}, 0, false
+	}
+	budget := usable / time.Duration(domainsLeft)
+	if budget < time.Second {
+		return nil, func(){}, 0, false
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
+	return ctx, cancel, budget, true
+}
+
 func verifyHTTPConnectivity(parent context.Context, d Domain, ip string, cfg Config) (bool, string) {
 	timeout := time.Duration(cfg.VerifyTimeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(parent, timeout)
@@ -149,6 +198,9 @@ func verifyHTTPDomain(parent context.Context, d Domain, ip string, cfg Config) (
 		ok, detail := strictHTTPAttempt(parent, d, ip, cfg)
 		last = detail
 		if ok { return true, detail + fmt.Sprintf(" · attempt %d", attempt) }
+		if verificationHardFailure(detail) {
+			return false, detail + fmt.Sprintf(" · hard fail attempt %d", attempt)
+		}
 		if attempt < cfg.Verify.HTTPRetries {
 			select {
 			case <-parent.Done():

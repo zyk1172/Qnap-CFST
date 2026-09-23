@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStrictHTTPBodyEvaluationPatternsCompile(t *testing.T) {
@@ -49,5 +51,46 @@ func TestEvaluateHTTPConnectivityStatusPolicy(t *testing.T) {
 		if ok, detail := evaluateHTTPConnectivityStatus(status); ok || !strings.Contains(detail, "temporary failure") {
 			t.Fatalf("HTTP %d must fail temporarily: ok=%v detail=%q", status, ok, detail)
 		}
+	}
+}
+
+func TestVerificationHardFailureClassification(t *testing.T) {
+	hard := []string{
+		"HTTP 403 final=https://example.com/",
+		"HTTP 421 final=https://example.com/",
+		"tracker HTTP 451",
+		"HTTP 403 · blocked/unusable",
+	}
+	for _, detail := range hard {
+		if !verificationHardFailure(detail) {
+			t.Fatalf("expected hard failure for %q", detail)
+		}
+	}
+	soft := []string{
+		"HTTP 429 · temporary failure",
+		"HTTP 503 final=https://example.com/",
+		"context deadline exceeded",
+		"tracker invalid response",
+	}
+	for _, detail := range soft {
+		if verificationHardFailure(detail) {
+			t.Fatalf("unexpected hard failure for %q", detail)
+		}
+	}
+}
+
+func TestDomainVerificationContextSharesRemainingBudget(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	child, childCancel, budget, ok := domainVerificationContext(parent, 4)
+	if !ok {
+		t.Fatal("expected domain budget")
+	}
+	defer childCancel()
+	if budget < 3*time.Second || budget > 4*time.Second {
+		t.Fatalf("unexpected budget: %s", budget)
+	}
+	if _, ok := child.Deadline(); !ok {
+		t.Fatal("domain context must have a deadline")
 	}
 }

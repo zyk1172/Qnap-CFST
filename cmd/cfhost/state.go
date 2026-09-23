@@ -51,6 +51,9 @@ func (a *App) persistStateStrict() error {
 }
 
 func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth, nextRefresh string, optimized bool) error {
+	if err:=ctx.Err();err!=nil {
+		return fmt.Errorf("resolution commit blocked by expired job context: %w",err)
+	}
 	old := a.snapshotResolution()
 	a.mu.Lock()
 	a.state.Mappings = mappings
@@ -69,6 +72,14 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 			return err
 		}
 	}
+	if err:=ctx.Err();err!=nil {
+		rollbackErr:=stage.Rollback()
+		a.restoreResolution(old)
+		if rollbackErr!=nil {
+			return fmt.Errorf("job context expired before state commit: %v; Hosts rollback also failed: %v",err,rollbackErr)
+		}
+		return fmt.Errorf("job context expired before state commit; Hosts restored: %w",err)
+	}
 	if err := a.persistStateStrict(); err != nil {
 		rollbackErr := stage.Rollback()
 		a.restoreResolution(old)
@@ -78,7 +89,9 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		return fmt.Errorf("state write failed; Hosts restored: %w", err)
 	}
 	if cfg.AutoApply && cfg.Sync.Enabled {
-		if err := a.publishSync(ctx, cfg, false); err != nil { a.appendLog("github sync failed: %v", err) }
+		syncCtx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+		if err := a.publishSync(syncCtx, cfg, false); err != nil { a.appendLog("github sync failed: %v", err) }
+		cancel()
 	}
 	return nil
 }

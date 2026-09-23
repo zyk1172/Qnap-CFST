@@ -124,6 +124,9 @@ func verifyTrackerAnnounce(parent context.Context, d Domain, ip string, sample T
 		if ok {
 			return true, fmt.Sprintf("%s · attempt %d", detail, attempt)
 		}
+		if verificationHardFailure(detail) {
+			return false, detail + fmt.Sprintf(" · hard fail attempt %d", attempt)
+		}
 		if attempt < retries {
 			timer := time.NewTimer(time.Second)
 			select {
