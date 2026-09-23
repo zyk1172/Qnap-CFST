@@ -39,6 +39,26 @@ type transmissionTrackerStatsRow struct {
 	TrackerStats []transmissionTrackerStat
 }
 
+const (
+	trackerKeepaliveMaxAttempts       = 3
+	trackerKeepaliveMinConnectedPct   = 90.0
+	trackerKeepaliveMaxFailures       = 5
+)
+var trackerKeepaliveInterval = 30 * time.Minute
+
+type transmissionDomainHealth struct {
+	Matched            int
+	Evaluated          int
+	Connected          int
+	Working            int
+	BusinessErrors     int
+	ConnectionFailures int
+	Waiting            int
+	ConnectedPercent   float64
+	FailureTorrentIDs  []int
+	LatestFailure      downloaderTrackerFailure
+}
+
 type transmissionTrackerRuntimeIssue struct {
 	Result           string `json:"result"`
 	LastAnnounceTime int64  `json:"lastAnnounceTime"`
@@ -57,6 +77,10 @@ type transmissionTrackerRuntime struct {
 	SeedingTorrents       int                               `json:"seedingTorrents"`
 	QueuedTorrents        int                               `json:"queuedTorrents"`
 	WorkingTorrents       int                               `json:"workingTorrents"`
+	BusinessErrorTorrents int                               `json:"businessErrorTorrents"`
+	ConnectedTorrents     int                               `json:"connectedTorrents"`
+	ConnectionFailures    int                               `json:"connectionFailures"`
+	ConnectedPercent      float64                           `json:"connectedPercent"`
 	ErrorTorrents         int                               `json:"errorTorrents"`
 	TimeoutTorrents       int                               `json:"timeoutTorrents"`
 	WaitingTorrents       int                               `json:"waitingTorrents"`
@@ -210,9 +234,89 @@ func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
 		return "Timeout"
 	}
 	if stat.HasAnnounced {
-		return "Error"
+		reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
+		if trackerFailureIndicatesUnreachable(reason) {
+			return "Disconnected"
+		}
+		return "ConnectedError"
 	}
 	return "Waiting"
+}
+
+func selectedTrackerStatForDomain(row transmissionTrackerStatsRow, target string) *transmissionTrackerStat {
+	var selected *transmissionTrackerStat
+	for i := range row.TrackerStats {
+		stat := row.TrackerStats[i]
+		if transmissionTrackerStatDomain(stat) != target {
+			continue
+		}
+		if selected == nil || stat.LastAnnounceTime >= selected.LastAnnounceTime {
+			copyStat := stat
+			selected = &copyStat
+		}
+	}
+	return selected
+}
+
+func transmissionDomainHealthForTarget(rows []transmissionTrackerStatsRow, target string) transmissionDomainHealth {
+	target = strings.ToLower(strings.TrimSpace(target))
+	out := transmissionDomainHealth{}
+	seenIDs := map[int]bool{}
+	for _, row := range rows {
+		if row.Status != 5 && row.Status != 6 {
+			continue
+		}
+		stat := selectedTrackerStatForDomain(row, target)
+		if stat == nil {
+			continue
+		}
+		out.Matched++
+		switch transmissionTrackerStatusLabel(*stat) {
+		case "Working":
+			out.Evaluated++
+			out.Connected++
+			out.Working++
+		case "ConnectedError":
+			out.Evaluated++
+			out.Connected++
+			out.BusinessErrors++
+		case "Timeout", "Disconnected":
+			out.Evaluated++
+			out.ConnectionFailures++
+			if row.ID > 0 && !seenIDs[row.ID] {
+				out.FailureTorrentIDs = append(out.FailureTorrentIDs, row.ID)
+				seenIDs[row.ID] = true
+			}
+			reason := sanitizeTrackerReason([]byte(stat.LastAnnounceResult))
+			if reason == "" {
+				reason = "tracker announce timed out"
+			}
+			if stat.LastAnnounceTime >= out.LatestFailure.LastAnnounceTime {
+				out.LatestFailure = downloaderTrackerFailure{
+					Source:           "Transmission",
+					Detail:           "Transmission · " + reason,
+					LastAnnounceTime: stat.LastAnnounceTime,
+				}
+			}
+		default:
+			out.Waiting++
+		}
+	}
+	if out.Evaluated > 0 {
+		out.ConnectedPercent = float64(out.Connected) * 100 / float64(out.Evaluated)
+	}
+	sort.Ints(out.FailureTorrentIDs)
+	return out
+}
+
+func trackerDomainHealthAcceptable(h transmissionDomainHealth) bool {
+	if h.ConnectionFailures == 0 {
+		return true
+	}
+	if h.Evaluated == 0 {
+		return true
+	}
+	return h.ConnectedPercent >= trackerKeepaliveMinConnectedPct && h.ConnectionFailures <= trackerKeepaliveMaxFailures
 }
 
 func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, target string, activeTorrents, checkedTorrents int, truncated bool) transmissionTrackerRuntime {
@@ -225,6 +329,14 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		CheckedAt:       time.Now().Format(time.RFC3339),
 	}
 	target = strings.ToLower(strings.TrimSpace(target))
+	health := transmissionDomainHealthForTarget(rows, target)
+	out.MatchedTorrents = health.Matched
+	out.WorkingTorrents = health.Working
+	out.BusinessErrorTorrents = health.BusinessErrors
+	out.ConnectedTorrents = health.Connected
+	out.ConnectionFailures = health.ConnectionFailures
+	out.ConnectedPercent = health.ConnectedPercent
+	out.WaitingTorrents = health.Waiting
 
 	var latest *transmissionTrackerStat
 	issues := make([]transmissionTrackerRuntimeIssue, 0)
@@ -232,22 +344,10 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		if row.Status != 5 && row.Status != 6 {
 			continue
 		}
-		var selected *transmissionTrackerStat
-		for i := range row.TrackerStats {
-			stat := row.TrackerStats[i]
-			if transmissionTrackerStatDomain(stat) != target {
-				continue
-			}
-			if selected == nil || stat.LastAnnounceTime >= selected.LastAnnounceTime {
-				copyStat := stat
-				selected = &copyStat
-			}
-		}
+		selected := selectedTrackerStatForDomain(row, target)
 		if selected == nil {
 			continue
 		}
-
-		out.MatchedTorrents++
 		if row.Status == 6 {
 			out.SeedingTorrents++
 		} else {
@@ -255,24 +355,15 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		}
 
 		label := transmissionTrackerStatusLabel(*selected)
-		switch label {
-		case "Working":
-			out.WorkingTorrents++
-		case "Timeout":
-			out.TimeoutTorrents++
-		case "Error":
-			out.ErrorTorrents++
-		default:
-			out.WaitingTorrents++
-		}
-		reason := sanitizeTrackerReason([]byte(selected.LastAnnounceResult))
-		if label == "Timeout" || label == "Error" {
+		if label == "Timeout" || label == "Disconnected" {
+			if label == "Timeout" {
+				out.TimeoutTorrents++
+			} else {
+				out.ErrorTorrents++
+			}
+			reason := sanitizeTrackerReason([]byte(selected.LastAnnounceResult))
 			if reason == "" {
-				if label == "Timeout" {
-					reason = "Tracker announce timed out"
-				} else {
-					reason = "Tracker announce failed"
-				}
+				reason = "Tracker announce timed out"
 			}
 			issues = append(issues, transmissionTrackerRuntimeIssue{
 				Result:           reason,
@@ -292,12 +383,14 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 	switch {
 	case out.MatchedTorrents == 0:
 		out.TrackerStatus = "NoActive"
-	case out.ErrorTorrents+out.TimeoutTorrents > 0 && out.WorkingTorrents > 0:
+	case out.ConnectionFailures > 0 && out.ConnectedTorrents > 0:
 		out.TrackerStatus = "Partial"
-	case out.TimeoutTorrents > 0 && out.ErrorTorrents == 0 && out.WorkingTorrents == 0:
+	case out.TimeoutTorrents > 0 && out.ErrorTorrents == 0 && out.ConnectedTorrents == 0:
 		out.TrackerStatus = "Timeout"
-	case out.ErrorTorrents+out.TimeoutTorrents > 0:
+	case out.ConnectionFailures > 0:
 		out.TrackerStatus = "Error"
+	case out.BusinessErrorTorrents > 0:
+		out.TrackerStatus = "Connected"
 	case out.WorkingTorrents > 0:
 		out.TrackerStatus = "Working"
 	default:
@@ -316,7 +409,7 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		out.AnnounceState = latest.AnnounceState
 		out.HasAnnounced = latest.HasAnnounced
 		out.LastAnnounceResult = sanitizeTrackerReason([]byte(latest.LastAnnounceResult))
-		out.LastAnnounceSucceeded = out.ErrorTorrents == 0 && out.TimeoutTorrents == 0 && out.WorkingTorrents > 0
+		out.LastAnnounceSucceeded = out.ConnectionFailures == 0 && out.ConnectedTorrents > 0
 		out.LastAnnounceTimedOut = out.TimeoutTorrents > 0
 		out.LastAnnounceTime = latest.LastAnnounceTime
 		out.NextAnnounceTime = latest.NextAnnounceTime
