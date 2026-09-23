@@ -386,9 +386,11 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 		`Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')`,
 		`Transmission 域名状态`,
 		`trackerStatus === 'Working'`,
-		`部分异常`,
+		`部分连接失败`,
 		`issues.map(issue =>`,
-		`CFHost 探测是对候选 IP 的独立验证`,
+		`Transmission 保活只调用 torrent-reannounce`,
+		`403 计为连接失败`,
+		`Repair 排除 IP`,
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("Tracker domain UI is missing %q", want)

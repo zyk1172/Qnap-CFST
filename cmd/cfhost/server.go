@@ -231,17 +231,22 @@ func (a *App) handleTrackerRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timeout := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 15 * time.Second
+	timeout := 60 * time.Second
+	if configured := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second; configured > timeout {
+		timeout = configured
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	runtime, err := transmissionTrackerRuntimeForDomain(ctx, cfg.Tracker.Transmission, host, cfg.Tracker.MaxTrackerLookups)
+	// Runtime health is intentionally uncapped; maxTrackerLookups only limits
+	// sample discovery and must not hide red seeds beyond the first 200 torrents.
+	runtime, err := transmissionTrackerRuntimeForDomain(ctx, cfg.Tracker.Transmission, host, 0)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	a.mu.RLock()
+	runtime.Keepalive = a.state.TrackerKeepalive[host]
+	a.mu.RUnlock()
 	writeResponse(w, runtime)
 }
 

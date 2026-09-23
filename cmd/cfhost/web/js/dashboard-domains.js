@@ -212,28 +212,46 @@ function trackerRuntimePanel(domain) {
   const trackerStatus = runtime.trackerStatus || 'Waiting'
   const statusLabel = ({
     Working: 'Working',
-    Partial: '部分异常',
+    Connected: '已连接（业务返回）',
+    Partial: '部分连接失败',
     Error: 'Error',
     Timeout: 'Timeout',
     Waiting: 'Waiting',
     NoActive: '无活跃做种',
   })[trackerStatus] || trackerStatus
-  const trackerVariant = trackerStatus === 'Working'
-    ? 'success'
-    : trackerStatus === 'Waiting' || trackerStatus === 'NoActive'
-      ? 'warning'
-      : 'danger'
   const matched = Number(runtime.matchedTorrents) || 0
   const working = Number(runtime.workingTorrents) || 0
-  const errors = (Number(runtime.errorTorrents) || 0) + (Number(runtime.timeoutTorrents) || 0)
+  const businessErrors = Number(runtime.businessErrorTorrents) || 0
+  const connected = Number(runtime.connectedTorrents) || 0
+  const errors = Number(runtime.connectionFailures) || 0
+  const connectedPercent = Number(runtime.connectedPercent) || 0
+  const thresholdHealthy = errors <= 5 && connectedPercent >= 90
+  const trackerVariant = trackerStatus === 'Working' || trackerStatus === 'Connected'
+    ? 'success'
+    : trackerStatus === 'Waiting' || trackerStatus === 'NoActive' || (trackerStatus === 'Partial' && thresholdHealthy)
+      ? 'warning'
+      : 'danger'
   const seeding = Number(runtime.seedingTorrents) || 0
   const queued = Number(runtime.queuedTorrents) || 0
   const checked = Number(runtime.checkedTorrents) || 0
   const active = Number(runtime.activeTorrents) || 0
   const issues = Array.isArray(runtime.issues) ? runtime.issues : []
   const scanText = runtime.truncated
-    ? `${checked} / ${active} 个活跃任务（达到扫描上限，结果可能不完整）`
-    : `${checked} / ${active} 个活跃任务`
+    ? `${checked} / ${active} 个活跃任务（扫描被限制，结果可能不完整）`
+    : `${checked} / ${active} 个活跃任务（全量）`
+  const keepalive = runtime.keepalive || {}
+  const keepaliveLabel = ({
+    healthy: '健康',
+    acceptable: '少量失败，暂不处理',
+    waiting: '等待重新汇报结果',
+    'waiting-after-third': '第 3 次后观察中',
+    'reannounce-due': '准备重新汇报',
+    'reannounce-error': '重新汇报 RPC 失败',
+    repair: '需要 Repair',
+    idle: '空闲',
+  })[keepalive.status] || (keepalive.status || '未触发')
+  const keepaliveNext = keepalive.nextCheck ? fmtTime(keepalive.nextCheck) : '—'
+  const rejectedIP = keepalive.rejectedIP || ''
 
   return `
     <div class="tracker-runtime-panel">
@@ -241,18 +259,22 @@ function trackerRuntimePanel(domain) {
         <span>Transmission 域名状态</span>
         <div class="domain-compact-chips">
           <span class="chip ${trackerVariant}"><span class="dot"></span>${esc(statusLabel)}</span>
-          <span class="chip ${errors ? 'danger' : matched ? 'success' : 'warning'}">${errors ? `异常 ${errors}` : `匹配 ${matched}`}</span>
+          <span class="chip ${errors ? (thresholdHealthy ? 'warning' : 'danger') : matched ? 'success' : 'warning'}">${errors ? `连接失败 ${errors}` : `匹配 ${matched}`}</span>
         </div>
       </div>
       <div class="domain-detail-grid tracker-runtime-grid">
         <div class="domain-detail-item"><span>匹配此 Tracker</span><strong>${matched} 个任务</strong></div>
         <div class="domain-detail-item"><span>做种状态</span><strong>做种中 ${seeding} · 等待做种 ${queued}</strong></div>
-        <div class="domain-detail-item"><span>Tracker 结果</span><strong class="${trackerVariant}">Working ${working} · 异常 ${errors}</strong></div>
+        <div class="domain-detail-item"><span>Tracker 连接</span><strong class="${trackerVariant}">连接 ${connected} · 失败 ${errors} · ${connectedPercent.toFixed(1)}%</strong></div>
+        <div class="domain-detail-item"><span>业务返回</span><strong>Working ${working} · PT业务错误 ${businessErrors}</strong></div>
         <div class="domain-detail-item"><span>扫描范围</span><strong>${esc(scanText)}</strong></div>
         <div class="domain-detail-item"><span>最近 Announce</span><strong>${esc(trackerUnixTime(runtime.lastAnnounceTime))}</strong></div>
         <div class="domain-detail-item"><span>下次 Announce</span><strong>${esc(trackerUnixTime(runtime.nextAnnounceTime))}</strong></div>
         <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
         <div class="domain-detail-item"><span>来源</span><strong>Transmission 活跃种子聚合</strong></div>
+        <div class="domain-detail-item"><span>做种保活</span><strong>${esc(keepaliveLabel)} · ${Number(keepalive.attempts) || 0}/3</strong></div>
+        <div class="domain-detail-item"><span>下次保活检查</span><strong>${esc(keepaliveNext)}</strong></div>
+        <div class="domain-detail-item"><span>Repair 排除 IP</span><strong>${rejectedIP ? esc(rejectedIP) : '—'}</strong></div>
       </div>
       ${issues.length ? `
         <div class="tracker-issue-list">
@@ -271,7 +293,7 @@ function trackerRuntimePanel(domain) {
       `}
       <div class="domain-detail-wide tracker-runtime-note">
         <span>状态说明</span>
-        <strong>CFHost 探测是对候选 IP 的独立验证；这里是 Transmission 当前活跃种子的域名级聚合状态，两者可能不同。</strong>
+        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。403 计为连接失败。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair；保活耗尽的旧 IP 会持续排除，直到成功切换映射。</strong>
       </div>
     </div>
   `

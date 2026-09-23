@@ -272,145 +272,54 @@ func TestNormalizeDownloaderURLs(t *testing.T) {
 }
 
 
-func TestTransmissionTrackerConnectionFailureFeedsRepairSignal(t *testing.T) {
-	var requests atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		if r.Header.Get("X-Transmission-Session-Id") == "" {
-			w.Header().Set("X-Transmission-Session-Id", "runtime-session")
-			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		var req struct {
-			JSONRPC string `json:"jsonrpc"`
-			Method  string `json:"method"`
-			Params struct {
-				Fields []string `json:"fields"`
-				IDs []int `json:"ids"`
-			} `json:"params"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
-		if req.JSONRPC != "2.0" || req.Method != "torrent_get" {
-			t.Fatalf("unexpected modern request %#v", req)
-		}
-		if !containsString(req.Params.Fields, "tracker_stats") {
-			_, _ = w.Write([]byte(fmt.Sprintf(`{
-				"jsonrpc":"2.0",
-				"result":{"torrents":[
-					{"id":11,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":500},
-					{"id":12,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":400}
-				]},
-				"id":1
-			}`, testHashA, testHashB)))
-			return
-		}
-		now := time.Now().Unix()
-		_, _ = w.Write([]byte(fmt.Sprintf(`{
-			"jsonrpc":"2.0",
-			"result":{"torrents":[
-				{
-					"hash_string":"%s",
-					"status":6,
-					"tracker_stats":[{
-						"announce":"https://tracker.m-team.cc/announce?passkey=sample",
-						"host":"tracker.m-team.cc",
-						"has_announced":true,
-						"last_announce_result":"Working",
-						"last_announce_succeeded":true,
-						"last_announce_timed_out":false,
-						"last_announce_time":%d
-					}]
-				},
-				{
-					"hash_string":"%s",
-					"status":6,
-					"tracker_stats":[{
-						"announce":"https://tracker.m-team.cc/announce?passkey=other",
-						"host":"tracker.m-team.cc",
-						"has_announced":true,
-						"last_announce_result":"Could not connect to tracker",
-						"last_announce_succeeded":false,
-						"last_announce_timed_out":false,
-						"last_announce_time":%d
-					}]
-				}
-			]},
-			"id":1
-		}`, testHashA, now-10, testHashB, now)))
-	}))
-	defer srv.Close()
-
-	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
-		Enabled: true,
-		URL: srv.URL,
-	}, map[string]TrackerSample{
-		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA},
-	}, 200)
-	if err != nil { t.Fatal(err) }
-	failure, ok := failures["tracker.m-team.cc"]
-	if !ok {
-		t.Fatal("non-sample active torrent connection failure was not surfaced")
+func TestTransmissionDomainHealthFindsNonSampleConnectionFailure(t *testing.T) {
+	rows := []transmissionTrackerStatsRow{
+		{ID:11, Status:6, TrackerStats:[]transmissionTrackerStat{{
+			Announce:"https://tracker.m-team.cc/announce?passkey=sample",
+			HasAnnounced:true,
+			LastAnnounceSucceeded:true,
+			LastAnnounceTime:100,
+		}}},
+		{ID:12, Status:6, TrackerStats:[]transmissionTrackerStat{{
+			Announce:"https://tracker.m-team.cc/announce?passkey=other",
+			HasAnnounced:true,
+			LastAnnounceResult:"Could not connect to tracker",
+			LastAnnounceTime:200,
+		}}},
 	}
-	if !strings.Contains(failure.Detail, "Could not connect to tracker") {
-		t.Fatalf("unexpected failure detail %q", failure.Detail)
+	health := transmissionDomainHealthForTarget(rows, "tracker.m-team.cc")
+	if health.Matched != 2 || health.Connected != 1 || health.ConnectionFailures != 1 {
+		t.Fatalf("unexpected health: %#v", health)
 	}
-	if requests.Load() != 3 {
-		t.Fatalf("expected 409 negotiation + active list + tracker_stats batch, got %d", requests.Load())
+	if len(health.FailureTorrentIDs) != 1 || health.FailureTorrentIDs[0] != 12 {
+		t.Fatalf("non-sample failed torrent id was not surfaced: %#v", health.FailureTorrentIDs)
+	}
+	if !strings.Contains(health.LatestFailure.Detail, "Could not connect to tracker") {
+		t.Fatalf("unexpected failure detail %q", health.LatestFailure.Detail)
 	}
 }
 
 
-func TestTransmissionBusinessTrackerErrorDoesNotInvalidateCandidate(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Transmission-Session-Id") == "" {
-			w.Header().Set("X-Transmission-Session-Id", "runtime-session")
-			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		var req struct {
-			Params struct {
-				Fields []string `json:"fields"`
-			} `json:"params"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
-		if !containsString(req.Params.Fields, "tracker_stats") {
-			_, _ = w.Write([]byte(fmt.Sprintf(`{
-				"jsonrpc":"2.0",
-				"result":{"torrents":[{"id":11,"hash_string":"%s","left_until_done":0,"is_finished":true,"status":6,"activity_date":500}]},
-				"id":1
-			}`, testHashA)))
-			return
-		}
-		_, _ = w.Write([]byte(fmt.Sprintf(`{
-			"jsonrpc":"2.0",
-			"result":{"torrents":[{
-				"hash_string":"%s",
-				"status":6,
-				"tracker_stats":[{
-					"announce":"https://tracker.m-team.cc/announce?passkey=secret",
-					"host":"tracker.m-team.cc",
-					"has_announced":true,
-					"last_announce_result":"Missing key peer_id",
-					"last_announce_succeeded":false,
-					"last_announce_timed_out":false,
-					"last_announce_time":%d
-				}]
-			}]},
-			"id":1
-		}`, testHashA, time.Now().Unix())))
-	}))
-	defer srv.Close()
-
-	failures, err := transmissionTrackerConnectionFailures(context.Background(), DownloaderClientConfig{
-		Enabled:true, URL:srv.URL,
-	}, map[string]TrackerSample{
-		"tracker.m-team.cc": {Domain:"tracker.m-team.cc", HashHex:testHashA},
-	}, 200)
-	if err != nil { t.Fatal(err) }
-	if _, exists := failures["tracker.m-team.cc"]; exists {
-		t.Fatal("business-level Tracker rejection must not invalidate the candidate")
+func TestTransmissionBusinessTrackerErrorCountsAsConnected(t *testing.T) {
+	rows := []transmissionTrackerStatsRow{
+		{ID:11, Status:6, TrackerStats:[]transmissionTrackerStat{{
+			Announce:"https://tracker.m-team.cc/announce",
+			HasAnnounced:true,
+			LastAnnounceResult:"Missing key peer_id",
+			LastAnnounceSucceeded:false,
+			LastAnnounceTimedOut:false,
+			LastAnnounceTime:100,
+		}}},
+	}
+	health := transmissionDomainHealthForTarget(rows, "tracker.m-team.cc")
+	if health.Connected != 1 || health.BusinessErrors != 1 || health.ConnectionFailures != 0 {
+		t.Fatalf("PT business error must prove Tracker connectivity: %#v", health)
+	}
+	if !trackerDomainHealthAcceptable(health) {
+		t.Fatal("business-level Tracker rejection must not trigger Repair")
+	}
+	if got := transmissionTrackerStatusLabel(rows[0].TrackerStats[0]); got != "ConnectedError" {
+		t.Fatalf("business error label=%q, want ConnectedError", got)
 	}
 }
 
@@ -599,8 +508,14 @@ func TestTransmissionTrackerStatusLabelErrors(t *testing.T) {
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceTimedOut:true}); got != "Timeout" {
 		t.Fatalf("timeout label=%q", got)
 	}
-	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"HTTP 403"}); got != "Error" {
-		t.Fatalf("error label=%q", got)
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Tracker gave HTTP response code 403"}); got != "Disconnected" {
+		t.Fatalf("HTTP 403 must be treated as a failed connection for keepalive, label=%q", got)
+	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceSucceeded:true, LastAnnounceResult:"HTTP 403 Forbidden"}); got != "Disconnected" {
+		t.Fatalf("HTTP 403 must override a succeeded flag, label=%q", got)
+	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Could not connect to tracker"}); got != "Disconnected" {
+		t.Fatalf("unreachable label=%q", got)
 	}
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{}); got != "Waiting" {
 		t.Fatalf("waiting label=%q", got)
@@ -616,6 +531,211 @@ func TestDownloaderTrackerFailureStalenessGuard(t *testing.T) {
 	}
 	if downloaderFailureIsNewer(failure, after) {
 		t.Fatal("stale Transmission failure must not invalidate a mapping repaired afterwards")
+	}
+}
+
+func TestTrackerKeepaliveThresholdRequiresPercentAndAbsoluteLimit(t *testing.T) {
+	cases := []struct{
+		name string
+		health transmissionDomainHealth
+		want bool
+	}{
+		{"ninety-percent-five-failures", transmissionDomainHealth{Evaluated:50, Connected:45, ConnectionFailures:5, ConnectedPercent:90}, true},
+		{"above-ninety-six-failures", transmissionDomainHealth{Evaluated:100, Connected:94, ConnectionFailures:6, ConnectedPercent:94}, false},
+		{"below-ninety", transmissionDomainHealth{Evaluated:10, Connected:8, ConnectionFailures:2, ConnectedPercent:80}, false},
+		{"no-failures", transmissionDomainHealth{Evaluated:10, Connected:10, ConnectedPercent:100}, true},
+	}
+	for _, tc := range cases {
+		if got := trackerDomainHealthAcceptable(tc.health); got != tc.want {
+			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestTransmissionHealthScanIsNotCappedAt200(t *testing.T) {
+	const total = 205
+	var trackerStatLookups atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "full-scan-session")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+			Params struct {
+				Fields []string `json:"fields"`
+				IDs []int `json:"ids"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { t.Fatal(err) }
+		if req.Method != "torrent_get" { t.Fatalf("unexpected method %q", req.Method) }
+
+		if !containsString(req.Params.Fields, "tracker_stats") {
+			torrents := make([]map[string]any, 0, total)
+			for i:=1;i<=total;i++ {
+				torrents = append(torrents, map[string]any{
+					"id":i, "hash_string":fmt.Sprintf("%040x", i),
+					"left_until_done":0, "is_finished":true, "status":6, "activity_date":total-i,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{"torrents":torrents},"id":1})
+			return
+		}
+		trackerStatLookups.Add(int32(len(req.Params.IDs)))
+		rows := make([]map[string]any,0,len(req.Params.IDs))
+		for _, id := range req.Params.IDs {
+			rows = append(rows,map[string]any{
+				"id":id,"hash_string":fmt.Sprintf("%040x",id),"status":6,
+				"tracker_stats":[]map[string]any{{
+					"announce":"https://tracker.example.com/announce",
+					"has_announced":true,"last_announce_succeeded":true,"last_announce_time":100,
+				}},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{"torrents":rows},"id":1})
+	}))
+	defer srv.Close()
+
+	rows,totalActive,checked,truncated,err := transmissionActiveTrackerStats(context.Background(),DownloaderClientConfig{Enabled:true,URL:srv.URL},0)
+	if err != nil { t.Fatal(err) }
+	if totalActive != total || checked != total || len(rows) != total || truncated {
+		t.Fatalf("health scan was truncated: active=%d checked=%d rows=%d truncated=%v",totalActive,checked,len(rows),truncated)
+	}
+	if got:=trackerStatLookups.Load();got!=total {
+		t.Fatalf("tracker_stats looked up %d torrents, want %d",got,total)
+	}
+}
+
+func TestTransmissionReannounceUsesReannounceAction(t *testing.T) {
+	var action string
+	var gotIDs []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id","reannounce-session")
+			w.Header().Set("X-Transmission-Rpc-Version","6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+			Params struct{ IDs []int `json:"ids"` } `json:"params"`
+		}
+		if err:=json.NewDecoder(r.Body).Decode(&req);err!=nil{t.Fatal(err)}
+		action=req.Method
+		gotIDs=append([]int(nil),req.Params.IDs...)
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{},"id":1})
+	}))
+	defer srv.Close()
+
+	if err:=transmissionReannounce(context.Background(),DownloaderClientConfig{Enabled:true,URL:srv.URL},[]int{12,11,12});err!=nil{t.Fatal(err)}
+	if action!="torrent_reannounce" {
+		t.Fatalf("action=%q, must use torrent_reannounce and never torrent_verify",action)
+	}
+	if len(gotIDs)!=2 || gotIDs[0]!=11 || gotIDs[1]!=12 {
+		t.Fatalf("unexpected reannounce ids %#v",gotIDs)
+	}
+}
+
+func TestTrackerKeepaliveWaitsThreeLowFrequencyReannouncesBeforeRepair(t *testing.T) {
+	oldInterval:=trackerKeepaliveInterval
+	trackerKeepaliveInterval=time.Hour
+	defer func(){trackerKeepaliveInterval=oldInterval}()
+
+	var reannounceCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+		if r.Header.Get("X-Transmission-Session-Id")==""{
+			w.Header().Set("X-Transmission-Session-Id","keepalive-session")
+			w.Header().Set("X-Transmission-Rpc-Version","6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct{
+			Method string `json:"method"`
+			Params struct{
+				Fields []string `json:"fields"`
+				IDs []int `json:"ids"`
+			} `json:"params"`
+		}
+		if err:=json.NewDecoder(r.Body).Decode(&req);err!=nil{t.Fatal(err)}
+		switch req.Method{
+		case "torrent_get":
+			if !containsString(req.Params.Fields,"tracker_stats"){
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{"torrents":[]map[string]any{
+					{"id":11,"hash_string":testHashA,"left_until_done":0,"is_finished":true,"status":6,"activity_date":500},
+					{"id":12,"hash_string":testHashB,"left_until_done":0,"is_finished":true,"status":6,"activity_date":400},
+				}},"id":1})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{"torrents":[]map[string]any{
+				{"id":11,"hash_string":testHashA,"status":6,"tracker_stats":[]map[string]any{{
+					"announce":"https://tracker.example.com/announce","has_announced":true,"last_announce_succeeded":true,"last_announce_time":100,
+				}}},
+				{"id":12,"hash_string":testHashB,"status":6,"tracker_stats":[]map[string]any{{
+					"announce":"https://tracker.example.com/announce","has_announced":true,"last_announce_succeeded":false,
+					"last_announce_result":"Could not connect to tracker","last_announce_time":200,
+				}}},
+			}},"id":1})
+		case "torrent_reannounce":
+			reannounceCalls.Add(1)
+			if len(req.Params.IDs)!=1 || req.Params.IDs[0]!=12 {
+				t.Fatalf("reannounce must target only failed torrent: %#v",req.Params.IDs)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc":"2.0","result":map[string]any{},"id":1})
+		default:
+			t.Fatalf("unexpected method %q",req.Method)
+		}
+	}))
+	defer srv.Close()
+
+	cfg:=defaultConfig()
+	cfg.Tracker.Transmission=DownloaderClientConfig{Enabled:true,URL:srv.URL}
+	cfg.Tracker.RealAnnounce=true
+	samples:=map[string]TrackerSample{"tracker.example.com":{Domain:"tracker.example.com"}}
+	a:=&App{state:RuntimeState{
+		Mappings:map[string]string{"tracker.example.com":"104.16.0.10"},
+		TrackerSamples:map[string]TrackerSampleRuntime{"tracker.example.com":{Available:true,Tested:true,Passed:true,LastTest:"2026-09-24T00:00:00Z"}},
+		TrackerKeepalive:map[string]TrackerKeepaliveRuntime{},
+		Logs:[]string{},
+	}}
+
+	for attempt:=1;attempt<=3;attempt++{
+		failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples)
+		if len(failures)!=0{t.Fatalf("attempt %d escalated too early: %#v",attempt,failures)}
+		state:=a.state.TrackerKeepalive["tracker.example.com"]
+		if state.Attempts!=attempt{t.Fatalf("attempt count=%d want %d",state.Attempts,attempt)}
+		state.NextCheck=time.Now().Add(-time.Minute).Format(time.RFC3339)
+		a.state.TrackerKeepalive["tracker.example.com"]=state
+	}
+	if got:=reannounceCalls.Load();got!=3{t.Fatalf("reannounce calls=%d want 3",got)}
+
+	failures:=a.evaluateTransmissionTrackerKeepalive(context.Background(),cfg,samples)
+	failure,ok:=failures["tracker.example.com"]
+	if !ok || !strings.Contains(failure.Detail,"keepalive exhausted"){
+		t.Fatalf("third observation must escalate to Repair: %#v",failures)
+	}
+	if failure.RejectedIP!="104.16.0.10"{
+		t.Fatalf("Repair must receive the exhausted mapping as rejected IP, got %q",failure.RejectedIP)
+	}
+	state:=a.state.TrackerKeepalive["tracker.example.com"]
+	if state.RejectedIP!="104.16.0.10" || state.RejectedAt==""{
+		t.Fatalf("rejected mapping must persist across Repair cycles: %#v",state)
+	}
+	if got:=reannounceCalls.Load();got!=3{t.Fatalf("must not reannounce a fourth time, got %d",got)}
+}
+
+func TestRejectedTrackerIPIsExcludedFromCandidateOrder(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Verify.CandidateLimit=10
+	d:=Domain{Host:"tracker.example.com",Class:"latency",Mode:"tracker",Enabled:true}
+	candidates:=[]Candidate{
+		{IP:"104.16.0.10",DelayMS:5,LossRate:0,SpeedMB:100},
+		{IP:"104.16.0.11",DelayMS:10,LossRate:0,SpeedMB:90},
+	}
+	order:=orderedCandidates(candidates,d,"","104.16.0.10",cfg)
+	if len(order)!=1 || order[0].IP!="104.16.0.11"{
+		t.Fatalf("rejected IP re-entered candidate order: %#v",order)
 	}
 }
 
