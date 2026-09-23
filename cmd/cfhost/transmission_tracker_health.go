@@ -68,6 +68,9 @@ type transmissionTrackerRuntime struct {
 	LastAnnounceTimedOut  bool                              `json:"lastAnnounceTimedOut"`
 	LastAnnounceTime      int64                             `json:"lastAnnounceTime"`
 	NextAnnounceTime      int64                             `json:"nextAnnounceTime"`
+	LastAnnouncePeerCount int                               `json:"lastAnnouncePeerCount"`
+	SeederCount           int                               `json:"seederCount"`
+	LeecherCount          int                               `json:"leecherCount"`
 	Issues                []transmissionTrackerRuntimeIssue `json:"issues,omitempty"`
 	CheckedAt             string                            `json:"checkedAt"`
 }
@@ -313,6 +316,9 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		out.LastAnnounceTimedOut = out.TimeoutTorrents > 0
 		out.LastAnnounceTime = latest.LastAnnounceTime
 		out.NextAnnounceTime = latest.NextAnnounceTime
+		out.LastAnnouncePeerCount = latest.LastAnnouncePeerCount
+		out.SeederCount = latest.SeederCount
+		out.LeecherCount = latest.LeecherCount
 	}
 	if len(out.Issues) > 0 {
 		out.LastAnnounceResult = out.Issues[0].Result
