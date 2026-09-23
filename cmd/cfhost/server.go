@@ -231,26 +231,13 @@ func (a *App) handleTrackerRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	samples := map[string]TrackerSample{}
-	if auto, err := loadTrackerSamples(cfg.Tracker.AutoSamplesPath); err == nil || auto != nil {
-		mergeTrackerSamples(samples, auto, false)
-	}
-	if manual, err := loadTrackerSamples(cfg.Tracker.SamplesPath); err == nil || manual != nil {
-		mergeTrackerSamples(samples, manual, true)
-	}
-	sample, ok := samples[host]
-	if !ok {
-		http.Error(w, "tracker sample is unavailable", http.StatusNotFound)
-		return
-	}
-
 	timeout := time.Duration(cfg.Tracker.DiscoveryTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	runtime, err := transmissionTrackerRuntimeForDomain(ctx, cfg.Tracker.Transmission, sample, host)
+	runtime, err := transmissionTrackerRuntimeForDomain(ctx, cfg.Tracker.Transmission, host, cfg.Tracker.MaxTrackerLookups)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

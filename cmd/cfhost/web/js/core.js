@@ -419,7 +419,7 @@ function trackerSampleMeta(domain) {
 
   const sample = store.state?.trackerSamples?.[domain.host]
   if (!sample?.available) {
-    return { label: '未获取', variant: 'warning', detail: '尚未从手工文件或下载器取得测试样本' }
+    return { label: '探测样本未获取', variant: 'warning', detail: 'CFHost 尚未从手工文件或下载器取得候选 IP 探测样本' }
   }
 
   const source = sample.source === 'manual'
@@ -428,14 +428,14 @@ function trackerSampleMeta(domain) {
       ? '下载器样本'
       : '样本'
   if (!sample.tested) {
-    return { label: '已获取 · 待测试', variant: 'info', detail: `${source} · 点击“维护”进行单域名样本验证` }
+    return { label: 'CFHost 待探测', variant: 'info', detail: `${source} · 点击“维护”由 CFHost 对当前候选 IP 发起独立 Tracker 探测` }
   }
 
   const testedAt = sample.lastTest ? ` · ${fmtTime(sample.lastTest, true)}` : ''
   if (sample.passed) {
-    return { label: '样本通过', variant: 'success', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
+    return { label: 'CFHost 探测通过', variant: 'success', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
   }
-  return { label: '样本失败', variant: 'danger', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
+  return { label: 'CFHost 探测失败', variant: 'danger', detail: `${source}${testedAt}${sample.detail ? ` · ${sample.detail}` : ''}` }
 }
 
 function candidateStats() {

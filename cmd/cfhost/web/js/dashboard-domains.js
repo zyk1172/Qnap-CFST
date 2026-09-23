@@ -194,15 +194,15 @@ function trackerRuntimePanel(domain) {
   if (!entry || entry.loading) {
     return `
       <div class="tracker-runtime-panel">
-        <div class="tracker-runtime-head"><span>Transmission 做种状态</span><span class="chip info"><span class="dot"></span>读取中</span></div>
-        <div class="domain-detail-wide"><span>实时状态</span><strong>正在从 Transmission 读取样本种子的 Tracker 状态…</strong></div>
+        <div class="tracker-runtime-head"><span>Transmission 域名状态</span><span class="chip info"><span class="dot"></span>读取中</span></div>
+        <div class="domain-detail-wide"><span>实时状态</span><strong>正在扫描 Transmission 当前等待做种/做种中的任务并聚合此 Tracker 域名…</strong></div>
       </div>
     `
   }
   if (entry.error || !entry.data) {
     return `
       <div class="tracker-runtime-panel">
-        <div class="tracker-runtime-head"><span>Transmission 做种状态</span><span class="chip warning"><span class="dot"></span>不可用</span></div>
+        <div class="tracker-runtime-head"><span>Transmission 域名状态</span><span class="chip warning"><span class="dot"></span>不可用</span></div>
         <div class="domain-detail-wide"><span>状态读取</span><strong>${esc(entry.error || '没有可用状态')}</strong></div>
       </div>
     `
@@ -210,35 +210,68 @@ function trackerRuntimePanel(domain) {
 
   const runtime = entry.data
   const trackerStatus = runtime.trackerStatus || 'Waiting'
-  const trackerVariant = trackerStatus === 'Working' ? 'success' : trackerStatus === 'Waiting' ? 'warning' : 'danger'
-  const torrentVariant = runtime.seeding ? 'success' : Number(runtime.torrentStatus) === 5 ? 'warning' : ''
-  const result = runtime.lastAnnounceResult || (runtime.lastAnnounceSucceeded ? 'Working' : runtime.hasAnnounced ? '—' : '尚未 Announce')
-  const peers = Number(runtime.lastAnnouncePeerCount) || 0
-  const seeders = Number(runtime.seederCount) || 0
-  const leechers = Number(runtime.leecherCount) || 0
+  const statusLabel = ({
+    Working: 'Working',
+    Partial: '部分异常',
+    Error: 'Error',
+    Timeout: 'Timeout',
+    Waiting: 'Waiting',
+    NoActive: '无活跃做种',
+  })[trackerStatus] || trackerStatus
+  const trackerVariant = trackerStatus === 'Working'
+    ? 'success'
+    : trackerStatus === 'Waiting' || trackerStatus === 'NoActive'
+      ? 'warning'
+      : 'danger'
+  const matched = Number(runtime.matchedTorrents) || 0
+  const working = Number(runtime.workingTorrents) || 0
+  const errors = (Number(runtime.errorTorrents) || 0) + (Number(runtime.timeoutTorrents) || 0)
+  const seeding = Number(runtime.seedingTorrents) || 0
+  const queued = Number(runtime.queuedTorrents) || 0
+  const checked = Number(runtime.checkedTorrents) || 0
+  const active = Number(runtime.activeTorrents) || 0
+  const issues = Array.isArray(runtime.issues) ? runtime.issues : []
+  const scanText = runtime.truncated
+    ? `${checked} / ${active} 个活跃任务（达到扫描上限，结果可能不完整）`
+    : `${checked} / ${active} 个活跃任务`
 
   return `
     <div class="tracker-runtime-panel">
       <div class="tracker-runtime-head">
-        <span>Transmission 做种状态</span>
+        <span>Transmission 域名状态</span>
         <div class="domain-compact-chips">
-          <span class="chip ${torrentVariant}"><span class="dot"></span>${esc(trackerTorrentStatusLabel(runtime.torrentStatus))}</span>
-          <span class="chip ${trackerVariant}"><span class="dot"></span>${esc(trackerStatus)}</span>
+          <span class="chip ${trackerVariant}"><span class="dot"></span>${esc(statusLabel)}</span>
+          <span class="chip ${errors ? 'danger' : matched ? 'success' : 'warning'}">${errors ? `异常 ${errors}` : `匹配 ${matched}`}</span>
         </div>
       </div>
       <div class="domain-detail-grid tracker-runtime-grid">
-        <div class="domain-detail-item"><span>任务状态</span><strong>${esc(trackerTorrentStatusLabel(runtime.torrentStatus))}</strong></div>
-        <div class="domain-detail-item"><span>Tracker 状态</span><strong class="${trackerVariant}">${esc(trackerStatus)}</strong></div>
-        <div class="domain-detail-item"><span>Announce 状态</span><strong>${esc(trackerAnnounceStateLabel(runtime.announceState))}</strong></div>
-        <div class="domain-detail-item"><span>最近 Peers</span><strong>${peers} · S ${seeders} / L ${leechers}</strong></div>
+        <div class="domain-detail-item"><span>匹配此 Tracker</span><strong>${matched} 个任务</strong></div>
+        <div class="domain-detail-item"><span>做种状态</span><strong>做种中 ${seeding} · 等待做种 ${queued}</strong></div>
+        <div class="domain-detail-item"><span>Tracker 结果</span><strong class="${trackerVariant}">Working ${working} · 异常 ${errors}</strong></div>
+        <div class="domain-detail-item"><span>扫描范围</span><strong>${esc(scanText)}</strong></div>
         <div class="domain-detail-item"><span>最近 Announce</span><strong>${esc(trackerUnixTime(runtime.lastAnnounceTime))}</strong></div>
         <div class="domain-detail-item"><span>下次 Announce</span><strong>${esc(trackerUnixTime(runtime.nextAnnounceTime))}</strong></div>
         <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
-        <div class="domain-detail-item"><span>来源</span><strong>${esc(runtime.source || 'Transmission')}</strong></div>
+        <div class="domain-detail-item"><span>来源</span><strong>Transmission 活跃种子聚合</strong></div>
       </div>
-      <div class="domain-detail-wide tracker-result ${trackerVariant}">
-        <span>最近 Tracker 返回</span>
-        <strong>${esc(result)}</strong>
+      ${issues.length ? `
+        <div class="tracker-issue-list">
+          ${issues.map(issue => `
+            <div class="domain-detail-wide tracker-result danger">
+              <span>${issue.timedOut ? 'Tracker Timeout' : 'Tracker Error'} · ${esc(trackerUnixTime(issue.lastAnnounceTime))}</span>
+              <strong>${esc(issue.result || 'Tracker announce failed')}</strong>
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div class="domain-detail-wide tracker-result ${trackerVariant}">
+          <span>最近 Tracker 返回</span>
+          <strong>${esc(runtime.lastAnnounceResult || (trackerStatus === 'Working' ? 'Working' : statusLabel))}</strong>
+        </div>
+      `}
+      <div class="domain-detail-wide tracker-runtime-note">
+        <span>状态说明</span>
+        <strong>CFHost 探测是对候选 IP 的独立验证；这里是 Transmission 当前活跃种子的域名级聚合状态，两者可能不同。</strong>
       </div>
     </div>
   `
@@ -290,7 +323,7 @@ function domainRowsHTML(domains, filtered) {
       ['Endpoint', domain.endpoint || '/'],
       ['类型 / 策略', `${domain.mode.toUpperCase()} · ${domain.class}`],
       ['当前 IP', ip || '—'],
-      ['样本状态', domain.mode === 'tracker' ? sample.label : '不适用'],
+      ['CFHost 探测', domain.mode === 'tracker' ? sample.label : '不适用'],
       ['连续失败', String(streak)],
       ['最近成功', domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'],
       ['最近失败', domainHealth.lastFailure ? fmtTime(domainHealth.lastFailure) : '—'],
@@ -334,7 +367,7 @@ function domainRowsHTML(domains, filtered) {
                 ${detailItems.map(([label, value]) => `<div class="domain-detail-item"><span>${esc(label)}</span><strong class="${label === '当前 IP' ? 'mono' : ''}">${esc(value)}</strong></div>`).join('')}
               </div>
               <div class="domain-detail-wide">
-                <span>样本详情</span>
+                <span>CFHost 探测详情</span>
                 <strong>${esc(sample.detail || (domain.mode === 'tracker' ? sample.label : 'HTTP 域名不使用 Tracker 样本'))}</strong>
               </div>
               <div class="domain-detail-wide">

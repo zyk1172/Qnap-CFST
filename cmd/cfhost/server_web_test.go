@@ -297,7 +297,7 @@ func TestDomainTableShowsTrackerSampleStateAndMaintenance(t *testing.T) {
 			t.Fatalf("domain table missing %q", want)
 		}
 	}
-	for _, want := range []string{"已获取 · 待测试", "样本通过", "样本失败", "未获取"} {
+	for _, want := range []string{"CFHost 待探测", "CFHost 探测通过", "CFHost 探测失败", "探测样本未获取"} {
 		if !strings.Contains(coreJS, want) {
 			t.Fatalf("sample status helper missing %q", want)
 		}
@@ -345,7 +345,7 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
 	for _, want := range []string{
 		"['站点组', domain.group || '—']",
 		"['Endpoint', domain.endpoint || '/']",
-		"['样本状态', domain.mode === 'tracker' ? sample.label : '不适用']",
+		"['CFHost 探测', domain.mode === 'tracker' ? sample.label : '不适用']",
 		"['连续失败', String(streak)]",
 	} {
 		if !strings.Contains(domainsJS, want) {
@@ -384,9 +384,11 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 		`data-domain-filter="tracker"`,
 		`store.domainFilter === 'tracker' && domain.mode !== 'tracker'`,
 		`Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')`,
-		`Transmission 做种状态`,
+		`Transmission 域名状态`,
 		`trackerStatus === 'Working'`,
-		`最近 Tracker 返回`,
+		`部分异常`,
+		`issues.map(issue =>`,
+		`CFHost 探测是对候选 IP 的独立验证`,
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("Tracker domain UI is missing %q", want)
