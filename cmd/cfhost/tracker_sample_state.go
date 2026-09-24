@@ -15,6 +15,39 @@ type TrackerSampleRuntime struct {
 	LastTest  string `json:"lastTest,omitempty"`
 }
 
+func (a *App) recordHTTPProbe(d Domain, ok bool, detail string) {
+	if d.Mode != "http" {
+		return
+	}
+	statusCode := httpStatusCodeFromDetail(detail)
+	if ok && statusCode == 0 {
+		// Normal-mode HTTP domains intentionally skip verification. Do not turn
+		// that policy decision into a synthetic successful HTTP probe.
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state.HTTPProbe == nil {
+		a.state.HTTPProbe = map[string]HTTPProbeRuntime{}
+	}
+	st := a.state.HTTPProbe[d.Host]
+	st.Available = true
+	st.Reachable = ok
+	st.StatusCode = statusCode
+	st.Detail = strings.TrimSpace(detail)
+	st.CheckedAt = now
+	if ok {
+		st.LastSuccessCode = statusCode
+		st.LastSuccessAt = now
+	} else {
+		st.LastFailureCode = statusCode
+		st.LastFailureAt = now
+		st.LastFailureDetail = strings.TrimSpace(detail)
+	}
+	a.state.HTTPProbe[d.Host] = st
+}
+
 func (a *App) refreshTrackerSampleInventory(cfg Config) {
 	manual, _ := loadTrackerSamples(cfg.Tracker.SamplesPath)
 	auto, _ := loadTrackerSamples(cfg.Tracker.AutoSamplesPath)
@@ -107,6 +140,7 @@ func (a *App) recordTrackerSampleTest(cfg Config, d Domain, ok bool, detail stri
 
 func (a *App) verifyDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
 	ok, detail := verifyConfiguredDomain(ctx, d, ip, cfg, samples)
+	a.recordHTTPProbe(d, ok, detail)
 	if d.Mode == "tracker" && d.Class != "normal" && cfg.Tracker.RealAnnounce {
 		if detail == "tracker sample missing" {
 			a.mu.Lock()

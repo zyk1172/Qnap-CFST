@@ -205,6 +205,16 @@ func classifyHTTPConnectivityStatus(status int) httpProbeDisposition {
 	return httpProbeReachable
 }
 
+var httpStatusCodeDetailPattern = regexp.MustCompile(`(?i)\bHTTP\s+([1-5][0-9]{2})\b`)
+
+func httpStatusCodeFromDetail(detail string) int {
+	match := httpStatusCodeDetailPattern.FindStringSubmatch(detail)
+	if len(match) != 2 || len(match[1]) != 3 {
+		return 0
+	}
+	return int(match[1][0]-'0')*100 + int(match[1][1]-'0')*10 + int(match[1][2]-'0')
+}
+
 func evaluateHTTPConnectivityStatus(status int) (bool, string) {
 	switch classifyHTTPConnectivityStatus(status) {
 	case httpProbeReachable:
