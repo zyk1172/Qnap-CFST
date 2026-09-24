@@ -23,6 +23,56 @@ func TestEvaluateStrictHTTPResponse(t *testing.T) {
 	if ok,_:=evaluateStrictHTTPResponse(204,nil,"https://example.com/api",cfg);!ok{t.Fatal("valid 204 response rejected")}
 }
 
+func TestHTTPStatusCodeFromDetail(t *testing.T) {
+	tests := []struct {
+		detail string
+		want   int
+	}{
+		{"HTTP 200 bytes=1024 final=https://example.com/", 200},
+		{"HTTP 403 · blocked/unusable", 403},
+		{"HTTP 503 final=https://example.com/", 503},
+		{"context deadline exceeded", 0},
+		{"verification skipped for normal mode", 0},
+	}
+	for _, tt := range tests {
+		if got := httpStatusCodeFromDetail(tt.detail); got != tt.want {
+			t.Fatalf("httpStatusCodeFromDetail(%q)=%d want %d", tt.detail, got, tt.want)
+		}
+	}
+}
+
+func TestRecordHTTPProbeTracksSuccessAndFailureCodes(t *testing.T) {
+	a := &App{state: RuntimeState{HTTPProbe: map[string]HTTPProbeRuntime{}}}
+	d := Domain{Host: "example.com", Mode: "http"}
+
+	a.recordHTTPProbe(d, true, "HTTP 204 bytes=0 final=https://example.com/api")
+	st := a.state.HTTPProbe[d.Host]
+	if !st.Available || !st.Reachable || st.StatusCode != 204 || st.LastSuccessCode != 204 {
+		t.Fatalf("unexpected success runtime: %+v", st)
+	}
+
+	a.recordHTTPProbe(d, false, "HTTP 403 · blocked/unusable")
+	st = a.state.HTTPProbe[d.Host]
+	if st.Reachable || st.StatusCode != 403 || st.LastFailureCode != 403 {
+		t.Fatalf("unexpected failure runtime: %+v", st)
+	}
+	if st.LastSuccessCode != 204 {
+		t.Fatalf("last successful code must be preserved, got %+v", st)
+	}
+
+	a.recordHTTPProbe(d, false, "context deadline exceeded")
+	st = a.state.HTTPProbe[d.Host]
+	if st.StatusCode != 0 || st.LastFailureCode != 0 || st.LastFailureDetail == "" {
+		t.Fatalf("network failure must be represented without a synthetic HTTP code: %+v", st)
+	}
+
+	normal := Domain{Host: "normal.example.com", Mode: "http", Class: "normal"}
+	a.recordHTTPProbe(normal, true, "verification skipped for normal mode")
+	if _, exists := a.state.HTTPProbe[normal.Host]; exists {
+		t.Fatal("normal-mode verification skip must not create an HTTP runtime status")
+	}
+}
+
 func TestEvaluateHTTPConnectivityStatusPolicy(t *testing.T) {
 	reachable := []int{200, 204, 301, 302, 400, 401, 404, 405, 409, 410, 422}
 	for _, status := range reachable {
