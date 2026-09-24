@@ -345,11 +345,16 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
 	for _, want := range []string{
 		"['站点组', domain.group || '—']",
 		"['Endpoint', domain.endpoint || '/']",
-		"['CFHost 探测', domain.mode === 'tracker' ? sample.label : '不适用']",
+		"['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label]",
 		"['连续失败', String(streak)]",
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("expanded detail is missing %q", want)
+		}
+	}
+	for _, want := range []string{"function httpRuntimePanel(domain)", "最近成功 Code", "最近失败 Code", "无 HTTP 响应"} {
+		if !strings.Contains(domainsJS, want) {
+			t.Fatalf("HTTP runtime status UI is missing %q", want)
 		}
 	}
 	if !strings.Contains(eventsJS, "const opening = store.expandedDomainHost !== domain.host") ||
