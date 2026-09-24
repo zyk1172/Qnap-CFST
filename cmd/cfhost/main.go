@@ -28,6 +28,19 @@ type DomainHealth struct {
 	LastFailure   string `json:"lastFailure"`
 }
 
+type HTTPProbeRuntime struct {
+	Available       bool   `json:"available"`
+	Reachable       bool   `json:"reachable"`
+	StatusCode      int    `json:"statusCode,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+	CheckedAt       string `json:"checkedAt,omitempty"`
+	LastSuccessCode int    `json:"lastSuccessCode,omitempty"`
+	LastSuccessAt   string `json:"lastSuccessAt,omitempty"`
+	LastFailureCode int    `json:"lastFailureCode,omitempty"`
+	LastFailureAt   string `json:"lastFailureAt,omitempty"`
+	LastFailureDetail string `json:"lastFailureDetail,omitempty"`
+}
+
 type CFSTRateLimitRuntime struct {
 	Active            bool   `json:"active"`
 	Mode              string `json:"mode"`
@@ -75,6 +88,7 @@ type RuntimeState struct {
 	Mappings            map[string]string       `json:"mappings"`
 	DomainStatus        map[string]string       `json:"domainStatus"`
 	DomainHealth        map[string]DomainHealth `json:"domainHealth"`
+	HTTPProbe           map[string]HTTPProbeRuntime `json:"httpProbe"`
 	TrackerSamples      map[string]TrackerSampleRuntime    `json:"trackerSamples"`
 	TrackerKeepalive    map[string]TrackerKeepaliveRuntime `json:"trackerKeepalive"`
 	CFSTRateLimit       CFSTRateLimitRuntime               `json:"cfstRateLimit"`
@@ -90,7 +104,7 @@ func main() {
 	if err != nil { log.Fatal(err) }
 	app := &App{
 		config: cfg, dataDir:dataDir, cfstBin:getenv("CFST_BIN","cfst"),
-		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}, TrackerSamples:map[string]TrackerSampleRuntime{}, TrackerKeepalive:map[string]TrackerKeepaliveRuntime{}},
+		state: RuntimeState{Mappings:map[string]string{}, DomainStatus:map[string]string{}, DomainHealth:map[string]DomainHealth{}, HTTPProbe:map[string]HTTPProbeRuntime{}, TrackerSamples:map[string]TrackerSampleRuntime{}, TrackerKeepalive:map[string]TrackerKeepaliveRuntime{}},
 	}
 	app.loadState()
 	app.refreshTrackerSampleInventory(cfg)
@@ -129,6 +143,7 @@ func (a *App) loadState() {
 	if s.Mappings==nil{s.Mappings=map[string]string{}}
 	if s.DomainStatus==nil{s.DomainStatus=map[string]string{}}
 	if s.DomainHealth==nil{s.DomainHealth=map[string]DomainHealth{}}
+	if s.HTTPProbe==nil{s.HTTPProbe=map[string]HTTPProbeRuntime{}}
 	if s.TrackerSamples==nil{s.TrackerSamples=map[string]TrackerSampleRuntime{}}
 	if s.TrackerKeepalive==nil{s.TrackerKeepalive=map[string]TrackerKeepaliveRuntime{}}
 	if s.CFSTRateLimit.Mode=="" { s.CFSTRateLimit.Mode="normal" }
