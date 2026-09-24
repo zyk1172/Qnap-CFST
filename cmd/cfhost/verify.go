@@ -205,7 +205,7 @@ func classifyHTTPConnectivityStatus(status int) httpProbeDisposition {
 	return httpProbeReachable
 }
 
-var httpStatusCodeDetailPattern = regexp.MustCompile(`(?i)\\bHTTP\\s+([1-5][0-9]{2})\\b`)
+var httpStatusCodeDetailPattern = regexp.MustCompile(`(?i)\bHTTP\s+([1-5][0-9]{2})\b`)
 
 func httpStatusCodeFromDetail(detail string) int {
 	match := httpStatusCodeDetailPattern.FindStringSubmatch(detail)
