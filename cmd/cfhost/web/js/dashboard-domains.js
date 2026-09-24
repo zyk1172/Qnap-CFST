@@ -302,6 +302,78 @@ function trackerRuntimePanel(domain) {
   `
 }
 
+function httpProbeMeta(domain) {
+  if (domain.mode !== 'http') return { available: false, label: '—', variant: '', detail: '' }
+  const runtime = store.state?.httpProbe?.[domain.host]
+  if (!runtime?.available) return { available: false, label: '未探测', variant: '', detail: '' }
+  const code = Number(runtime.statusCode) || 0
+  const reachable = !!runtime.reachable
+  return {
+    available: true,
+    reachable,
+    code,
+    label: code ? `HTTP ${code}` : '无 HTTP 响应',
+    variant: reachable ? 'success' : 'danger',
+    detail: runtime.detail || '',
+  }
+}
+
+function httpRuntimePanel(domain) {
+  if (domain.mode !== 'http') return ''
+  const runtime = store.state?.httpProbe?.[domain.host]
+  if (!runtime?.available) {
+    return `
+      <div class="tracker-runtime-panel">
+        <div class="tracker-runtime-head"><span>HTTP 域名状态</span><span class="chip"><span class="dot"></span>未探测</span></div>
+        <div class="domain-detail-wide"><span>探测状态</span><strong>尚未执行 HTTP 连通性验证；下一次 Repair、完整优化或单域名维护后会记录返回码。</strong></div>
+      </div>
+    `
+  }
+
+  const currentCode = Number(runtime.statusCode) || 0
+  const successCode = Number(runtime.lastSuccessCode) || 0
+  const failureCode = Number(runtime.lastFailureCode) || 0
+  const reachable = !!runtime.reachable
+  const variant = reachable ? 'success' : 'danger'
+  const currentLabel = reachable
+    ? (currentCode ? `HTTP ${currentCode} · 成功` : '连接成功')
+    : (currentCode ? `HTTP ${currentCode} · 失败` : '连接失败 · 无 HTTP 响应')
+  const successLabel = runtime.lastSuccessAt
+    ? `${successCode ? `HTTP ${successCode}` : '成功'} · ${fmtTime(runtime.lastSuccessAt)}`
+    : '—'
+  const failureLabel = runtime.lastFailureAt
+    ? `${failureCode ? `HTTP ${failureCode}` : '无 HTTP 响应'} · ${fmtTime(runtime.lastFailureAt)}`
+    : '—'
+
+  return `
+    <div class="tracker-runtime-panel">
+      <div class="tracker-runtime-head">
+        <span>HTTP 域名状态</span>
+        <div class="domain-compact-chips">
+          <span class="chip ${variant}"><span class="dot"></span>${esc(currentLabel)}</span>
+          <span class="chip ${currentCode ? variant : 'warning'}">${currentCode ? `Code ${currentCode}` : 'No Response'}</span>
+        </div>
+      </div>
+      <div class="domain-detail-grid tracker-runtime-grid">
+        <div class="domain-detail-item"><span>当前探测</span><strong class="${variant}">${esc(currentLabel)}</strong></div>
+        <div class="domain-detail-item"><span>最近成功 Code</span><strong>${esc(successLabel)}</strong></div>
+        <div class="domain-detail-item"><span>最近失败 Code</span><strong>${esc(failureLabel)}</strong></div>
+        <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
+        <div class="domain-detail-item"><span>Endpoint</span><strong class="mono">${esc(domain.endpoint || '/')}</strong></div>
+        <div class="domain-detail-item"><span>当前映射 IP</span><strong class="mono">${esc((store.state?.mappings || {})[domain.host] || '—')}</strong></div>
+      </div>
+      <div class="domain-detail-wide tracker-result ${variant}">
+        <span>HTTP 探测详情</span>
+        <strong>${esc(runtime.detail || (reachable ? 'HTTP connectivity verified' : 'HTTP connectivity failed'))}</strong>
+      </div>
+      <div class="domain-detail-wide tracker-runtime-note">
+        <span>状态说明</span>
+        <strong>HTTP 403、421、451 按不可用处理；408、425、429 和 5xx 按临时失败处理。网络、TLS 或超时导致没有收到 HTTP 响应时显示“无 HTTP 响应”。</strong>
+      </div>
+    </div>
+  `
+}
+
 function filteredDomains() {
   const domains = store.config.domains || []
   const query = store.domainQuery.trim().toLowerCase()
@@ -332,6 +404,7 @@ function domainRowsHTML(domains, filtered) {
     const domainHealth = health[domain.host] || {}
     const streak = domainHealth.failureStreak || 0
     const sample = trackerSampleMeta(domain)
+    const httpProbe = httpProbeMeta(domain)
     const maintaining = !!store.state?.running && store.state.currentJob === 'maintain' && store.state.currentDomain === domain.host
     const expanded = store.expandedDomainHost === domain.host
     const healthLabel = !domain.enabled ? '停用' : ip ? '正常' : '待处理'
@@ -342,13 +415,15 @@ function domainRowsHTML(domains, filtered) {
     const currentStatus = statuses[domain.host] || (ip ? '映射可用' : '等待验证')
     const sampleCompact = domain.mode === 'tracker'
       ? `<span class="chip compact ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span>`
-      : ''
+      : httpProbe.available
+        ? `<span class="chip compact ${httpProbe.variant}"><span class="dot"></span>${esc(httpProbe.label)}</span>`
+        : ''
     const detailItems = [
       ['站点组', domain.group || '—'],
       ['Endpoint', domain.endpoint || '/'],
       ['类型 / 策略', `${domain.mode.toUpperCase()} · ${domain.class}`],
       ['当前 IP', ip || '—'],
-      ['CFHost 探测', domain.mode === 'tracker' ? sample.label : '不适用'],
+      ['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label],
       ['连续失败', String(streak)],
       ['最近成功', domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'],
       ['最近失败', domainHealth.lastFailure ? fmtTime(domainHealth.lastFailure) : '—'],
@@ -393,12 +468,13 @@ function domainRowsHTML(domains, filtered) {
               </div>
               <div class="domain-detail-wide">
                 <span>CFHost 探测详情</span>
-                <strong>${esc(sample.detail || (domain.mode === 'tracker' ? sample.label : 'HTTP 域名不使用 Tracker 样本'))}</strong>
+                <strong>${esc(domain.mode === 'tracker' ? (sample.detail || sample.label) : (httpProbe.detail || '尚未执行 HTTP 探测'))}</strong>
               </div>
               <div class="domain-detail-wide">
                 <span>最近状态</span>
                 <strong>${esc(currentStatus)}</strong>
               </div>
+              ${httpRuntimePanel(domain)}
               ${trackerRuntimePanel(domain)}
             </div>
           </td>
