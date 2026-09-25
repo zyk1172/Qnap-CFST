@@ -651,6 +651,10 @@ func trackerKeepaliveNextDue(state TrackerKeepaliveRuntime, now time.Time) bool 
 }
 
 func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Config, samples map[string]TrackerSample) map[string]downloaderTrackerFailure {
+	return a.evaluateTransmissionTrackerKeepaliveForTargets(ctx, cfg, samples, nil)
+}
+
+func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context, cfg Config, samples map[string]TrackerSample, only map[string]bool) map[string]downloaderTrackerFailure {
 	out := make(map[string]downloaderTrackerFailure)
 	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled || len(samples) == 0 {
 		return out
@@ -685,6 +689,9 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 	for rawDomain := range samples {
 		domain := strings.ToLower(strings.TrimSpace(rawDomain))
 		if domain == "" {
+			continue
+		}
+		if only != nil && !only[domain] {
 			continue
 		}
 		targets[domain] = true
@@ -842,9 +849,11 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 	if a.state.TrackerKeepalive == nil {
 		a.state.TrackerKeepalive = map[string]TrackerKeepaliveRuntime{}
 	}
-	for domain := range a.state.TrackerKeepalive {
-		if !targets[domain] {
-			delete(a.state.TrackerKeepalive, domain)
+	if only == nil {
+		for domain := range a.state.TrackerKeepalive {
+			if !targets[domain] {
+				delete(a.state.TrackerKeepalive, domain)
+			}
 		}
 	}
 	for domain, state := range states {
@@ -858,6 +867,79 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 		a.appendLog("Transmission tracker health: %d domain(s) crossed keepalive threshold and require Repair", len(out))
 	}
 	return out
+}
+
+func (a *App) trackerKeepalivePostRepairTargets(cfg Config, samples map[string]TrackerSample, before, after map[string]string) map[string]bool {
+	targets := map[string]bool{}
+	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled || len(samples) == 0 {
+		return targets
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, d := range cfg.Domains {
+		if !d.Enabled || d.Mode != "tracker" || d.Class == "normal" {
+			continue
+		}
+		if _, ok := samples[d.Host]; !ok {
+			continue
+		}
+		sample := a.state.TrackerSamples[d.Host]
+		if !sample.Tested || !sample.Passed {
+			continue
+		}
+		state := a.state.TrackerKeepalive[d.Host]
+		newIP := strings.TrimSpace(after[d.Host])
+		mappingChanged := newIP != "" && newIP != strings.TrimSpace(before[d.Host])
+		strandedRepair := state.Status == "repair" &&
+			state.Attempts < trackerKeepaliveMaxAttempts &&
+			state.RejectedIP == "" &&
+			strings.TrimSpace(state.NextCheck) == "" &&
+			strings.TrimSpace(state.NextReannounce) == ""
+		if mappingChanged || strandedRepair {
+			targets[d.Host] = true
+		}
+	}
+	return targets
+}
+
+func (a *App) reconcileTransmissionTrackerKeepaliveAfterRepair(ctx context.Context, cfg Config, samples map[string]TrackerSample, before, after map[string]string) {
+	targets := a.trackerKeepalivePostRepairTargets(cfg, samples, before, after)
+	if len(targets) == 0 {
+		return
+	}
+
+	domains := make([]string, 0, len(targets))
+	for domain := range targets {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+
+	// Arm a short fallback before the live Transmission scan. If the job
+	// context expires or Transmission is temporarily unavailable, the scheduler
+	// will retry shortly instead of leaving the domain stranded at repair/0
+	// until the next normal auto-Repair interval.
+	retryAt := time.Now().Add(trackerKeepaliveObservationDelay).Format(time.RFC3339)
+	a.mu.Lock()
+	if a.state.TrackerKeepalive == nil {
+		a.state.TrackerKeepalive = map[string]TrackerKeepaliveRuntime{}
+	}
+	for _, domain := range domains {
+		state := a.state.TrackerKeepalive[domain]
+		state.Status = "repair"
+		state.NextCheck = retryAt
+		state.NextReannounce = ""
+		state.LastEvent = "Tracker sample/mapping recovered during Repair; immediate Transmission keepalive recheck requested"
+		a.state.TrackerKeepalive[domain] = state
+	}
+	a.mu.Unlock()
+
+	a.appendLog("repair: Tracker mapping/sample recovered; rechecking Transmission keepalive immediately for %s", strings.Join(domains, ", "))
+	if ctx.Err() != nil {
+		a.appendLog("repair: immediate Tracker keepalive recheck deferred to scheduler because job context ended: %v", ctx.Err())
+		return
+	}
+	_ = a.evaluateTransmissionTrackerKeepaliveForTargets(ctx, cfg, samples, targets)
 }
 
 // downloaderFailureIsNewer prevents a stale Transmission error from repeatedly

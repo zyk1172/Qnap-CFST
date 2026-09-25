@@ -253,6 +253,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
 	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,next,false);err!=nil{return err}
+	a.reconcileTransmissionTrackerKeepaliveAfterRepair(ctx,cfg,samples,current,mappings)
 	if refreshErr!=nil{return refreshErr}
 	a.completeJobProgress("完成", fmt.Sprintf("Repair 完成 · %d 个映射", len(mappings)))
 	return nil
