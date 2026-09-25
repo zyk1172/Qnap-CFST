@@ -793,6 +793,166 @@ func TestTrackerKeepaliveObservesTwoMinutesAndKeepsThirtyMinuteReannounceInterva
 }
 
 
+func TestPostRepairKeepaliveTargetsRecoveredTracker(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Tracker.RealAnnounce = true
+	cfg.Tracker.Transmission.Enabled = true
+	cfg.Domains = []Domain{{
+		Host: "tracker.example.com", Group: "example", Class: "latency",
+		Mode: "tracker", Endpoint: "/announce", Enabled: true,
+	}}
+	samples := map[string]TrackerSample{
+		"tracker.example.com": {Domain: "tracker.example.com"},
+	}
+	a := &App{state: RuntimeState{
+		TrackerSamples: map[string]TrackerSampleRuntime{
+			"tracker.example.com": {Available: true, Tested: true, Passed: true},
+		},
+		TrackerKeepalive: map[string]TrackerKeepaliveRuntime{
+			"tracker.example.com": {Status: "repair", Attempts: 0},
+		},
+	}}
+
+	targets := a.trackerKeepalivePostRepairTargets(
+		cfg, samples,
+		map[string]string{"tracker.example.com": "104.16.0.10"},
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+	)
+	if !targets["tracker.example.com"] {
+		t.Fatal("a verified replacement mapping must trigger an immediate keepalive recheck")
+	}
+
+	// The same bug can occur when the sample recovers without changing the
+	// mapping: repair/0 with no schedule must still be re-entered immediately.
+	targets = a.trackerKeepalivePostRepairTargets(
+		cfg, samples,
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+	)
+	if !targets["tracker.example.com"] {
+		t.Fatal("sample recovery must not leave repair/0 stranded without a schedule")
+	}
+
+	// An exhausted/rejected mapping is different: it must be replaced, not
+	// silently restarted against the same rejected IP.
+	a.state.TrackerKeepalive["tracker.example.com"] = TrackerKeepaliveRuntime{
+		Status: "repair", Attempts: trackerKeepaliveMaxAttempts, RejectedIP: "104.16.0.11",
+	}
+	targets = a.trackerKeepalivePostRepairTargets(
+		cfg, samples,
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+	)
+	if targets["tracker.example.com"] {
+		t.Fatal("exhausted rejected mapping must not restart keepalive without a replacement")
+	}
+}
+
+func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
+	var reannounceCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") == "" {
+			w.Header().Set("X-Transmission-Session-Id", "post-repair-session")
+			w.Header().Set("X-Transmission-Rpc-Version", "6.0.0")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+			Params struct {
+				Fields []string `json:"fields"`
+				IDs    []int    `json:"ids"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		switch req.Method {
+		case "torrent_get":
+			if !containsString(req.Params.Fields, "tracker_stats") {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"result": map[string]any{"torrents": []map[string]any{{
+						"id": 11, "hash_string": testHashA, "left_until_done": 0,
+						"is_finished": true, "status": 6, "activity_date": 500,
+					}}},
+					"id": 1,
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"result": map[string]any{"torrents": []map[string]any{{
+					"id": 11, "hash_string": testHashA, "status": 6,
+					"tracker_stats": []map[string]any{{
+						"announce": "https://tracker.example.com/announce",
+						"has_announced": true,
+						"last_announce_succeeded": false,
+						"last_announce_result": "Could not connect to tracker",
+						"last_announce_time": 200,
+					}},
+				}}},
+				"id": 1,
+			})
+		case "torrent_reannounce":
+			reannounceCalls.Add(1)
+			if len(req.Params.IDs) != 1 || req.Params.IDs[0] != 11 {
+				t.Fatalf("post-repair reannounce must target only the failed torrent: %#v", req.Params.IDs)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "result": map[string]any{}, "id": 1,
+			})
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := defaultConfig()
+	cfg.Tracker.RealAnnounce = true
+	cfg.Tracker.Transmission = DownloaderClientConfig{Enabled: true, URL: srv.URL}
+	cfg.Domains = []Domain{{
+		Host: "tracker.example.com", Group: "example", Class: "latency",
+		Mode: "tracker", Endpoint: "/announce", Enabled: true,
+	}}
+	samples := map[string]TrackerSample{
+		"tracker.example.com": {Domain: "tracker.example.com"},
+	}
+	a := &App{state: RuntimeState{
+		Mappings: map[string]string{"tracker.example.com": "104.16.0.11"},
+		TrackerSamples: map[string]TrackerSampleRuntime{
+			"tracker.example.com": {
+				Available: true, Tested: true, Passed: true,
+				LastTest: "2026-09-25T10:09:18Z",
+			},
+		},
+		TrackerKeepalive: map[string]TrackerKeepaliveRuntime{
+			"tracker.example.com": {Status: "repair", Attempts: 0},
+		},
+		Logs: []string{},
+	}}
+
+	a.reconcileTransmissionTrackerKeepaliveAfterRepair(
+		context.Background(), cfg, samples,
+		map[string]string{"tracker.example.com": "104.16.0.10"},
+		map[string]string{"tracker.example.com": "104.16.0.11"},
+	)
+
+	if got := reannounceCalls.Load(); got != 1 {
+		t.Fatalf("same Repair cycle must call torrent_reannounce once, got %d", got)
+	}
+	state := a.state.TrackerKeepalive["tracker.example.com"]
+	if state.Attempts != 1 || state.Status != "observing" {
+		t.Fatalf("post-repair keepalive must enter observing 1/3, got %#v", state)
+	}
+	if state.NextCheck == "" || state.NextReannounce == "" || state.LastReannounce == "" {
+		t.Fatalf("post-repair reannounce must schedule observation and minimum interval, got %#v", state)
+	}
+	if !strings.Contains(state.LastEvent, "reannounce 1/3") {
+		t.Fatalf("post-repair state must expose the actual reannounce action, got %q", state.LastEvent)
+	}
+}
+
 func TestRejectedTrackerIPIsExcludedFromCandidateOrder(t *testing.T) {
 	cfg:=defaultConfig()
 	cfg.Verify.CandidateLimit=10
