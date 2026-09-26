@@ -96,7 +96,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return nil
 	}
 
-	if d.Class == "normal" {
+	if normalModeSkipsVerification(d) {
 		candidates := fresh
 		if len(candidates) == 0 {
 			a.appendLog("%s manual maintain: refreshing CFST candidates", d.Host)
