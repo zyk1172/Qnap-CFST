@@ -78,6 +78,9 @@ func (a *App) updateTrackerSampleInventory(cfg Config, manual, auto map[string]T
 	for _, d := range cfg.Domains {
 		if d.Mode != "tracker" || d.Class == "normal" {
 			delete(a.state.TrackerSamples, d.Host)
+			if d.Class == "normal" {
+				delete(a.state.TrackerKeepalive, d.Host)
+			}
 			continue
 		}
 		st := a.state.TrackerSamples[d.Host]
