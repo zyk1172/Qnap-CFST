@@ -64,6 +64,16 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 
 	// Manually managed samples always take precedence over discovered/cache samples.
 	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
+
+	// Normal Tracker domains explicitly opt out of sample/Transmission
+	// monitoring. Ignore stale/manual sample rows for them as well.
+	targets:=trackerTargetDomains(cfg)
+	for host:=range samples {
+		if !targets[host] {
+			delete(samples,host)
+		}
+	}
+
 	a.updateTrackerSampleInventory(cfg,manual,autoSamples)
 	a.markTrackerSamplesPending(discoveredDomains)
 	if len(samples)>0 { a.appendLog("tracker samples ready: %d",len(samples)) }
