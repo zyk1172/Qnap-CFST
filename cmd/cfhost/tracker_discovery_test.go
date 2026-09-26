@@ -848,7 +848,7 @@ func TestPostRepairKeepaliveTargetsRecoveredTracker(t *testing.T) {
 	}
 }
 
-func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
+func TestPostRepairKeepaliveReannouncesNormalTrackerInSameRepairCycle(t *testing.T) {
 	var reannounceCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Transmission-Session-Id") == "" {
@@ -912,7 +912,7 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	cfg.Tracker.RealAnnounce = true
 	cfg.Tracker.Transmission = DownloaderClientConfig{Enabled: true, URL: srv.URL}
 	cfg.Domains = []Domain{{
-		Host: "tracker.example.com", Group: "example", Class: "latency",
+		Host: "tracker.example.com", Group: "example", Class: "normal",
 		Mode: "tracker", Endpoint: "/announce", Enabled: true,
 	}}
 	samples := map[string]TrackerSample{
