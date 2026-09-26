@@ -96,8 +96,6 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 
 	mappings:=retainEnabledMappings(current,cfg)
 	statuses:=make(map[string]string)
-	groupIP:=make(map[string]string)
-	groupHardFailures:=make(map[string]map[string]bool)
 	confirmedUnusableCurrent:=make(map[string]bool)
 	pending:=make([]pendingDomain,0)
 	freshDownloaderFailure:=make(map[string]bool)
@@ -106,6 +104,12 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		a.setJobDomainProgress("检查当前映射", 2, 7, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		currentIP:=current[d.Host]
+
+		if isFollowDomain(d) {
+			delete(mappings,d.Host)
+			statuses[d.Host]="follow waiting · "+d.Follow
+			continue
+		}
 
 		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(cached,d,"","",cfg)
@@ -160,11 +164,9 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			}
 			if ok {
 				mappings[d.Host]=currentIP; statuses[d.Host]="retained · "+currentIP+" · "+detail
-				if k:=groupKey(d); k!="" && groupIP[k]=="" { groupIP[k]=currentIP }
 				continue
 			}
 			if verificationHardFailure(detail) {
-				markGroupHardFailure(groupHardFailures,groupKey(d),currentIP)
 				if d.Mode=="http" {
 					confirmedUnusableCurrent[d.Host]=true
 					delete(mappings,d.Host)
@@ -185,18 +187,22 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		for _,d:=range cfg.Domains {
 			if !d.Enabled { continue }
 			configured[d.Host]=true
+			if isFollowDomain(d) { continue }
 			h:=health[d.Host]
 			h.FailureStreak=0
 			h.LastSuccess=finalNow.Format(time.RFC3339)
 			health[d.Host]=h
 		}
+		followUnresolved:=applyFollowMappings(cfg,mappings,statuses,health)
 		for host:=range health {
 			if !configured[host] { delete(health,host) }
 		}
-		a.setJobProgress("应用结果", fmt.Sprintf("全部健康 · 提交 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
+		detail:="全部健康"
+		if followUnresolved>0 { detail=fmt.Sprintf("%d 个跟随域名未解析",followUnresolved) }
+		a.setJobProgress("应用结果", fmt.Sprintf("%s · 提交 %d 个域名映射", detail, len(mappings)), 7, 7, 0, 0)
 		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",false);err!=nil{return err}
-		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · 全部健康 · %d 个映射", len(mappings)))
-		a.appendLog("repair: all configured domains healthy; candidate verification and CFST refresh skipped")
+		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · %s · %d 个映射", detail, len(mappings)))
+		if followUnresolved==0 { a.appendLog("repair: all independent domains healthy; followers synchronized; candidate verification and CFST refresh skipped") }
 		return nil
 	}
 
@@ -212,7 +218,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		a.setJobProgress("验证缓存候选", "下载器已确认 Tracker 连接故障，跳过旧候选并优先刷新 CFST", 3, 7, 1, 1)
 		a.appendLog("repair: skipping cached candidate verification after fresh downloader Tracker failure; avoiding stale-candidate churn before CFST refresh")
 	} else {
-		pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证缓存候选",3,7)
+		pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,"验证缓存候选",3,7)
 	}
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 	a.setJobProgress("评估刷新", fmt.Sprintf("仍有 %d 个域名待处理", len(pending)), 4, 7, 0, 0)
@@ -252,7 +258,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			a.appendLog("repair: CFST refresh failed: %v",err)
 			if forceRuntimeRefresh && len(cached)>0 && ctx.Err()==nil {
 				a.setJobProgress("验证新候选", "CFST 未产出新候选，回退验证缓存候选", 6, 7, 0, len(pending))
-				pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证新候选",6,7)
+				pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,"验证新候选",6,7)
 				if len(pending)==0 {
 					a.appendLog("repair: cached candidate fallback resolved all domains after CFST failure")
 					refreshErr=nil
@@ -262,7 +268,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			a.storeCandidates(newCandidates)
 			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
 			a.setJobProgress("验证新候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 6, 7, 0, len(pending))
-			pending=a.resolvePendingWithProgress(ctx,cfg,samples,newCandidates,pending,mappings,statuses,groupIP,groupHardFailures,"验证新候选",6,7)
+			pending=a.resolvePendingWithProgress(ctx,cfg,samples,newCandidates,pending,mappings,statuses,"验证新候选",6,7)
 		}
 	} else if refreshablePending>0 {
 		a.setJobProgress("验证新候选", "无需立即刷新 CFST，保留当前判定", 6, 7, 1, 1)
@@ -281,7 +287,9 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	finalNow:=time.Now(); configured:=make(map[string]bool)
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { continue }
-		configured[d.Host]=true; h:=health[d.Host]
+		configured[d.Host]=true
+		if isFollowDomain(d) { continue }
+		h:=health[d.Host]
 		if unresolved[d.Host] {
 			h.FailureStreak++; h.LastFailure=finalNow.Format(time.RFC3339)
 			if statuses[d.Host]==""{statuses[d.Host]="no verified candidate"}
@@ -290,6 +298,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		}
 		health[d.Host]=h
 	}
+	applyFollowMappings(cfg,mappings,statuses,health)
 	for host:=range health { if !configured[host]{delete(health,host)} }
 	next:=""; maxFinalStreak:=0
 	for host:=range refreshableUnresolved { if health[host].FailureStreak>maxFinalStreak{maxFinalStreak=health[host].FailureStreak} }
@@ -306,21 +315,11 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	return nil
 }
 
-func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string) []pendingDomain {
-	return a.resolvePendingWithProgress(ctx,cfg,samples,candidates,pending,mappings,statuses,groupIP,map[string]map[string]bool{},"验证候选",1,1)
+func (a *App) resolvePending(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string) []pendingDomain {
+	return a.resolvePendingWithProgress(ctx,cfg,samples,candidates,pending,mappings,statuses,"验证候选",1,1)
 }
 
-func markGroupHardFailure(cache map[string]map[string]bool,key,ip string) {
-	if key=="" || ip=="" {return}
-	if cache[key]==nil {cache[key]=map[string]bool{}}
-	cache[key][ip]=true
-}
-
-func groupHardFailed(cache map[string]map[string]bool,key,ip string) bool {
-	return key!="" && ip!="" && cache[key]!=nil && cache[key][ip]
-}
-
-func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,groupIP map[string]string,groupHardFailures map[string]map[string]bool,progressStage string,progressStep,progressSteps int) []pendingDomain {
+func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples map[string]TrackerSample,candidates []Candidate,pending []pendingDomain,mappings map[string]string,statuses map[string]string,progressStage string,progressStep,progressSteps int) []pendingDomain {
 	if len(pending)==0{
 		a.setJobProgress(progressStage, "无需处理", progressStep, progressSteps, 1, 1)
 		return pending
@@ -353,42 +352,19 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 			remaining=append(remaining,p)
 			continue
 		}
-		key:=groupKey(p.Domain)
-		preferred:=groupIP[key]
 		resolved:=false
 		lastDetail:="no candidate"
-		if preferred!="" && preferred!=p.FailedCurrent && !groupHardFailed(groupHardFailures,key,preferred) {
-			ok,detail:=a.verifyDomain(domainCtx,p.Domain,preferred,cfg,samples); lastDetail=detail
-			if ok {
-				mappings[p.Domain.Host]=preferred
-				statuses[p.Domain.Host]="verified shared · "+preferred+" · "+detail
-				a.appendLog("%s -> %s (shared group IP · %s)",p.Domain.Host,preferred,detail)
-				resolved=true
-			} else if verificationHardFailure(detail) {
-				markGroupHardFailure(groupHardFailures,key,preferred)
-				a.appendLog("%s skipped for group %s after hard failure: %s",preferred,key,detail)
-			}
-		}
-		if !resolved {
-			order:=orderedCandidates(candidates,p.Domain,"",p.FailedCurrent,cfg)
-			for _,candidate:=range order {
-				if candidate.IP==preferred || groupHardFailed(groupHardFailures,key,candidate.IP){continue}
-				if domainCtx.Err()!=nil {break}
-				ok,detail:=a.verifyDomain(domainCtx,p.Domain,candidate.IP,cfg,samples)
-				lastDetail=detail
-				if !ok {
-					if verificationHardFailure(detail) {
-						markGroupHardFailure(groupHardFailures,key,candidate.IP)
-					}
-					continue
-				}
-				mappings[p.Domain.Host]=candidate.IP
-				statuses[p.Domain.Host]="verified · "+candidate.IP+" · "+detail
-				if key!="" && groupIP[key]==""{groupIP[key]=candidate.IP}
-				a.appendLog("%s -> %s (%s)",p.Domain.Host,candidate.IP,detail)
-				resolved=true
-				break
-			}
+		order:=orderedCandidates(candidates,p.Domain,"",p.FailedCurrent,cfg)
+		for _,candidate:=range order {
+			if domainCtx.Err()!=nil {break}
+			ok,detail:=a.verifyDomain(domainCtx,p.Domain,candidate.IP,cfg,samples)
+			lastDetail=detail
+			if !ok { continue }
+			mappings[p.Domain.Host]=candidate.IP
+			statuses[p.Domain.Host]="verified · "+candidate.IP+" · "+detail
+			a.appendLog("%s -> %s (%s)",p.Domain.Host,candidate.IP,detail)
+			resolved=true
+			break
 		}
 		domainErr:=domainCtx.Err()
 		cancel()
