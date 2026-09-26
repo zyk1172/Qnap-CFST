@@ -420,11 +420,61 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 			t.Fatalf("Tracker expanded detail must stay concise; obsolete field remains: %q", removed)
 		}
 	}
-	if !strings.Contains(eventsJS, "if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)") {
+	if !strings.Contains(eventsJS, "if (opening && domain.mode === 'tracker' && domain.class !== 'follow') await loadTrackerRuntime(domain)") {
 		t.Fatal("Tracker runtime must load lazily when a Tracker row is expanded")
 	}
 	if !strings.Contains(interactionsJS, "/api/tracker-runtime?host=") {
 		t.Fatal("Tracker expansion must query the runtime endpoint")
+	}
+}
+
+func TestDomainFollowStrategyUI(t *testing.T) {
+	interactions, err := webAssets.ReadFile("web/js/interactions.js")
+	if err != nil { t.Fatal(err) }
+	domains, err := webAssets.ReadFile("web/js/dashboard-domains.js")
+	if err != nil { t.Fatal(err) }
+	settings, err := webAssets.ReadFile("web/js/settings.js")
+	if err != nil { t.Fatal(err) }
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil { t.Fatal(err) }
+
+	interactionsJS := string(interactions)
+	domainsJS := string(domains)
+	settingsJS := string(settings)
+	eventsJS := string(events)
+
+	for _, want := range []string{
+		`<label>跟随域名</label><select name="follow"`,
+		`value="follow"`,
+		`follow.disabled = !active`,
+		`follow.required = active`,
+		`follow: strategy === 'follow'`,
+		`.filter(domain => domain.host !== current.host && domain.class !== 'follow')`,
+		`item.follow === previous.host`,
+		`正被 ${followers.map(item => item.host).join('、')} 跟随`,
+	} {
+		if !strings.Contains(interactionsJS, want) {
+			t.Fatalf("follow domain editor is missing %q", want)
+		}
+	}
+	if strings.Contains(interactionsJS, `name="group"`) || strings.Contains(interactionsJS, "站点组") {
+		t.Fatal("legacy site-group field must be removed from domain editor")
+	}
+	for _, want := range []string{
+		`domain.class === 'follow' ? '跟随' : 'LAT'`,
+		`['跟随域名', domain.follow || '—']`,
+		`follow · 直接复用目标域名当前 IP`,
+		`同步跟随域名当前 IP`,
+	} {
+		if !strings.Contains(domainsJS, want) {
+			t.Fatalf("follow domain list is missing %q", want)
+		}
+	}
+	if !strings.Contains(settingsJS, "follow：不独立测速或验证") {
+		t.Fatal("settings must explain follow strategy")
+	}
+	if !strings.Contains(eventsJS, "domain.class !== 'follow'") {
+		t.Fatal("follow Tracker domains must not load Transmission runtime")
 	}
 }
 
