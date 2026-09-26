@@ -13,7 +13,8 @@ func isFollowDomain(d Domain) bool {
 // never triggers CFST by itself. It simply mirrors the current mapping of one
 // existing non-follow domain. Follow chains are rejected during config
 // normalization, so this pass is deterministic and cycle-free.
-func applyFollowMappings(cfg Config, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth) {
+func applyFollowMappings(cfg Config, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth) int {
+	unresolved := 0
 	byHost := make(map[string]Domain, len(cfg.Domains))
 	for _, d := range cfg.Domains {
 		byHost[d.Host] = d
@@ -26,18 +27,24 @@ func applyFollowMappings(cfg Config, mappings map[string]string, statuses map[st
 		target, ok := byHost[d.Follow]
 		if !ok {
 			delete(mappings, d.Host)
+			delete(health, d.Host)
 			statuses[d.Host] = "follow unresolved · target missing · " + d.Follow
+			unresolved++
 			continue
 		}
 		if !target.Enabled {
 			delete(mappings, d.Host)
+			delete(health, d.Host)
 			statuses[d.Host] = "follow unresolved · target disabled · " + target.Host
+			unresolved++
 			continue
 		}
 		ip := mappings[target.Host]
 		if ip == "" {
 			delete(mappings, d.Host)
+			delete(health, d.Host)
 			statuses[d.Host] = "follow unresolved · target has no mapping · " + target.Host
+			unresolved++
 			continue
 		}
 
@@ -49,4 +56,5 @@ func applyFollowMappings(cfg Config, mappings map[string]string, statuses map[st
 			delete(health, d.Host)
 		}
 	}
+	return unresolved
 }
