@@ -67,9 +67,11 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		if newIP := mappings[host]; newIP != "" && newIP != keepalive.RejectedIP {
 			oldRejected := keepalive.RejectedIP
 			a.state.TrackerKeepalive[host] = TrackerKeepaliveRuntime{
-				SampleTestAt: keepalive.SampleTestAt,
-				Status:       "healthy",
-				LastEvent:    fmt.Sprintf("mapping changed from rejected %s to %s; rejected IP cleared", oldRejected, newIP),
+				SampleTestAt:     keepalive.SampleTestAt,
+				MappingIP:        newIP,
+				MappingChangedAt: time.Now().Format(time.RFC3339),
+				Status:           "healthy",
+				LastEvent:        fmt.Sprintf("mapping changed from rejected %s to %s; rejected IP cleared", oldRejected, newIP),
 			}
 		}
 	}
