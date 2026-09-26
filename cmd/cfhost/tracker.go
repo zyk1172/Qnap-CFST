@@ -85,13 +85,12 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 	return out, nil
 }
 func normalModeSkipsVerification(d Domain) bool {
-	return d.Class == "normal" && d.Mode != "tracker"
+	return d.Class == "normal"
 }
 
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
-	// "normal" controls candidate ranking/thresholds. Only HTTP normal domains
-	// skip verification; Tracker domains must still prove the candidate with a
-	// real announce so keepalive/reannounce has trustworthy sample state.
+	// Normal is an explicit no-verification strategy for every protocol,
+	// including Tracker domains.
 	if normalModeSkipsVerification(d) {
 		return true, "verification skipped · normal"
 	}
@@ -109,6 +108,9 @@ func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config
 }
 
 func domainRefreshable(d Domain, cfg Config, samples map[string]TrackerSample) bool {
+	if d.Class == "normal" {
+		return true
+	}
 	if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 		_, ok := samples[d.Host]
 		return ok
