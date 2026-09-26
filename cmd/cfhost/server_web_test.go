@@ -395,8 +395,8 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 
 	for _, want := range []string{
 		`data-domain-filter="tracker"`,
-		`store.domainFilter === 'tracker' && domain.mode !== 'tracker'`,
-		`Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')`,
+		`store.domainFilter === 'tracker' && (domain.mode !== 'tracker' || domain.class === 'follow')`,
+		`Number(b.domain.mode === 'tracker' && b.domain.class !== 'follow') - Number(a.domain.mode === 'tracker' && a.domain.class !== 'follow')`,
 		`Transmission 状态`,
 		`trackerStatus === 'Working'`,
 		`部分失败`,
