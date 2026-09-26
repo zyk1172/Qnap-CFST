@@ -58,6 +58,8 @@ type TrackerKeepaliveRuntime struct {
 	NextCheck          string  `json:"nextCheck,omitempty"`
 	NextReannounce     string  `json:"nextReannounce,omitempty"`
 	SampleTestAt       string  `json:"sampleTestAt,omitempty"`
+	MappingIP          string  `json:"mappingIP,omitempty"`
+	MappingChangedAt   string  `json:"mappingChangedAt,omitempty"`
 	RejectedIP         string  `json:"rejectedIP,omitempty"`
 	RejectedAt         string  `json:"rejectedAt,omitempty"`
 	FastRetry          bool    `json:"fastRetry,omitempty"`
