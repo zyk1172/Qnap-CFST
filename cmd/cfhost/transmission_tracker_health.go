@@ -878,7 +878,7 @@ func (a *App) trackerKeepalivePostRepairTargets(cfg Config, samples map[string]T
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	for _, d := range cfg.Domains {
-		if !d.Enabled || d.Mode != "tracker" || d.Class == "normal" {
+		if !d.Enabled || d.Mode != "tracker" {
 			continue
 		}
 		if _, ok := samples[d.Host]; !ok {
