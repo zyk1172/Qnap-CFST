@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"encoding/json"
 	"errors"
 	"os"
@@ -93,7 +94,7 @@ type SyncConfig struct {
 
 type Domain struct {
 	Host     string `json:"host"`
-	Group    string `json:"group"`
+	Follow   string `json:"follow,omitempty"`
 	Class    string `json:"class"`
 	Mode     string `json:"mode"`
 	Endpoint string `json:"endpoint"`
@@ -192,22 +193,22 @@ func defaultConfig() Config {
 			CommitMessage: "CFHost: update hosts map",
 		},
 		Domains: []Domain{
-			{Host: "tracker.m-team.cc", Group: "mteam", Class: "latency", Mode: "tracker", Endpoint: "/announce", Enabled: true},
-			{Host: "tracker.m-team.io", Group: "mteam", Class: "latency", Mode: "tracker", Endpoint: "/announce", Enabled: true},
-			{Host: "kp.m-team.cc", Group: "mteam", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "zp.m-team.io", Group: "mteam", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "ob.m-team.cc", Group: "mteam", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "h5.m-team.cc", Group: "mteam", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "api.m-team.cc", Group: "mteam", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "tracker.ptcafe.club", Group: "ptcafe", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
-			{Host: "ptcafe.club", Group: "ptcafe", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "tracker.xingyungept.org", Group: "xingyungept", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
-			{Host: "pt.xingyungept.org", Group: "xingyungept", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "www.xingyungept.org", Group: "xingyungept", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "tracker.hdtime.org", Group: "hdtime", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
-			{Host: "hdtime.org", Group: "hdtime", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
-			{Host: "www.pttime.org", Group: "pttime", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
-			{Host: "ptzone.xyz", Group: "ptzone", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
+			{Host: "tracker.m-team.cc", Class: "latency", Mode: "tracker", Endpoint: "/announce", Enabled: true},
+			{Host: "tracker.m-team.io", Class: "latency", Mode: "tracker", Endpoint: "/announce", Enabled: true},
+			{Host: "kp.m-team.cc", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "zp.m-team.io", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "ob.m-team.cc", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "h5.m-team.cc", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "api.m-team.cc", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "tracker.ptcafe.club", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
+			{Host: "ptcafe.club", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "tracker.xingyungept.org", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
+			{Host: "pt.xingyungept.org", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "www.xingyungept.org", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "tracker.hdtime.org", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
+			{Host: "hdtime.org", Class: "latency", Mode: "http", Endpoint: "/", Enabled: true},
+			{Host: "www.pttime.org", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
+			{Host: "ptzone.xyz", Class: "latency", Mode: "tracker", Endpoint: "/announce.php", Enabled: true},
 		},
 	}
 }
@@ -291,16 +292,41 @@ func normalizeConfig(c *Config) error {
 	clean := make([]Domain, 0, len(c.Domains))
 	for _, d := range c.Domains {
 		d.Host = strings.ToLower(strings.TrimSpace(d.Host))
-		d.Group = strings.TrimSpace(d.Group)
+		d.Follow = strings.ToLower(strings.TrimSpace(d.Follow))
+		d.Class = strings.ToLower(strings.TrimSpace(d.Class))
 		d.Mode = strings.ToLower(strings.TrimSpace(d.Mode))
 		d.Endpoint = strings.TrimSpace(d.Endpoint)
 		if d.Host == "" || seen[d.Host] { continue }
-		if d.Class != "latency" && d.Class != "bandwidth" && d.Class != "normal" { d.Class = "latency" }
+		if d.Class != "latency" && d.Class != "bandwidth" && d.Class != "normal" && d.Class != "follow" { d.Class = "latency" }
+		if d.Class != "follow" { d.Follow = "" }
 		if d.Mode != "tracker" { d.Mode = "http" }
 		if d.Endpoint == "" { d.Endpoint = "/" }
 		if !strings.HasPrefix(d.Endpoint, "/") { d.Endpoint = "/" + d.Endpoint }
 		seen[d.Host] = true
 		clean = append(clean, d)
+	}
+
+	byHost := make(map[string]Domain, len(clean))
+	for _, d := range clean {
+		byHost[d.Host] = d
+	}
+	for _, d := range clean {
+		if d.Class != "follow" {
+			continue
+		}
+		if d.Follow == "" {
+			return fmt.Errorf("follow target is required for %s", d.Host)
+		}
+		if d.Follow == d.Host {
+			return fmt.Errorf("%s cannot follow itself", d.Host)
+		}
+		target, ok := byHost[d.Follow]
+		if !ok {
+			return fmt.Errorf("follow target %s for %s does not exist", d.Follow, d.Host)
+		}
+		if target.Class == "follow" {
+			return fmt.Errorf("%s cannot follow %s because follow chains are not allowed", d.Host, d.Follow)
+		}
 	}
 	c.Domains = clean
 	return nil
