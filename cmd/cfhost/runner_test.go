@@ -320,22 +320,28 @@ func TestOrderedNormalCandidatesIgnoreGroupPreferred(t *testing.T) {
 	}
 }
 
-func TestNormalTrackerDoesNotRequireSample(t *testing.T) {
+func TestNormalTrackerRequiresSampleAndDoesNotSkipVerification(t *testing.T) {
 	cfg:=defaultConfig()
 	d:=Domain{Host:"tracker.example.com",Class:"normal",Mode:"tracker",Enabled:true}
-	if !domainRefreshable(d,cfg,map[string]TrackerSample{}) {
-		t.Fatal("normal tracker must not require a tracker sample")
+	if domainRefreshable(d,cfg,map[string]TrackerSample{}) {
+		t.Fatal("normal Tracker must require a real announce sample")
 	}
 	ok,detail:=verifyConfiguredDomain(t.Context(),d,"104.16.0.1",cfg,map[string]TrackerSample{})
-	if !ok || !strings.Contains(detail,"verification skipped") {
-		t.Fatalf("normal strategy should bypass domain verification: ok=%v detail=%q",ok,detail)
+	if ok || detail!="tracker sample missing" {
+		t.Fatalf("normal Tracker must not bypass verification: ok=%v detail=%q",ok,detail)
+	}
+	a:=&App{state:RuntimeState{TrackerSamples:map[string]TrackerSampleRuntime{}}}
+	a.recordTrackerSampleTest(cfg,d,true,"announce accepted · attempt 1")
+	state:=a.state.TrackerSamples[d.Host]
+	if !state.Tested || !state.Passed || !strings.Contains(state.Detail,"announce accepted") {
+		t.Fatalf("normal Tracker sample result was not persisted: %#v",state)
 	}
 }
 
-func TestResolvePendingNormalUsesLowestLatencyWithoutVerification(t *testing.T) {
+func TestResolvePendingNormalHTTPUsesLowestLatencyWithoutVerification(t *testing.T) {
 	cfg:=defaultConfig()
 	a:=&App{}
-	d:=Domain{Host:"tracker.example.com",Class:"normal",Mode:"tracker",Enabled:true}
+	d:=Domain{Host:"plain.example.com",Class:"normal",Mode:"http",Enabled:true}
 	pending:=[]pendingDomain{{Domain:d,Refreshable:true}}
 	mappings:=map[string]string{}
 	statuses:=map[string]string{}
@@ -353,28 +359,79 @@ func TestResolvePendingNormalUsesLowestLatencyWithoutVerification(t *testing.T) 
 		map[string]string{},
 	)
 	if len(remaining)!=0 {
-		t.Fatalf("normal domain should resolve directly: %#v",remaining)
+		t.Fatalf("normal HTTP domain should resolve directly: %#v",remaining)
 	}
 	if mappings[d.Host]!="104.16.0.2" {
-		t.Fatalf("normal domain did not receive lowest latency IP: %#v",mappings)
+		t.Fatalf("normal HTTP domain did not receive lowest latency IP: %#v",mappings)
 	}
 	if !strings.Contains(statuses[d.Host],"verification skipped") {
-		t.Fatalf("normal status must state verification was skipped: %q",statuses[d.Host])
+		t.Fatalf("normal HTTP status must state verification was skipped: %q",statuses[d.Host])
 	}
 }
 
-func TestTrackerDiscoverySkipsNormalDomains(t *testing.T) {
+func TestResolvePendingNormalTrackerDoesNotBypassMissingSample(t *testing.T) {
+	cfg:=defaultConfig()
+	a:=&App{state:RuntimeState{TrackerSamples:map[string]TrackerSampleRuntime{}}}
+	d:=Domain{Host:"tracker.example.com",Class:"normal",Mode:"tracker",Enabled:true}
+	pending:=[]pendingDomain{{Domain:d,Refreshable:true}}
+	mappings:=map[string]string{}
+	statuses:=map[string]string{}
+	remaining:=a.resolvePending(
+		t.Context(),
+		cfg,
+		map[string]TrackerSample{},
+		[]Candidate{{IP:"104.16.0.2",DelayMS:12}},
+		pending,
+		mappings,
+		statuses,
+		map[string]string{},
+	)
+	if len(remaining)!=1 || mappings[d.Host]!="" {
+		t.Fatalf("normal Tracker must remain unresolved without a sample: remaining=%#v mappings=%#v",remaining,mappings)
+	}
+	if !strings.Contains(statuses[d.Host],"tracker sample missing") {
+		t.Fatalf("normal Tracker unresolved reason must expose missing sample: %q",statuses[d.Host])
+	}
+}
+
+func TestTrackerDiscoveryIncludesNormalTrackerDomains(t *testing.T) {
 	cfg:=defaultConfig()
 	cfg.Domains=[]Domain{
 		{Host:"tracker.normal.example",Class:"normal",Mode:"tracker",Enabled:true},
 		{Host:"tracker.verified.example",Class:"latency",Mode:"tracker",Enabled:true},
+		{Host:"normal-http.example",Class:"normal",Mode:"http",Enabled:true},
 	}
 	targets:=trackerTargetDomains(cfg)
-	if targets["tracker.normal.example"] {
-		t.Fatal("normal tracker must not trigger sample discovery")
+	if !targets["tracker.normal.example"] {
+		t.Fatal("normal Tracker must participate in sample discovery")
 	}
 	if !targets["tracker.verified.example"] {
-		t.Fatal("verified tracker should remain a discovery target")
+		t.Fatal("latency Tracker should remain a discovery target")
+	}
+	if targets["normal-http.example"] {
+		t.Fatal("normal HTTP domain must not enter Tracker sample discovery")
+	}
+}
+
+func TestRepairBudgetReservesTimeForRefreshAndCommit(t *testing.T) {
+	if got:=repairInspectionReserve(10*time.Minute);got!=6*time.Minute {
+		t.Fatalf("10-minute Repair must reserve 6 minutes after inspection, got %s",got)
+	}
+	if got:=repairCFSTReserve(6*time.Minute);got!=2*time.Minute {
+		t.Fatalf("6-minute remainder must reserve 2 minutes after CFST, got %s",got)
+	}
+	parent,parentCancel:=context.WithTimeout(context.Background(),10*time.Minute)
+	defer parentCancel()
+	child,childCancel,reserve,ok:=contextWithDeadlineReserve(parent,6*time.Minute)
+	if !ok || reserve!=6*time.Minute {
+		t.Fatalf("failed to create reserved inspection context: reserve=%s ok=%v",reserve,ok)
+	}
+	defer childCancel()
+	parentDeadline,_:=parent.Deadline()
+	childDeadline,_:=child.Deadline()
+	window:=parentDeadline.Sub(childDeadline)
+	if window<5*time.Minute+59*time.Second || window>6*time.Minute+time.Second {
+		t.Fatalf("reserved tail drifted: %s",window)
 	}
 }
 
