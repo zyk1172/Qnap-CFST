@@ -116,7 +116,7 @@ function renderHealthRows() {
     const detail = statuses[domain.host] || (ok ? '映射可用' : '等待验证')
     return `
       <div class="health-row">
-        <span class="health-icon" style="color:${ok ? 'var(--success)' : 'var(--warning)'}">${icon(domain.mode === 'tracker' ? 'activity' : 'globe')}</span>
+        <span class="health-icon" style="color:${ok ? 'var(--success)' : 'var(--warning)'}">${icon(domain.class === 'follow' ? 'sync' : domain.mode === 'tracker' ? 'activity' : 'globe')}</span>
         <div class="health-copy"><strong>${esc(domain.host)}</strong><small>${esc(detail)}</small></div>
         <span class="chip ${ok ? 'success' : 'warning'}"><span class="dot"></span>${ok ? esc(mappings[domain.host]) : '未映射'}</span>
       </div>
@@ -345,14 +345,14 @@ function filteredDomains() {
   const filtered = domains
     .map((domain, index) => ({ domain, index }))
     .filter(({ domain }) => {
-      if (store.domainFilter === 'tracker' && domain.mode !== 'tracker') return false
+      if (store.domainFilter === 'tracker' && (domain.mode !== 'tracker' || domain.class === 'follow')) return false
       if (store.domainFilter === 'enabled' && !domain.enabled) return false
       if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host]) return false
       if (!query) return true
       return [domain.host, domain.follow, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
     })
     .sort((a, b) => {
-      const trackerOrder = Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')
+      const trackerOrder = Number(b.domain.mode === 'tracker' && b.domain.class !== 'follow') - Number(a.domain.mode === 'tracker' && a.domain.class !== 'follow')
       return trackerOrder || a.index - b.index
     })
     .map(item => item.domain)
@@ -374,7 +374,7 @@ function domainRowsHTML(domains, filtered) {
     const expanded = store.expandedDomainHost === domain.host
     const healthLabel = !domain.enabled ? '停用' : ip ? '正常' : '待处理'
     const healthVariant = !domain.enabled ? '' : ip ? 'success' : 'warning'
-    const modeLabel = domain.mode === 'tracker' ? 'TRK' : 'HTTP'
+    const modeLabel = domain.class === 'follow' ? 'MAP' : domain.mode === 'tracker' ? 'TRK' : 'HTTP'
     const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : domain.class === 'follow' ? '跟随' : 'LAT'
     const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : domain.class === 'follow' ? 'primary' : 'info'
     const sampleCompact = domain.class === 'follow'
@@ -408,7 +408,7 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-meta-cell">
           <div class="domain-compact-chips">
-            <span class="chip compact ${domain.mode === 'tracker' ? 'primary' : ''}">${modeLabel}</span>
+            <span class="chip compact ${domain.class === 'follow' || domain.mode === 'tracker' ? 'primary' : ''}">${modeLabel}</span>
             <span class="chip compact ${classVariant}">${classLabel}</span>
           </div>
         </td>
