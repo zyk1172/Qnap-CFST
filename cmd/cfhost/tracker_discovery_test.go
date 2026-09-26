@@ -697,6 +697,9 @@ func TestTrackerKeepaliveObservesTwoMinutesAndKeepsThirtyMinuteReannounceInterva
 	cfg:=defaultConfig()
 	cfg.Tracker.Transmission=DownloaderClientConfig{Enabled:true,URL:srv.URL}
 	cfg.Tracker.RealAnnounce=true
+	cfg.Domains=[]Domain{{
+		Host:"tracker.example.com",Class:"latency",Mode:"tracker",Enabled:true,
+	}}
 	samples:=map[string]TrackerSample{"tracker.example.com":{Domain:"tracker.example.com"}}
 	a:=&App{state:RuntimeState{
 		Mappings:map[string]string{"tracker.example.com":"104.16.0.10"},
