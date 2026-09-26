@@ -26,8 +26,6 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	a.mu.RLock(); current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); a.mu.RUnlock()
 	mappings:=retainEnabledMappings(current,cfg)
 	statuses:=make(map[string]string)
-	groupIP:=make(map[string]string)
-	groupHardFailures:=make(map[string]map[string]bool)
 	now:=time.Now().Format(time.RFC3339)
 
 	for index,d:=range cfg.Domains {
@@ -36,6 +34,11 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		oldIP:=current[d.Host]
 		h:=health[d.Host]
+		if isFollowDomain(d) {
+			delete(mappings,d.Host)
+			statuses[d.Host]="follow waiting · "+d.Follow
+			continue
+		}
 		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(candidates,d,"","",cfg)
 			if len(order)==0 {
@@ -78,46 +81,36 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 			continue
 		}
 
-		key:=groupKey(d)
-		preferred:=groupIP[key]
-		order:=orderedCandidates(candidates,d,preferred,"",cfg)
+		order:=orderedCandidates(candidates,d,"","",cfg)
 		resolved:=false
 		lastDetail:="no candidate"
 		oldHardFailed:=false
 		tried:=make(map[string]bool)
 		for _,candidate:=range order {
 			if domainCtx.Err()!=nil {break}
-			if groupHardFailed(groupHardFailures,key,candidate.IP){continue}
 			tried[candidate.IP]=true
 			ok,detail:=a.verifyDomain(domainCtx,d,candidate.IP,cfg,samples)
 			lastDetail=detail
 			if !ok {
-				if verificationHardFailure(detail) {
-					markGroupHardFailure(groupHardFailures,key,candidate.IP)
-					if d.Mode=="http" && candidate.IP==oldIP {
-						oldHardFailed=true
-					}
+				if verificationHardFailure(detail) && d.Mode=="http" && candidate.IP==oldIP {
+					oldHardFailed=true
 				}
 				continue
 			}
 			mappings[d.Host]=candidate.IP
 			statuses[d.Host]="optimized · "+candidate.IP+" · "+detail
-			if key!=""&&groupIP[key]==""{groupIP[key]=candidate.IP}
 			resolved=true
 			break
 		}
-		if !resolved && oldIP!="" && !tried[oldIP] && !groupHardFailed(groupHardFailures,key,oldIP) && domainCtx.Err()==nil {
+		if !resolved && oldIP!="" && !tried[oldIP] && domainCtx.Err()==nil {
 			ok,detail:=a.verifyDomain(domainCtx,d,oldIP,cfg,samples)
 			lastDetail=detail
 			if ok {
 				mappings[d.Host]=oldIP
 				statuses[d.Host]="retained after optimize · "+oldIP+" · "+detail
 				resolved=true
-			} else if verificationHardFailure(detail) {
-				markGroupHardFailure(groupHardFailures,key,oldIP)
-				if d.Mode=="http" {
-					oldHardFailed=true
-				}
+			} else if verificationHardFailure(detail) && d.Mode=="http" {
+				oldHardFailed=true
 			}
 		}
 		domainErr:=domainCtx.Err()
@@ -145,6 +138,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		health[d.Host]=h
 	}
 	if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before commit: %w",err)}
+	applyFollowMappings(cfg,mappings,statuses,health)
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 5, 5, 0, 0)
 	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",true);err!=nil{return err}
 	a.completeJobProgress("完成", fmt.Sprintf("完整优化完成 · %d 个映射", len(mappings)))
