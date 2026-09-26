@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="cmd/cfhost/web/assets/cfhost-logo.png" alt="CFHost Logo" width="180">
+  <img src="cmd/cfhost/web/assets/cfhost-logo.svg" alt="CFHost Logo" width="180">
 </p>
 
 <h1 align="center">CFHost</h1>
@@ -602,10 +602,11 @@ cmd/cfhost/
 WebUI 品牌资源：
 
 ```text
-cmd/cfhost/web/assets/cfhost-logo.png
+cmd/cfhost/web/assets/cfhost-logo.svg  # 浏览器与界面使用的矢量图标
+cmd/cfhost/web/assets/cfhost-logo.png  # Apple touch icon 的透明 PNG 兼容资源
 ```
 
-该图标同时用于浏览器标签页、启动画面、左侧品牌区与本 README。
+矢量图用于浏览器标签页、启动画面、左侧品牌区与本 README；PNG 仅作 Apple touch icon 兼容资源。
 
 镜像中包含两个程序：
 
