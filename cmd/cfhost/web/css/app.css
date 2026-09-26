@@ -37,19 +37,20 @@ svg { display: block; }
   transition: opacity 240ms var(--ease-standard), visibility 240ms var(--ease-standard);
 }
 .boot-screen.is-hidden { opacity: 0; visibility: hidden; }
-.boot-logo, .brand-mark {
-  position: relative;
+.boot-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 28px rgba(var(--primary-rgb), .16));
+}
+.brand-mark {
+  display: block;
   width: 36px;
   height: 36px;
-  transform: rotate(45deg);
+  flex: 0 0 36px;
+  object-fit: contain;
 }
-.boot-logo span, .brand-mark span {
-  position: absolute;
-  inset: 5px;
-  border: 4px solid var(--primary);
-  border-radius: 8px;
-}
-.boot-logo span:last-child, .brand-mark span:last-child { inset: 11px -1px -1px 11px; opacity: .55; }
 .boot-wordmark { color: var(--text-strong); font-size: 18px; font-weight: 780; letter-spacing: .17em; }
 .boot-progress { width: 108px; height: 3px; overflow: hidden; border-radius: 99px; background: var(--border-strong); }
 .boot-progress i { display: block; width: 38%; height: 100%; border-radius: inherit; background: var(--primary); animation: boot-progress 1.15s ease-in-out infinite; }
@@ -97,8 +98,6 @@ svg { display: block; }
   cursor: pointer;
   text-align: left;
 }
-.brand-mark { width: 32px; height: 32px; flex: 0 0 32px; }
-.brand-mark span { border-width: 3.5px; border-radius: 7px; }
 .brand-copy { display: grid; min-width: 0; line-height: 1.2; transition: opacity 150ms ease, transform 180ms ease; }
 .brand-copy strong { overflow: hidden; color: var(--text-strong); font-size: 17px; letter-spacing: .11em; text-overflow: ellipsis; }
 .brand-copy small { margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
