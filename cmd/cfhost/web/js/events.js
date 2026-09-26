@@ -71,7 +71,7 @@ document.addEventListener('click', async event => {
       const opening = store.expandedDomainHost !== domain.host
       store.expandedDomainHost = opening ? domain.host : ''
       updateDomainResults()
-      if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)
+      if (opening && domain.mode === 'tracker' && domain.class !== 'follow') await loadTrackerRuntime(domain)
     }
     return
   }
