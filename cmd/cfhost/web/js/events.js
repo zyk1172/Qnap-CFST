@@ -139,6 +139,11 @@ document.addEventListener('click', async event => {
 // per keystroke and silently dropped every character typed faster than roughly
 // 12 keys per second.
 document.addEventListener('input', event => {
+  if (event.target.matches?.('#domain-form select[name="class"]')) {
+    syncDomainFollowSelector()
+    return
+  }
+
   if (event.target.id === 'domain-search') {
     store.domainQuery = event.target.value
     updateDomainResults()
