@@ -161,6 +161,42 @@ func TestAppearancePopoverSurvivesSidebarToggle(t *testing.T) {
 }
 
 
+func TestDesktopSidebarCannotCollapse(t *testing.T) {
+	index, err := webAssets.ReadFile("web/index.html")
+	if err != nil { t.Fatal(err) }
+	events, err := webAssets.ReadFile("web/js/events.js")
+	if err != nil { t.Fatal(err) }
+	interactions, err := webAssets.ReadFile("web/js/interactions.js")
+	if err != nil { t.Fatal(err) }
+	css, err := webAssets.ReadFile("web/css/app.css")
+	if err != nil { t.Fatal(err) }
+
+	indexHTML := string(index)
+	eventsJS := string(events)
+	interactionsJS := string(interactions)
+	cssText := string(css)
+
+	for _, forbidden := range []string{
+		`data-action="toggle-sidebar"`,
+		`sidebar-collapse`,
+		`切换侧栏宽度`,
+		`function toggleSidebar()`,
+		`sidebar-collapsed .sidebar`,
+	} {
+		if strings.Contains(indexHTML, forbidden) || strings.Contains(eventsJS, forbidden) || strings.Contains(interactionsJS, forbidden) || strings.Contains(cssText, forbidden) {
+			t.Fatalf("desktop sidebar collapse interaction must be removed: %q", forbidden)
+		}
+	}
+	if !strings.Contains(eventsJS, "localStorage.removeItem('cfhost-sidebar-collapsed')") {
+		t.Fatal("boot must clear obsolete persisted collapsed-sidebar preference")
+	}
+	for _, required := range []string{`data-action="open-sidebar"`, `data-action="close-sidebar"`} {
+		if !strings.Contains(indexHTML, required) {
+			t.Fatalf("mobile sidebar interaction must remain: %q", required)
+		}
+	}
+}
+
 func TestSingleColumnGridTracksClampMinimum(t *testing.T) {
 	css, err := webAssets.ReadFile("web/css/app.css")
 	if err != nil {
