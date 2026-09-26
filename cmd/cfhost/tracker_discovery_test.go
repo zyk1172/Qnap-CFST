@@ -848,7 +848,7 @@ func TestPostRepairKeepaliveTargetsRecoveredTracker(t *testing.T) {
 	}
 }
 
-func TestPostRepairKeepaliveReannouncesNormalTrackerInSameRepairCycle(t *testing.T) {
+func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	var reannounceCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Transmission-Session-Id") == "" {
@@ -912,7 +912,7 @@ func TestPostRepairKeepaliveReannouncesNormalTrackerInSameRepairCycle(t *testing
 	cfg.Tracker.RealAnnounce = true
 	cfg.Tracker.Transmission = DownloaderClientConfig{Enabled: true, URL: srv.URL}
 	cfg.Domains = []Domain{{
-		Host: "tracker.example.com", Group: "example", Class: "normal",
+		Host: "tracker.example.com", Group: "example", Class: "latency",
 		Mode: "tracker", Endpoint: "/announce", Enabled: true,
 	}}
 	samples := map[string]TrackerSample{
@@ -950,6 +950,64 @@ func TestPostRepairKeepaliveReannouncesNormalTrackerInSameRepairCycle(t *testing
 	}
 	if !strings.Contains(state.LastEvent, "reannounce 1/3") {
 		t.Fatalf("post-repair state must expose the actual reannounce action, got %q", state.LastEvent)
+	}
+}
+
+func TestNormalTrackerNeverEntersPostRepairKeepalive(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Tracker.RealAnnounce=true
+	cfg.Tracker.Transmission.Enabled=true
+	cfg.Domains=[]Domain{{
+		Host:"tracker.normal.example",Class:"normal",Mode:"tracker",Enabled:true,
+	}}
+	samples:=map[string]TrackerSample{
+		"tracker.normal.example":{Domain:"tracker.normal.example"},
+	}
+	a:=&App{state:RuntimeState{
+		TrackerSamples:map[string]TrackerSampleRuntime{
+			"tracker.normal.example":{Available:true,Tested:true,Passed:true},
+		},
+		TrackerKeepalive:map[string]TrackerKeepaliveRuntime{
+			"tracker.normal.example":{Status:"repair",Attempts:0},
+		},
+	}}
+	targets:=a.trackerKeepalivePostRepairTargets(
+		cfg,samples,
+		map[string]string{"tracker.normal.example":"104.16.0.10"},
+		map[string]string{"tracker.normal.example":"104.16.0.11"},
+	)
+	if targets["tracker.normal.example"] {
+		t.Fatal("Normal Tracker must never enter post-Repair keepalive/reannounce")
+	}
+}
+
+func TestNormalTrackerSampleDoesNotTriggerTransmissionHealthScan(t *testing.T) {
+	var requests atomic.Int32
+	srv:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+		requests.Add(1)
+		t.Fatal("Normal-only Tracker sample must not trigger any Transmission health request")
+	}))
+	defer srv.Close()
+
+	cfg:=defaultConfig()
+	cfg.Tracker.RealAnnounce=true
+	cfg.Tracker.Transmission=DownloaderClientConfig{Enabled:true,URL:srv.URL}
+	cfg.Domains=[]Domain{{
+		Host:"tracker.normal.example",Class:"normal",Mode:"tracker",Enabled:true,
+	}}
+	a:=&App{state:RuntimeState{
+		Mappings:map[string]string{"tracker.normal.example":"104.16.0.10"},
+		TrackerKeepalive:map[string]TrackerKeepaliveRuntime{},
+	}}
+	failures:=a.evaluateTransmissionTrackerKeepalive(
+		context.Background(),cfg,
+		map[string]TrackerSample{"tracker.normal.example":{Domain:"tracker.normal.example"}},
+	)
+	if len(failures)!=0 {
+		t.Fatalf("Normal Tracker produced downloader failures: %#v",failures)
+	}
+	if got:=requests.Load();got!=0 {
+		t.Fatalf("Transmission requests=%d want 0 for Normal-only Tracker",got)
 	}
 }
 
