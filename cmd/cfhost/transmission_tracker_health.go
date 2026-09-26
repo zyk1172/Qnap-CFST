@@ -660,6 +660,19 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 		return out
 	}
 
+	monitored:=trackerTargetDomains(cfg)
+	hasMonitoredSample:=false
+	for rawDomain:=range samples {
+		domain:=strings.ToLower(strings.TrimSpace(rawDomain))
+		if monitored[domain] {
+			hasMonitoredSample=true
+			break
+		}
+	}
+	if !hasMonitoredSample {
+		return out
+	}
+
 	// Runtime health is deliberately uncapped. maxTrackerLookups=200 remains
 	// limited to sample discovery; health/keepalive must see every active seed.
 	timeout := 60 * time.Second
@@ -688,7 +701,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 
 	for rawDomain := range samples {
 		domain := strings.ToLower(strings.TrimSpace(rawDomain))
-		if domain == "" {
+		if domain == "" || !monitored[domain] {
 			continue
 		}
 		if only != nil && !only[domain] {
