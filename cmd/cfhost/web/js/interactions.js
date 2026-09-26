@@ -215,8 +215,18 @@ async function saveDomain(indexToken) {
     enabled: form.elements.enabled.checked,
   }
   const next = deepClone(store.config)
-  if (indexToken === 'new') next.domains.push(domain)
-  else next.domains[Number(indexToken)] = domain
+  if (indexToken === 'new') {
+    next.domains.push(domain)
+  } else {
+    const index = Number(indexToken)
+    const previous = next.domains[index]
+    if (previous && previous.host !== domain.host) {
+      next.domains.forEach(item => {
+        if (item.follow === previous.host) item.follow = domain.host
+      })
+    }
+    next.domains[index] = domain
+  }
   await persistConfig(next)
   closeModal()
   toast('域名已保存', domain.host, 'success')
@@ -226,6 +236,11 @@ async function saveDomain(indexToken) {
 async function deleteDomain(index) {
   const domain = store.config.domains[index]
   if (!domain) return
+  const followers = (store.config.domains || []).filter(item => item.follow === domain.host)
+  if (followers.length) {
+    toast('无法删除', `${domain.host} 正被 ${followers.map(item => item.host).join('、')} 跟随，请先修改这些域名的策略。`, 'error')
+    return
+  }
   if (!await confirmAction('删除域名', `将从 CFHost 配置中移除 ${domain.host}。`, '删除', true)) return
   const next = deepClone(store.config)
   next.domains.splice(index, 1)
