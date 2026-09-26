@@ -17,7 +17,7 @@ CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeed
 ```text
 CFST 找候选
    ↓
-按 latency / bandwidth / normal 策略排序
+按 latency / bandwidth / normal / follow 策略处理
    ↓
 逐域名验证实际可用性
    ↓
@@ -37,10 +37,11 @@ Tracker 可选真实 announce
 - **CFST 优选**：复用 CloudflareSpeedTest 的成熟测速核心。
 - **Smart Repair**：优先验证当前 IP，失效后再尝试缓存候选，必要时才重新跑完整 CFST。
 - **Full Optimize**：显式全局优化；手动执行时重新测速并允许全部域名重选 IP，周期执行默认关闭。
-- **三类选择策略**
+- **四类选择策略**
   - `latency`：验证域名后按 loss → delay → speed
   - `bandwidth`：验证域名后按 loss → speed → delay
   - `normal`：不做 HTTP/Tracker 有效性验证，直接取 CFST 候选中延迟最低的 IP
+  - `follow`：不独立测速或验证，直接复用另一个已有非 follow 域名的当前映射 IP
 - **严格 HTTP 验证**：支持重试、跳转、正文大小、Challenge / 占位页识别。
 - **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
@@ -397,8 +398,6 @@ Transmission 样本种子的真实 tracker_stats
   ↓ 明确连接失败时直接判当前 IP 失效
 CFHost 当前 IP 主动验证
   ↓ 失败
-同站点组已验证 IP
-  ↓ 不可用
 有效期内候选缓存
   ↓ 全失败
 达到 failure threshold + cooldown
@@ -425,7 +424,7 @@ Tracker 缺样本时只为该域名尝试自动发现
   ↓
 先验证当前 IP
   ↓
-失败后尝试同组 IP / 缓存候选
+失败后尝试缓存候选
   ↓
 仍失败则立即刷新一次 CFST
   ↓
@@ -466,7 +465,7 @@ Full Optimize 是明确的**全局重选**操作：
 
 ---
 
-# latency / bandwidth / normal
+# latency / bandwidth / normal / follow
 
 ## latency
 
@@ -508,12 +507,27 @@ delay → loss → speed → IP
 
 - HTTP 域名不发起 HTTP 有效性验证。
 - Tracker 域名不要求测试种子，也不执行真实 announce。
-- 不使用站点组共享 IP 来覆盖最低延迟排序。
 - Smart Repair 有新鲜 CFST 候选时直接应用最低延迟 IP。
 - 如果暂时没有新鲜候选但已有映射，先保留旧映射，不会因为“不验证”而删除 Hosts。
 - Full Optimize 会重新运行 CFST，并直接为 normal 域名应用最低延迟候选。
 
-每个需要验证的 latency / bandwidth 域名默认最多验证 Top 10 候选；normal 不做这一步。
+每个需要验证的 latency / bandwidth 域名默认最多验证 Top 10 候选；normal 与 follow 都不做独立域名验证。
+
+## follow
+
+follow 是显式的“映射跟随”策略，适合多个域名必须始终使用同一个 Cloudflare IP 的场景。
+
+行为：
+
+- 在域名编辑器原“站点组”位置选择一个已有域名作为跟随目标。
+- 只有选择 `follow` 策略时“跟随域名”下拉框才启用；latency / bandwidth / normal 下该字段会被忽略并在保存时清空。
+- 跟随域名不会独立跑 CFST、HTTP 验证、Tracker announce、Transmission 保活或候选选择。
+- Repair / Full Optimize 先处理被跟随的独立域名，再把其最终 IP 原样同步给 follow 域名。
+- 被跟随目标停用或当前没有有效映射时，follow 域名也会进入未解析状态，并移除旧的跟随映射，避免保留错误 IP。
+- 不允许自跟随，也不允许 follow → follow 链式依赖，避免循环和多级状态传播。
+- 删除一个仍被其他域名跟随的目标会被 WebUI 阻止；重命名目标域名时，WebUI 会同步更新引用。
+
+旧配置中的 `group` / 站点组字段不再参与任何映射选择，配置再次保存后会自然移除。
 
 ---
 
