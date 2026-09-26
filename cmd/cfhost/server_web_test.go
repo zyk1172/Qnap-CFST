@@ -343,16 +343,21 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"['站点组', domain.group || '—']",
-		"['Endpoint', domain.endpoint || '/']",
+		"['配置',",
+		"['当前 IP', ip || '—']",
 		"['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label]",
-		"['连续失败', String(streak)]",
+		"['健康记录',",
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("expanded detail is missing %q", want)
 		}
 	}
-	for _, want := range []string{"function httpRuntimePanel(domain)", "最近成功 Code", "最近失败 Code", "无 HTTP 响应"} {
+	for _, removed := range []string{"['站点组',", "['Endpoint',", "['类型 / 策略',", "['最近失败',"} {
+		if strings.Contains(domainsJS, removed) {
+			t.Fatalf("expanded detail must stay compact; obsolete card remains: %q", removed)
+		}
+	}
+	for _, want := range []string{"function httpRuntimePanel(domain)", "最近成功", "最近失败", "无 HTTP 响应"} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("HTTP runtime status UI is missing %q", want)
 		}
@@ -389,19 +394,27 @@ func TestDomainTrackerFilterSortAndRuntimeDetails(t *testing.T) {
 		`data-domain-filter="tracker"`,
 		`store.domainFilter === 'tracker' && domain.mode !== 'tracker'`,
 		`Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')`,
-		`Transmission 域名状态`,
+		`Transmission 状态`,
 		`trackerStatus === 'Working'`,
-		`部分连接失败`,
-		`issues.map(issue =>`,
-		`Transmission 保活只调用 torrent-reannounce`,
-		`403 计为连接失败`,
-		`Repair 排除 IP`,
-		`重新汇报后观察中`,
-		`每次重新汇报后等待 2 分钟`,
-		`最早下次重新汇报`,
+		`部分失败`,
+		`const latestIssue = issues[0]`,
+		`Tracker 连接`,
+		`Repair / 保活`,
+		`最近 Tracker 返回`,
 	} {
 		if !strings.Contains(domainsJS, want) {
 			t.Fatalf("Tracker domain UI is missing %q", want)
+		}
+	}
+	for _, removed := range []string{
+		`扫描范围`,
+		`来源</span><strong>Transmission 活跃种子聚合`,
+		`下次状态检查`,
+		`最早下次重新汇报`,
+		`状态说明`,
+	} {
+		if strings.Contains(domainsJS, removed) {
+			t.Fatalf("Tracker expanded detail must stay concise; obsolete field remains: %q", removed)
 		}
 	}
 	if !strings.Contains(eventsJS, "if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)") {

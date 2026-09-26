@@ -135,7 +135,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			continue
 		}
 		if currentIP!="" {
-			if failure,exists:=downloaderFailures[d.Host]; exists && downloaderFailureIsNewer(failure,health[d.Host].LastSuccess) {
+			if failure,exists:=downloaderFailures[d.Host]; exists && (failure.Hard || downloaderFailureIsNewer(failure,health[d.Host].LastSuccess)) {
 				detail:="downloader reported tracker connection failure · "+failure.Detail
 				statuses[d.Host]="current failed · "+detail
 				a.recordTrackerSampleTest(cfg,d,false,detail)

@@ -16,6 +16,7 @@ type downloaderTrackerFailure struct {
 	Detail           string
 	LastAnnounceTime int64
 	RejectedIP       string
+	Hard             bool
 }
 
 type transmissionTrackerStat struct {
@@ -51,16 +52,18 @@ var (
 )
 
 type transmissionDomainHealth struct {
-	Matched            int
-	Evaluated          int
-	Connected          int
-	Working            int
-	BusinessErrors     int
-	ConnectionFailures int
-	Waiting            int
-	ConnectedPercent   float64
-	FailureTorrentIDs  []int
-	LatestFailure      downloaderTrackerFailure
+	Matched                int
+	Evaluated              int
+	Connected              int
+	Working                int
+	BusinessErrors         int
+	ConnectionFailures     int
+	ForbiddenFailures      int
+	Waiting                int
+	ConnectedPercent       float64
+	FailureTorrentIDs      []int
+	LatestFailure          downloaderTrackerFailure
+	LatestForbiddenFailure downloaderTrackerFailure
 }
 
 type transmissionTrackerRuntimeIssue struct {
@@ -232,15 +235,17 @@ func parseTransmissionTrackerStats(body []byte, modern bool) ([]transmissionTrac
 
 func trackerFailureIndicatesForbidden(reason string) bool {
 	normalized := strings.ToLower(strings.Join(strings.Fields(reason), " "))
-	patterns := []string{
-		"http 403",
-		"http response code 403",
-		"response code 403",
-		"status 403",
-		"403 forbidden",
-	}
-	for _, pattern := range patterns {
-		if strings.Contains(normalized, pattern) {
+	// Transmission has emitted several forms over time, including:
+	// "Tracker gave HTTP response code 403", "HTTP 403 Forbidden", and
+	// "Tracker HTTP response 403 (Forbidden)". Treat a standalone 403 token as
+	// a hard Tracker connection failure regardless of surrounding wording.
+	for i := 0; i+3 <= len(normalized); i++ {
+		if normalized[i:i+3] != "403" {
+			continue
+		}
+		beforeDigit := i > 0 && normalized[i-1] >= '0' && normalized[i-1] <= '9'
+		afterDigit := i+3 < len(normalized) && normalized[i+3] >= '0' && normalized[i+3] <= '9'
+		if !beforeDigit && !afterDigit {
 			return true
 		}
 	}
@@ -315,12 +320,20 @@ func transmissionDomainHealthForTarget(rows []transmissionTrackerStatsRow, targe
 			if reason == "" {
 				reason = "tracker announce timed out"
 			}
-			if stat.LastAnnounceTime >= out.LatestFailure.LastAnnounceTime {
-				out.LatestFailure = downloaderTrackerFailure{
-					Source:           "Transmission",
-					Detail:           "Transmission · " + reason,
-					LastAnnounceTime: stat.LastAnnounceTime,
+			failure := downloaderTrackerFailure{
+				Source:           "Transmission",
+				Detail:           "Transmission · " + reason,
+				LastAnnounceTime: stat.LastAnnounceTime,
+			}
+			if trackerFailureIndicatesForbidden(reason) {
+				out.ForbiddenFailures++
+				failure.Hard = true
+				if stat.LastAnnounceTime >= out.LatestForbiddenFailure.LastAnnounceTime {
+					out.LatestForbiddenFailure = failure
 				}
+			}
+			if stat.LastAnnounceTime >= out.LatestFailure.LastAnnounceTime {
+				out.LatestFailure = failure
 			}
 		default:
 			out.Waiting++
@@ -334,6 +347,11 @@ func transmissionDomainHealthForTarget(rows []transmissionTrackerStatsRow, targe
 }
 
 func trackerDomainHealthAcceptable(h transmissionDomainHealth) bool {
+	// HTTP 403 is never a tolerable residual failure: it must not contribute to
+	// keepalive health or be hidden by the 90% / five-failure grace window.
+	if h.ForbiddenFailures > 0 {
+		return false
+	}
 	if h.ConnectionFailures == 0 {
 		return true
 	}
@@ -341,6 +359,17 @@ func trackerDomainHealthAcceptable(h transmissionDomainHealth) bool {
 		return true
 	}
 	return h.ConnectedPercent >= trackerKeepaliveMinConnectedPct && h.ConnectionFailures <= trackerKeepaliveMaxFailures
+}
+
+func trackerFailurePredatesMappingChange(state TrackerKeepaliveRuntime, failure downloaderTrackerFailure) bool {
+	if !failure.Hard || failure.LastAnnounceTime <= 0 || strings.TrimSpace(state.MappingChangedAt) == "" {
+		return false
+	}
+	changedAt, err := time.Parse(time.RFC3339, state.MappingChangedAt)
+	if err != nil {
+		return false
+	}
+	return !time.Unix(failure.LastAnnounceTime, 0).After(changedAt)
 }
 
 func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, target string, activeTorrents, checkedTorrents int, truncated bool) transmissionTrackerRuntime {
@@ -714,13 +743,24 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 
 		state := states[domain]
 		currentIP := currentMappings[domain]
-		if state.RejectedIP != "" && currentIP != "" && currentIP != state.RejectedIP {
+		mappingChanged := state.MappingIP != "" && currentIP != "" && currentIP != state.MappingIP
+		rejectionCleared := state.RejectedIP != "" && currentIP != "" && currentIP != state.RejectedIP
+		if mappingChanged || rejectionCleared {
+			oldIP := state.MappingIP
+			if oldIP == "" {
+				oldIP = state.RejectedIP
+			}
 			state = TrackerKeepaliveRuntime{
-				SampleTestAt: sampleTestAt,
-				Status:       "healthy",
-				LastEvent:    fmt.Sprintf("mapping changed from rejected %s to %s; keepalive rejection cleared", state.RejectedIP, currentIP),
+				SampleTestAt:     sampleTestAt,
+				MappingIP:        currentIP,
+				MappingChangedAt: now.Format(time.RFC3339),
+				Status:           "healthy",
+				LastEvent:        fmt.Sprintf("mapping changed from %s to %s; stale Transmission results before the switch will be ignored", oldIP, currentIP),
 			}
 		} else {
+			if state.MappingIP == "" {
+				state.MappingIP = currentIP
+			}
 			// Re-testing the same sample updates LastTest on every verification.
 			// That timestamp must not reset a 1/3, 2/3, 3/3 keepalive cycle.
 			state.SampleTestAt = sampleTestAt
@@ -730,6 +770,42 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 		state.ConnectedTorrents = health.Connected
 		state.ConnectionFailures = health.ConnectionFailures
 		state.ConnectedPercent = health.ConnectedPercent
+
+		if health.ForbiddenFailures > 0 {
+			failure := health.LatestForbiddenFailure
+			if trackerFailurePredatesMappingChange(state, failure) {
+				state.Status = "observing"
+				state.LastEvent = fmt.Sprintf("ignoring stale HTTP 403 from before mapping switch · waiting for a fresh announce on %s", currentIP)
+				states[domain] = state
+				continue
+			}
+			state.Attempts = 0
+			state.Status = "repair"
+			state.NextCheck = ""
+			state.NextReannounce = ""
+			if currentIP != "" {
+				state.RejectedIP = currentIP
+				state.RejectedAt = now.Format(time.RFC3339)
+			}
+			state.LastEvent = fmt.Sprintf("HTTP 403 is a hard Tracker failure · %d forbidden announce(s) · rejected IP %s", health.ForbiddenFailures, state.RejectedIP)
+			states[domain] = state
+			if failure.Detail == "" {
+				failure = downloaderTrackerFailure{
+					Source:           "Transmission 403",
+					Detail:           "Transmission · Tracker HTTP 403",
+					LastAnnounceTime: now.Unix(),
+					Hard:             true,
+				}
+			}
+			failure.Source = "Transmission 403"
+			failure.Hard = true
+			failure.RejectedIP = state.RejectedIP
+			if failure.LastAnnounceTime == 0 {
+				failure.LastAnnounceTime = now.Unix()
+			}
+			out[domain] = failure
+			continue
+		}
 
 		if state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
 			state.LastEvent=fmt.Sprintf("waiting 2-minute post-reannounce observation window · current snapshot connected %.1f%% · failures %d (not evaluated yet)",health.ConnectedPercent,health.ConnectionFailures)

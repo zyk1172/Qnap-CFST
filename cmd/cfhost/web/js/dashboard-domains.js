@@ -194,15 +194,15 @@ function trackerRuntimePanel(domain) {
   if (!entry || entry.loading) {
     return `
       <div class="tracker-runtime-panel">
-        <div class="tracker-runtime-head"><span>Transmission 域名状态</span><span class="chip info"><span class="dot"></span>读取中</span></div>
-        <div class="domain-detail-wide"><span>实时状态</span><strong>正在扫描 Transmission 当前等待做种/做种中的任务并聚合此 Tracker 域名…</strong></div>
+        <div class="tracker-runtime-head"><span>Transmission 状态</span><span class="chip info"><span class="dot"></span>读取中</span></div>
+        <div class="domain-detail-wide"><span>实时状态</span><strong>正在读取此 Tracker 的 Transmission 汇报状态…</strong></div>
       </div>
     `
   }
   if (entry.error || !entry.data) {
     return `
       <div class="tracker-runtime-panel">
-        <div class="tracker-runtime-head"><span>Transmission 域名状态</span><span class="chip warning"><span class="dot"></span>不可用</span></div>
+        <div class="tracker-runtime-head"><span>Transmission 状态</span><span class="chip warning"><span class="dot"></span>不可用</span></div>
         <div class="domain-detail-wide"><span>状态读取</span><strong>${esc(entry.error || '没有可用状态')}</strong></div>
       </div>
     `
@@ -211,17 +211,15 @@ function trackerRuntimePanel(domain) {
   const runtime = entry.data
   const trackerStatus = runtime.trackerStatus || 'Waiting'
   const statusLabel = ({
-    Working: 'Working',
+    Working: '正常',
     Connected: '已连接（业务返回）',
-    Partial: '部分连接失败',
-    Error: 'Error',
-    Timeout: 'Timeout',
-    Waiting: 'Waiting',
+    Partial: '部分失败',
+    Error: '连接失败',
+    Timeout: '超时',
+    Waiting: '等待汇报',
     NoActive: '无活跃做种',
   })[trackerStatus] || trackerStatus
   const matched = Number(runtime.matchedTorrents) || 0
-  const working = Number(runtime.workingTorrents) || 0
-  const businessErrors = Number(runtime.businessErrorTorrents) || 0
   const connected = Number(runtime.connectedTorrents) || 0
   const errors = Number(runtime.connectionFailures) || 0
   const connectedPercent = Number(runtime.connectedPercent) || 0
@@ -233,70 +231,43 @@ function trackerRuntimePanel(domain) {
       : 'danger'
   const seeding = Number(runtime.seedingTorrents) || 0
   const queued = Number(runtime.queuedTorrents) || 0
-  const checked = Number(runtime.checkedTorrents) || 0
-  const active = Number(runtime.activeTorrents) || 0
   const issues = Array.isArray(runtime.issues) ? runtime.issues : []
-  const scanText = runtime.truncated
-    ? `${checked} / ${active} 个活跃任务（扫描被限制，结果可能不完整）`
-    : `${checked} / ${active} 个活跃任务（全量）`
+  const latestIssue = issues[0]
   const keepalive = runtime.keepalive || {}
   const keepaliveLabel = ({
     healthy: '健康',
-    acceptable: '少量失败，暂不处理',
-    waiting: '等待下次低频汇报',
-    observing: '重新汇报后观察中',
+    acceptable: '少量失败',
+    waiting: '等待重报',
+    observing: '观察中',
     observed: '观察完成',
-    'reannounce-due': '准备重新汇报',
-    'reannounce-error': '重新汇报 RPC 失败',
+    'reannounce-due': '准备重报',
+    'reannounce-error': '重报失败',
     repair: '需要 Repair',
     idle: '空闲',
   })[keepalive.status] || (keepalive.status || '未触发')
-  const keepaliveNext = keepalive.nextCheck ? fmtTime(keepalive.nextCheck) : '—'
-  const nextReannounce = keepalive.nextReannounce ? fmtTime(keepalive.nextReannounce) : '—'
   const rejectedIP = keepalive.rejectedIP || ''
+  const repairText = rejectedIP
+    ? `${keepaliveLabel} · 排除 ${rejectedIP}`
+    : `${keepaliveLabel} · ${Number(keepalive.attempts) || 0}/3`
 
   return `
     <div class="tracker-runtime-panel">
       <div class="tracker-runtime-head">
-        <span>Transmission 域名状态</span>
+        <span>Transmission 状态</span>
         <div class="domain-compact-chips">
           <span class="chip ${trackerVariant}"><span class="dot"></span>${esc(statusLabel)}</span>
-          <span class="chip ${errors ? (thresholdHealthy ? 'warning' : 'danger') : matched ? 'success' : 'warning'}">${errors ? `连接失败 ${errors}` : `匹配 ${matched}`}</span>
+          <span class="chip ${errors ? 'danger' : matched ? 'success' : 'warning'}">${errors ? `失败 ${errors}` : `匹配 ${matched}`}</span>
         </div>
       </div>
       <div class="domain-detail-grid tracker-runtime-grid">
-        <div class="domain-detail-item"><span>匹配此 Tracker</span><strong>${matched} 个任务</strong></div>
-        <div class="domain-detail-item"><span>做种状态</span><strong>做种中 ${seeding} · 等待做种 ${queued}</strong></div>
-        <div class="domain-detail-item"><span>Tracker 连接</span><strong class="${trackerVariant}">连接 ${connected} · 失败 ${errors} · ${connectedPercent.toFixed(1)}%</strong></div>
-        <div class="domain-detail-item"><span>业务返回</span><strong>Working ${working} · PT业务错误 ${businessErrors}</strong></div>
-        <div class="domain-detail-item"><span>扫描范围</span><strong>${esc(scanText)}</strong></div>
+        <div class="domain-detail-item"><span>Tracker 连接</span><strong class="${trackerVariant}">匹配 ${matched} · 连接 ${connected} · 失败 ${errors} · ${connectedPercent.toFixed(1)}%</strong></div>
+        <div class="domain-detail-item"><span>做种</span><strong>做种 ${seeding} · 等待 ${queued}</strong></div>
         <div class="domain-detail-item"><span>最近 Announce</span><strong>${esc(trackerUnixTime(runtime.lastAnnounceTime))}</strong></div>
-        <div class="domain-detail-item"><span>下次 Announce</span><strong>${esc(trackerUnixTime(runtime.nextAnnounceTime))}</strong></div>
-        <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
-        <div class="domain-detail-item"><span>来源</span><strong>Transmission 活跃种子聚合</strong></div>
-        <div class="domain-detail-item"><span>做种保活</span><strong>${esc(keepaliveLabel)} · ${Number(keepalive.attempts) || 0}/3</strong></div>
-        <div class="domain-detail-item"><span>下次状态检查</span><strong>${esc(keepaliveNext)}</strong></div>
-        <div class="domain-detail-item"><span>最早下次重新汇报</span><strong>${esc(nextReannounce)}</strong></div>
-        <div class="domain-detail-item"><span>Repair 排除 IP</span><strong>${rejectedIP ? esc(rejectedIP) : '—'}</strong></div>
+        <div class="domain-detail-item"><span>Repair / 保活</span><strong class="${errors ? 'danger' : ''}">${esc(repairText)}</strong></div>
       </div>
-      ${issues.length ? `
-        <div class="tracker-issue-list">
-          ${issues.map(issue => `
-            <div class="domain-detail-wide tracker-result danger">
-              <span>${issue.timedOut ? 'Tracker Timeout' : 'Tracker Error'} · ${esc(trackerUnixTime(issue.lastAnnounceTime))}</span>
-              <strong>${esc(issue.result || 'Tracker announce failed')}</strong>
-            </div>
-          `).join('')}
-        </div>
-      ` : `
-        <div class="domain-detail-wide tracker-result ${trackerVariant}">
-          <span>最近 Tracker 返回</span>
-          <strong>${esc(runtime.lastAnnounceResult || (trackerStatus === 'Working' ? 'Working' : statusLabel))}</strong>
-        </div>
-      `}
-      <div class="domain-detail-wide tracker-runtime-note">
-        <span>状态说明</span>
-        <strong>CFHost 探测验证候选 IP；Transmission 保活只调用 torrent-reannounce 重新向 Tracker 汇报，不做 torrent verify。每次重新汇报后等待 2 分钟再读取新状态，两次重新汇报至少间隔 30 分钟。403 计为连接失败。连接率 ≥90% 且连接失败 ≤5 时暂不触发 Repair；保活耗尽的旧 IP 会持续排除，直到成功切换映射。</strong>
+      <div class="domain-detail-wide tracker-result ${latestIssue ? 'danger' : trackerVariant}">
+        <span>最近 Tracker 返回</span>
+        <strong>${esc(latestIssue?.result || runtime.lastAnnounceResult || statusLabel)}</strong>
       </div>
     </div>
   `
@@ -356,19 +327,13 @@ function httpRuntimePanel(domain) {
       </div>
       <div class="domain-detail-grid tracker-runtime-grid">
         <div class="domain-detail-item"><span>当前探测</span><strong class="${variant}">${esc(currentLabel)}</strong></div>
-        <div class="domain-detail-item"><span>最近成功 Code</span><strong>${esc(successLabel)}</strong></div>
-        <div class="domain-detail-item"><span>最近失败 Code</span><strong>${esc(failureLabel)}</strong></div>
+        <div class="domain-detail-item"><span>最近成功</span><strong>${esc(successLabel)}</strong></div>
+        <div class="domain-detail-item"><span>最近失败</span><strong>${esc(failureLabel)}</strong></div>
         <div class="domain-detail-item"><span>最近检查</span><strong>${esc(fmtTime(runtime.checkedAt))}</strong></div>
-        <div class="domain-detail-item"><span>Endpoint</span><strong class="mono">${esc(domain.endpoint || '/')}</strong></div>
-        <div class="domain-detail-item"><span>当前映射 IP</span><strong class="mono">${esc((store.state?.mappings || {})[domain.host] || '—')}</strong></div>
       </div>
       <div class="domain-detail-wide tracker-result ${variant}">
         <span>HTTP 探测详情</span>
         <strong>${esc(runtime.detail || (reachable ? 'HTTP connectivity verified' : 'HTTP connectivity failed'))}</strong>
-      </div>
-      <div class="domain-detail-wide tracker-runtime-note">
-        <span>状态说明</span>
-        <strong>HTTP 403、421、451 按不可用处理；408、425、429 和 5xx 按临时失败处理。网络、TLS 或超时导致没有收到 HTTP 响应时显示“无 HTTP 响应”。</strong>
       </div>
     </div>
   `
@@ -412,21 +377,16 @@ function domainRowsHTML(domains, filtered) {
     const modeLabel = domain.mode === 'tracker' ? 'TRK' : 'HTTP'
     const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : 'LAT'
     const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'
-    const currentStatus = statuses[domain.host] || (ip ? '映射可用' : '等待验证')
     const sampleCompact = domain.mode === 'tracker'
       ? `<span class="chip compact ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span>`
       : httpProbe.available
         ? `<span class="chip compact ${httpProbe.variant}"><span class="dot"></span>${esc(httpProbe.label)}</span>`
         : ''
     const detailItems = [
-      ['站点组', domain.group || '—'],
-      ['Endpoint', domain.endpoint || '/'],
-      ['类型 / 策略', `${domain.mode.toUpperCase()} · ${domain.class}`],
+      ['配置', `${domain.group || '—'} · ${domain.endpoint || '/'} · ${domain.mode.toUpperCase()} / ${domain.class}`],
       ['当前 IP', ip || '—'],
       ['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label],
-      ['连续失败', String(streak)],
-      ['最近成功', domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'],
-      ['最近失败', domainHealth.lastFailure ? fmtTime(domainHealth.lastFailure) : '—'],
+      ['健康记录', `连续失败 ${streak} · 最近成功 ${domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'}`],
     ]
 
     return `
@@ -469,10 +429,6 @@ function domainRowsHTML(domains, filtered) {
               <div class="domain-detail-wide">
                 <span>CFHost 探测详情</span>
                 <strong>${esc(domain.mode === 'tracker' ? (sample.detail || sample.label) : (httpProbe.detail || '尚未执行 HTTP 探测'))}</strong>
-              </div>
-              <div class="domain-detail-wide">
-                <span>最近状态</span>
-                <strong>${esc(currentStatus)}</strong>
               </div>
               ${httpRuntimePanel(domain)}
               ${trackerRuntimePanel(domain)}

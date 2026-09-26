@@ -232,6 +232,11 @@ func evaluateTrackerResponse(body []byte) trackerProbeVerdict {
 // prove that the HTTP endpoint answered, but not that this candidate can reach
 // the Tracker service, so they must remain candidate failures.
 func trackerFailureIndicatesUnreachable(reason string) bool {
+	// A 403 is a hard failure everywhere, including a syntactically valid
+	// bencoded failure dictionary. It must never become "candidate reachable".
+	if trackerFailureIndicatesForbidden(reason) {
+		return true
+	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(reason), " "))
 	patterns := []string{
 		"could not connect to track",

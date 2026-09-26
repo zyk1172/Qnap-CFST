@@ -132,6 +132,7 @@ func TestEvaluateTrackerResponseTreatsTrackerErrorsAsReachable(t *testing.T) {
 		{"PTT anti-abuse error still proves connectivity", bencodeFailure("PTT:多IP汇报同一资源，等缓存过期或修改qb高级里的网络接口"), true, false},
 		{"missing peer id still proves connectivity", bencodeFailure("Missing key peer_id"), true, false},
 		{"even IP-ban business error proves tracker connectivity", bencodeFailure("your ip is banned"), true, false},
+		{"403 failure dictionary is unreachable", bencodeFailure("Tracker HTTP response 403 (Forbidden)"), false, false},
 		{"upstream tracker connect failure is unreachable", bencodeFailure("Could not connect to tracker"), false, false},
 		{"truncated connect wording is unreachable", bencodeFailure("Could not connect to track"), false, false},
 		{"failed-to-connect wording is unreachable", bencodeFailure("Failed to connect to tracker"), false, false},
