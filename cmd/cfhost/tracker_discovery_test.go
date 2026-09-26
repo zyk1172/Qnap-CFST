@@ -511,6 +511,9 @@ func TestTransmissionTrackerStatusLabelErrors(t *testing.T) {
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Tracker gave HTTP response code 403"}); got != "Disconnected" {
 		t.Fatalf("HTTP 403 must be treated as a failed connection for keepalive, label=%q", got)
 	}
+	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceResult:"Tracker HTTP response 403 (Forbidden)"}); got != "Disconnected" {
+		t.Fatalf("Transmission's current 403 wording must be treated as disconnected, label=%q", got)
+	}
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{HasAnnounced:true, LastAnnounceSucceeded:true, LastAnnounceResult:"HTTP 403 Forbidden"}); got != "Disconnected" {
 		t.Fatalf("HTTP 403 must override a succeeded flag, label=%q", got)
 	}
@@ -519,6 +522,31 @@ func TestTransmissionTrackerStatusLabelErrors(t *testing.T) {
 	}
 	if got := transmissionTrackerStatusLabel(transmissionTrackerStat{}); got != "Waiting" {
 		t.Fatalf("waiting label=%q", got)
+	}
+}
+
+
+func TestTransmissionHTTP403NeverCountsAsConnected(t *testing.T) {
+	rows := make([]transmissionTrackerStatsRow, 0, 56)
+	for i := 1; i <= 56; i++ {
+		rows = append(rows, transmissionTrackerStatsRow{
+			ID: i,
+			Status: 6,
+			TrackerStats: []transmissionTrackerStat{{
+				Announce: "https://tracker.hdtime.org/announce.php",
+				HasAnnounced: true,
+				LastAnnounceResult: "Tracker HTTP response 403 (Forbidden)",
+				LastAnnounceTime: int64(100 + i),
+			}},
+		})
+	}
+	health := transmissionDomainHealthForTarget(rows, "tracker.hdtime.org")
+	if health.Connected != 0 || health.ConnectionFailures != 56 || health.ForbiddenFailures != 56 || health.ConnectedPercent != 0 {
+		t.Fatalf("403 rows must be 0 connected / 56 failed, got %#v", health)
+	}
+	runtime := aggregateTransmissionTrackerRuntime(rows, "tracker.hdtime.org", 56, 56, false)
+	if runtime.TrackerStatus != "Error" || runtime.ConnectedTorrents != 0 || runtime.ConnectionFailures != 56 {
+		t.Fatalf("runtime must surface 403 as connection failure, got %#v", runtime)
 	}
 }
 
@@ -534,6 +562,19 @@ func TestDownloaderTrackerFailureStalenessGuard(t *testing.T) {
 	}
 }
 
+
+func TestHard403PredatingMappingChangeIsIgnored(t *testing.T) {
+	state := TrackerKeepaliveRuntime{MappingChangedAt: time.Unix(200, 0).UTC().Format(time.RFC3339)}
+	oldFailure := downloaderTrackerFailure{Hard:true, LastAnnounceTime:199}
+	if !trackerFailurePredatesMappingChange(state, oldFailure) {
+		t.Fatal("403 recorded before a mapping switch must be ignored as stale")
+	}
+	newFailure := downloaderTrackerFailure{Hard:true, LastAnnounceTime:201}
+	if trackerFailurePredatesMappingChange(state, newFailure) {
+		t.Fatal("403 recorded after a mapping switch must remain a hard failure")
+	}
+}
+
 func TestTrackerKeepaliveThresholdRequiresPercentAndAbsoluteLimit(t *testing.T) {
 	cases := []struct{
 		name string
@@ -544,6 +585,7 @@ func TestTrackerKeepaliveThresholdRequiresPercentAndAbsoluteLimit(t *testing.T) 
 		{"above-ninety-six-failures", transmissionDomainHealth{Evaluated:100, Connected:94, ConnectionFailures:6, ConnectedPercent:94}, false},
 		{"below-ninety", transmissionDomainHealth{Evaluated:10, Connected:8, ConnectionFailures:2, ConnectedPercent:80}, false},
 		{"no-failures", transmissionDomainHealth{Evaluated:10, Connected:10, ConnectedPercent:100}, true},
+		{"single-403-is-never-tolerated", transmissionDomainHealth{Evaluated:100, Connected:99, ConnectionFailures:1, ForbiddenFailures:1, ConnectedPercent:99}, false},
 	}
 	for _, tc := range cases {
 		if got := trackerDomainHealthAcceptable(tc.health); got != tc.want {
