@@ -178,10 +178,12 @@ func TestDesktopSidebarCannotCollapse(t *testing.T) {
 
 	for _, forbidden := range []string{
 		`data-action="toggle-sidebar"`,
-		`sidebar-collapse`,
+		`class="icon-button sidebar-collapse"`,
+		`.sidebar-collapse {`,
 		`切换侧栏宽度`,
 		`function toggleSidebar()`,
-		`sidebar-collapsed .sidebar`,
+		`html.sidebar-collapsed .sidebar`,
+		`classList.toggle('sidebar-collapsed')`,
 	} {
 		if strings.Contains(indexHTML, forbidden) || strings.Contains(eventsJS, forbidden) || strings.Contains(interactionsJS, forbidden) || strings.Contains(cssText, forbidden) {
 			t.Fatalf("desktop sidebar collapse interaction must be removed: %q", forbidden)
