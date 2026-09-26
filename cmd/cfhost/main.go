@@ -206,7 +206,10 @@ func (a *App) startJob(kind string) bool {
 
 	go func(){
 		started:=time.Now(); cfg:=a.snapshotConfig()
-		ctx,cancel:=context.WithTimeout(context.Background(),time.Duration(cfg.CFST.RunTimeoutMinutes)*time.Minute); defer cancel()
+		// Jobs are not bounded by the CFST timeout. Repair/optimize must be able
+		// to finish their finite verification/retry work even when CFST itself
+		// reaches its own timeout.
+		ctx:=context.Background()
 		a.appendLog("%s started",kind)
 		err:=a.runJob(ctx,kind,cfg)
 		finished:=time.Now(); now:=finished.Format(time.RFC3339)
