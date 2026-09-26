@@ -1,6 +1,14 @@
-# CFHost
+<p align="center">
+  <img src="cmd/cfhost/web/assets/cfhost-logo.png" alt="CFHost Logo" width="180">
+</p>
 
-**面向 QNAP / NAS 的 Cloudflare 优选、域名验证与 Hosts 自动管理服务。**
+<h1 align="center">CFHost</h1>
+
+<p align="center"><strong>面向 QNAP / NAS 的 Cloudflare 优选、域名验证与 Hosts 自动管理服务。</strong></p>
+
+<p align="center">
+  <code>QNAP / NAS</code> · <code>Cloudflare 优选</code> · <code>Smart Repair</code> · <code>Tracker announce</code> · <code>Hosts 管理</code>
+</p>
 
 CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的测速核心，为 NAS 场景增加 WebUI、Smart Repair、Full Optimize、Tracker 真实 announce、宿主机 Hosts 管理、运行历史和 GitHub 映射同步。
 
@@ -49,6 +57,7 @@ Tracker 可选真实 announce
 - **旧版本迁移**：可导入旧 CF-YX Marker 和 `legacy-hosts-map.tsv`。
 - **GitHub 原子同步**：一次 commit 同时发布 `hosts-map.tsv` 和 `status.json`。
 - **运行历史与日志**：保存最近任务、耗时、候选数量、映射变化和错误信息。
+- **统一品牌资源**：浏览器标签页、启动画面、左侧栏与 README 共用项目图标，保持 WebUI 与项目主页视觉一致。
 - **MoviePilot V3 风格 WebUI**
   - Dashboard
   - 域名管理
@@ -589,6 +598,14 @@ CFHost 服务：
 ```text
 cmd/cfhost/
 ```
+
+WebUI 品牌资源：
+
+```text
+cmd/cfhost/web/assets/cfhost-logo.png
+```
+
+该图标同时用于浏览器标签页、启动画面、左侧品牌区与本 README。
 
 镜像中包含两个程序：
 
