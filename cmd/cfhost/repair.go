@@ -166,6 +166,30 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		pending=append(pending,pendingDomain{d,currentIP,refreshable})
 	}
 
+	// Healthy fast-path: once all configured domains have passed their current
+	// mapping/runtime checks, there is nothing to repair. Do not enter cached
+	// candidate verification or CFST refresh logic.
+	if len(pending)==0 {
+		finalNow:=time.Now()
+		configured:=make(map[string]bool)
+		for _,d:=range cfg.Domains {
+			if !d.Enabled { continue }
+			configured[d.Host]=true
+			h:=health[d.Host]
+			h.FailureStreak=0
+			h.LastSuccess=finalNow.Format(time.RFC3339)
+			health[d.Host]=h
+		}
+		for host:=range health {
+			if !configured[host] { delete(health,host) }
+		}
+		a.setJobProgress("应用结果", fmt.Sprintf("全部健康 · 提交 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
+		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",false);err!=nil{return err}
+		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · 全部健康 · %d 个映射", len(mappings)))
+		a.appendLog("repair: all configured domains healthy; candidate verification and CFST refresh skipped")
+		return nil
+	}
+
 	forceRuntimeRefresh:=false
 	for _,p:=range pending {
 		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
