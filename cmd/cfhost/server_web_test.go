@@ -19,6 +19,8 @@ func TestWebAssetsEmbedded(t *testing.T) {
 		"web/js/settings.js",
 		"web/js/interactions.js",
 		"web/js/events.js",
+		"web/assets/cfhost-logo.svg",
+		"web/assets/cfhost-logo.png",
 	} {
 		content, err := webAssets.ReadFile(name)
 		if err != nil {
@@ -47,6 +49,7 @@ func TestRoutesServeWebUI(t *testing.T) {
 		{"/", "text/html", "CFHOST"},
 		{"/css/theme.css", "text/css", "--primary: #8d51f9"},
 		{"/js/core.js", "javascript", "PAGE_META"},
+		{"/assets/cfhost-logo.svg", "image/svg+xml", "<svg"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
