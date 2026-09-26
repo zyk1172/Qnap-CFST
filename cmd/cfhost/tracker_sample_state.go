@@ -121,7 +121,7 @@ func (a *App) markTrackerSamplesPending(domains []string) {
 }
 
 func (a *App) recordTrackerSampleTest(cfg Config, d Domain, ok bool, detail string) {
-	if d.Mode != "tracker" || d.Class == "normal" || !cfg.Tracker.RealAnnounce {
+	if d.Mode != "tracker" || !cfg.Tracker.RealAnnounce {
 		return
 	}
 	a.mu.Lock()
@@ -141,7 +141,7 @@ func (a *App) recordTrackerSampleTest(cfg Config, d Domain, ok bool, detail stri
 func (a *App) verifyDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
 	ok, detail := verifyConfiguredDomain(ctx, d, ip, cfg, samples)
 	a.recordHTTPProbe(d, ok, detail)
-	if d.Mode == "tracker" && d.Class != "normal" && cfg.Tracker.RealAnnounce {
+	if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 		if detail == "tracker sample missing" {
 			a.mu.Lock()
 			st := a.state.TrackerSamples[d.Host]
