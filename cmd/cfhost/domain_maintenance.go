@@ -252,8 +252,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 	go func() {
 		started := time.Now()
 		cfg := a.snapshotConfig()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.CFST.RunTimeoutMinutes)*time.Minute)
-		defer cancel()
+		ctx := context.Background()
 
 		a.appendLog("maintain started: %s", d.Host)
 		err := a.runDomainMaintenance(ctx, cfg, d.Host)
