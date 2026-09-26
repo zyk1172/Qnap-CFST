@@ -84,8 +84,14 @@ func loadTrackerSamples(path string) (map[string]TrackerSample, error) {
 	}
 	return out, nil
 }
+func normalModeSkipsVerification(d Domain) bool {
+	return d.Class == "normal"
+}
+
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
-	if d.Class == "normal" {
+	// Normal is an explicit no-verification strategy for every protocol,
+	// including Tracker domains.
+	if normalModeSkipsVerification(d) {
 		return true, "verification skipped · normal"
 	}
 	if d.Mode != "tracker" {

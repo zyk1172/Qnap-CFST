@@ -197,20 +197,33 @@ func buildCFSTArgs(cfg Config, ipFile, resultPath string, degraded bool) []strin
 	return args
 }
 
+func cfstRunTimeout(cfg Config) time.Duration {
+	timeout := time.Duration(cfg.CFST.RunTimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	return timeout
+}
+
 func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
+	// RunTimeoutMinutes belongs to CFST only. Callers such as Repair and
+	// Optimize keep their own lifetime and continue after a CFST timeout.
+	cfstCtx, cancel := context.WithTimeout(ctx, cfstRunTimeout(cfg))
+	defer cancel()
+
 	now := time.Now()
 	degraded, until := a.rateLimitMode(now, cfg)
 	if degraded {
 		a.appendLog("CFST rate-limit cooldown active until %s; using degraded probe (%.2f MB request)", until.Format(time.RFC3339), cfg.CFST.DegradedDownloadMB)
 	}
 
-	candidates, signal, err := a.runCFSTMode(ctx, cfg, degraded)
+	candidates, signal, err := a.runCFSTMode(cfstCtx, cfg, degraded)
 	if signal != nil && cfg.CFST.AdaptiveRateLimit {
 		until = a.recordCFSTRateLimit(time.Now(), cfg, *signal)
 		a.appendLog("CFST rate limit detected: HTTP %d · retry-after=%q · until=%s", signal.StatusCode, signal.RetryAfter, until.Format(time.RFC3339))
 		if !degraded {
 			a.appendLog("CFST switching immediately to degraded probe: count=%d seconds=%d request=%.2f MB", cfg.CFST.DegradedDownloadCount, cfg.CFST.DegradedDownloadSeconds, cfg.CFST.DegradedDownloadMB)
-			fallbackCandidates, fallbackSignal, fallbackErr := a.runCFSTMode(ctx, cfg, true)
+			fallbackCandidates, fallbackSignal, fallbackErr := a.runCFSTMode(cfstCtx, cfg, true)
 			if fallbackSignal != nil {
 				until = a.recordCFSTRateLimit(time.Now(), cfg, *fallbackSignal)
 				a.appendLog("CFST degraded probe also reported rate limit until %s", until.Format(time.RFC3339))

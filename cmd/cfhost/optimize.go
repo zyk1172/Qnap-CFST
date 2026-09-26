@@ -36,7 +36,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		oldIP:=current[d.Host]
 		h:=health[d.Host]
-		if d.Class=="normal" {
+		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(candidates,d,"","",cfg)
 			if len(order)==0 {
 				h.FailureStreak++;h.LastFailure=now;health[d.Host]=h

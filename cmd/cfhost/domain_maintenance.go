@@ -96,7 +96,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return nil
 	}
 
-	if d.Class == "normal" {
+	if normalModeSkipsVerification(d) {
 		candidates := fresh
 		if len(candidates) == 0 {
 			a.appendLog("%s manual maintain: refreshing CFST candidates", d.Host)
@@ -252,8 +252,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 	go func() {
 		started := time.Now()
 		cfg := a.snapshotConfig()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.CFST.RunTimeoutMinutes)*time.Minute)
-		defer cancel()
+		ctx := context.Background()
 
 		a.appendLog("maintain started: %s", d.Host)
 		err := a.runDomainMaintenance(ctx, cfg, d.Host)

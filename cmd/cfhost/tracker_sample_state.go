@@ -55,7 +55,7 @@ func (a *App) refreshTrackerSampleInventory(cfg Config) {
 
 	keep := make(map[string]bool)
 	for _, d := range cfg.Domains {
-		if d.Mode == "tracker" {
+		if d.Mode == "tracker" && d.Class != "normal" {
 			keep[d.Host] = true
 		}
 	}
@@ -76,7 +76,11 @@ func (a *App) updateTrackerSampleInventory(cfg Config, manual, auto map[string]T
 		a.state.TrackerSamples = map[string]TrackerSampleRuntime{}
 	}
 	for _, d := range cfg.Domains {
-		if d.Mode != "tracker" {
+		if d.Mode != "tracker" || d.Class == "normal" {
+			delete(a.state.TrackerSamples, d.Host)
+			if d.Class == "normal" {
+				delete(a.state.TrackerKeepalive, d.Host)
+			}
 			continue
 		}
 		st := a.state.TrackerSamples[d.Host]

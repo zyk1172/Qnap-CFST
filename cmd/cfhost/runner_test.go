@@ -378,6 +378,50 @@ func TestTrackerDiscoverySkipsNormalDomains(t *testing.T) {
 	}
 }
 
+func TestNormalTrackerClearsSampleAndKeepaliveRuntime(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.Domains=[]Domain{
+		{Host:"tracker.normal.example",Class:"normal",Mode:"tracker",Enabled:true},
+		{Host:"tracker.verified.example",Class:"latency",Mode:"tracker",Enabled:true},
+	}
+	a:=&App{state:RuntimeState{
+		TrackerSamples:map[string]TrackerSampleRuntime{
+			"tracker.normal.example":{Available:true,Tested:true,Passed:true},
+			"tracker.verified.example":{Available:true,Tested:true,Passed:true},
+		},
+		TrackerKeepalive:map[string]TrackerKeepaliveRuntime{
+			"tracker.normal.example":{Status:"observing",Attempts:1},
+			"tracker.verified.example":{Status:"healthy"},
+		},
+	}}
+	a.updateTrackerSampleInventory(cfg,nil,nil)
+	if _,ok:=a.state.TrackerSamples["tracker.normal.example"];ok {
+		t.Fatal("Normal Tracker sample runtime must be removed")
+	}
+	if _,ok:=a.state.TrackerKeepalive["tracker.normal.example"];ok {
+		t.Fatal("Normal Tracker keepalive runtime must be removed")
+	}
+	if _,ok:=a.state.TrackerSamples["tracker.verified.example"];!ok {
+		t.Fatal("non-Normal Tracker sample runtime must remain managed")
+	}
+}
+
+func TestCFSTRunTimeoutIsIndependent(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.CFST.RunTimeoutMinutes=10
+	if got:=cfstRunTimeout(cfg);got!=10*time.Minute {
+		t.Fatalf("CFST timeout=%s want 10m",got)
+	}
+	cfg.CFST.RunTimeoutMinutes=0
+	if got:=cfstRunTimeout(cfg);got!=30*time.Minute {
+		t.Fatalf("invalid CFST timeout should fall back to 30m, got %s",got)
+	}
+	parent:=context.Background()
+	if _,ok:=parent.Deadline();ok {
+		t.Fatal("Repair/job parent context must not require a deadline")
+	}
+}
+
 func TestUnresolvedDomainsListsEnabledDomainsWithoutMappings(t *testing.T) {
 	cfg := Config{Domains: []Domain{
 		{Host: "b.example", Enabled: true},

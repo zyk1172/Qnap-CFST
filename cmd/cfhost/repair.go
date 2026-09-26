@@ -64,6 +64,16 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 
 	// Manually managed samples always take precedence over discovered/cache samples.
 	if manual!=nil { mergeTrackerSamples(samples,manual,true) }
+
+	// Normal Tracker domains explicitly opt out of sample/Transmission
+	// monitoring. Ignore stale/manual sample rows for them as well.
+	targets:=trackerTargetDomains(cfg)
+	for host:=range samples {
+		if !targets[host] {
+			delete(samples,host)
+		}
+	}
+
 	a.updateTrackerSampleInventory(cfg,manual,autoSamples)
 	a.markTrackerSamplesPending(discoveredDomains)
 	if len(samples)>0 { a.appendLog("tracker samples ready: %d",len(samples)) }
@@ -97,7 +107,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		currentIP:=current[d.Host]
 
-		if d.Class=="normal" {
+		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(cached,d,"","",cfg)
 			if len(order)>0 {
 				chosen:=order[0]
@@ -166,8 +176,44 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		pending=append(pending,pendingDomain{d,currentIP,refreshable})
 	}
 
+	// Healthy fast-path: once all configured domains have passed their current
+	// mapping/runtime checks, there is nothing to repair. Do not enter cached
+	// candidate verification or CFST refresh logic.
+	if len(pending)==0 {
+		finalNow:=time.Now()
+		configured:=make(map[string]bool)
+		for _,d:=range cfg.Domains {
+			if !d.Enabled { continue }
+			configured[d.Host]=true
+			h:=health[d.Host]
+			h.FailureStreak=0
+			h.LastSuccess=finalNow.Format(time.RFC3339)
+			health[d.Host]=h
+		}
+		for host:=range health {
+			if !configured[host] { delete(health,host) }
+		}
+		a.setJobProgress("应用结果", fmt.Sprintf("全部健康 · 提交 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
+		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",false);err!=nil{return err}
+		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · 全部健康 · %d 个映射", len(mappings)))
+		a.appendLog("repair: all configured domains healthy; candidate verification and CFST refresh skipped")
+		return nil
+	}
+
+	forceRuntimeRefresh:=false
+	for _,p:=range pending {
+		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
+			forceRuntimeRefresh=true
+			break
+		}
+	}
 	a.setJobProgress("验证缓存候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 3, 7, 0, len(pending))
-	pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证缓存候选",3,7)
+	if forceRuntimeRefresh {
+		a.setJobProgress("验证缓存候选", "下载器已确认 Tracker 连接故障，跳过旧候选并优先刷新 CFST", 3, 7, 1, 1)
+		a.appendLog("repair: skipping cached candidate verification after fresh downloader Tracker failure; avoiding stale-candidate churn before CFST refresh")
+	} else {
+		pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证缓存候选",3,7)
+	}
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 	a.setJobProgress("评估刷新", fmt.Sprintf("仍有 %d 个域名待处理", len(pending)), 4, 7, 0, 0)
 	maxProspective:=0; refreshablePending:=0
@@ -184,13 +230,6 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 	bootstrap:=refreshablePending>0 && len(cached)==0 && (len(current)==0 || normalNeedsBootstrap)
 	refreshNow,nextRefresh,backoff:=refreshDecision(now,lastRefresh,maxProspective,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,bootstrap)
-	forceRuntimeRefresh:=false
-	for _,p:=range pending {
-		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
-			forceRuntimeRefresh=true
-			break
-		}
-	}
 	if forceRuntimeRefresh {
 		refreshNow=true
 		nextRefresh=time.Time{}
@@ -211,6 +250,14 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			refreshErr=err
 			a.setJobProgress("CFST 测速", "测速失败 · "+err.Error(), 5, 7, 1, 1)
 			a.appendLog("repair: CFST refresh failed: %v",err)
+			if forceRuntimeRefresh && len(cached)>0 && ctx.Err()==nil {
+				a.setJobProgress("验证新候选", "CFST 未产出新候选，回退验证缓存候选", 6, 7, 0, len(pending))
+				pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证新候选",6,7)
+				if len(pending)==0 {
+					a.appendLog("repair: cached candidate fallback resolved all domains after CFST failure")
+					refreshErr=nil
+				}
+			}
 		} else {
 			a.storeCandidates(newCandidates)
 			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
@@ -286,7 +333,7 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 		}
 		a.setJobDomainProgress(progressStage, progressStep, progressSteps, index+1, len(pending), p.Domain.Host)
 		if !p.Refreshable { remaining=append(remaining,p); continue }
-		if p.Domain.Class=="normal" {
+		if normalModeSkipsVerification(p.Domain) {
 			order:=orderedCandidates(candidates,p.Domain,"","",cfg)
 			if len(order)==0 {
 				statuses[p.Domain.Host]="normal unresolved · no CFST candidate"
