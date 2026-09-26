@@ -44,13 +44,12 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		health:=copyHealth(a.state.DomainHealth)
 		nextRefresh:=a.state.NextRefresh
 		a.mu.RUnlock()
-		unresolved:=applyFollowMappings(cfg,mappings,statuses,health)
+		resolved:=applyFollowMapping(cfg,d,mappings,statuses,health)
 		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,nextRefresh,false);err!=nil{return err}
-		if mappings[d.Host]=="" {
+		if !resolved {
 			return fmt.Errorf("%s unresolved: follow target %s has no active mapping",d.Host,d.Follow)
 		}
 		a.completeJobProgress("完成", fmt.Sprintf("%s 已跟随 %s · %s",d.Host,d.Follow,mappings[d.Host]))
-		if unresolved>0 { a.appendLog("follow sync completed with %d unresolved follower(s)",unresolved) }
 		return nil
 	}
 
