@@ -76,9 +76,9 @@ func (a *App) updateTrackerSampleInventory(cfg Config, manual, auto map[string]T
 		a.state.TrackerSamples = map[string]TrackerSampleRuntime{}
 	}
 	for _, d := range cfg.Domains {
-		if d.Mode != "tracker" || d.Class == "normal" {
+		if d.Mode != "tracker" || d.Class == "normal" || isFollowDomain(d) {
 			delete(a.state.TrackerSamples, d.Host)
-			if d.Class == "normal" {
+			if d.Class == "normal" || isFollowDomain(d) {
 				delete(a.state.TrackerKeepalive, d.Host)
 			}
 			continue
@@ -125,7 +125,7 @@ func (a *App) markTrackerSamplesPending(domains []string) {
 }
 
 func (a *App) recordTrackerSampleTest(cfg Config, d Domain, ok bool, detail string) {
-	if d.Mode != "tracker" || d.Class == "normal" || !cfg.Tracker.RealAnnounce {
+	if d.Mode != "tracker" || d.Class == "normal" || isFollowDomain(d) || !cfg.Tracker.RealAnnounce {
 		return
 	}
 	a.mu.Lock()
@@ -145,7 +145,7 @@ func (a *App) recordTrackerSampleTest(cfg Config, d Domain, ok bool, detail stri
 func (a *App) verifyDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
 	ok, detail := verifyConfiguredDomain(ctx, d, ip, cfg, samples)
 	a.recordHTTPProbe(d, ok, detail)
-	if d.Mode == "tracker" && d.Class != "normal" && cfg.Tracker.RealAnnounce {
+	if d.Mode == "tracker" && d.Class != "normal" && !isFollowDomain(d) && cfg.Tracker.RealAnnounce {
 		if detail == "tracker sample missing" {
 			a.mu.Lock()
 			st := a.state.TrackerSamples[d.Host]

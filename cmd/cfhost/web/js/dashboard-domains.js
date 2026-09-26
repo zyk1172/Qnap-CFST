@@ -116,7 +116,7 @@ function renderHealthRows() {
     const detail = statuses[domain.host] || (ok ? '映射可用' : '等待验证')
     return `
       <div class="health-row">
-        <span class="health-icon" style="color:${ok ? 'var(--success)' : 'var(--warning)'}">${icon(domain.mode === 'tracker' ? 'activity' : 'globe')}</span>
+        <span class="health-icon" style="color:${ok ? 'var(--success)' : 'var(--warning)'}">${icon(domain.class === 'follow' ? 'sync' : domain.mode === 'tracker' ? 'activity' : 'globe')}</span>
         <div class="health-copy"><strong>${esc(domain.host)}</strong><small>${esc(detail)}</small></div>
         <span class="chip ${ok ? 'success' : 'warning'}"><span class="dot"></span>${ok ? esc(mappings[domain.host]) : '未映射'}</span>
       </div>
@@ -345,14 +345,14 @@ function filteredDomains() {
   const filtered = domains
     .map((domain, index) => ({ domain, index }))
     .filter(({ domain }) => {
-      if (store.domainFilter === 'tracker' && domain.mode !== 'tracker') return false
+      if (store.domainFilter === 'tracker' && (domain.mode !== 'tracker' || domain.class === 'follow')) return false
       if (store.domainFilter === 'enabled' && !domain.enabled) return false
       if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host]) return false
       if (!query) return true
-      return [domain.host, domain.group, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
+      return [domain.host, domain.follow, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
     })
     .sort((a, b) => {
-      const trackerOrder = Number(b.domain.mode === 'tracker') - Number(a.domain.mode === 'tracker')
+      const trackerOrder = Number(b.domain.mode === 'tracker' && b.domain.class !== 'follow') - Number(a.domain.mode === 'tracker' && a.domain.class !== 'follow')
       return trackerOrder || a.index - b.index
     })
     .map(item => item.domain)
@@ -374,20 +374,29 @@ function domainRowsHTML(domains, filtered) {
     const expanded = store.expandedDomainHost === domain.host
     const healthLabel = !domain.enabled ? '停用' : ip ? '正常' : '待处理'
     const healthVariant = !domain.enabled ? '' : ip ? 'success' : 'warning'
-    const modeLabel = domain.mode === 'tracker' ? 'TRK' : 'HTTP'
-    const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : 'LAT'
-    const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : 'info'
-    const sampleCompact = domain.mode === 'tracker'
-      ? `<span class="chip compact ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span>`
-      : httpProbe.available
-        ? `<span class="chip compact ${httpProbe.variant}"><span class="dot"></span>${esc(httpProbe.label)}</span>`
-        : ''
-    const detailItems = [
-      ['配置', `${domain.group || '—'} · ${domain.endpoint || '/'} · ${domain.mode.toUpperCase()} / ${domain.class}`],
-      ['当前 IP', ip || '—'],
-      ['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label],
-      ['健康记录', `连续失败 ${streak} · 最近成功 ${domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'}`],
-    ]
+    const modeLabel = domain.class === 'follow' ? 'MAP' : domain.mode === 'tracker' ? 'TRK' : 'HTTP'
+    const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : domain.class === 'follow' ? '跟随' : 'LAT'
+    const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : domain.class === 'follow' ? 'primary' : 'info'
+    const sampleCompact = domain.class === 'follow'
+      ? (domain.follow ? `<span class="chip compact primary">→ ${esc(domain.follow)}</span>` : '')
+      : domain.mode === 'tracker'
+        ? `<span class="chip compact ${sample.variant}"><span class="dot"></span>${esc(sample.label)}</span>`
+        : httpProbe.available
+          ? `<span class="chip compact ${httpProbe.variant}"><span class="dot"></span>${esc(httpProbe.label)}</span>`
+          : ''
+    const detailItems = domain.class === 'follow'
+      ? [
+          ['跟随域名', domain.follow || '—'],
+          ['当前 IP', ip || '—'],
+          ['策略', 'follow · 直接复用目标域名当前 IP'],
+          ['健康记录', domain.follow ? `由 ${domain.follow} 决定` : '未配置跟随目标'],
+        ]
+      : [
+          ['配置', `${domain.endpoint || '/'} · ${domain.mode.toUpperCase()} / ${domain.class}`],
+          ['当前 IP', ip || '—'],
+          ['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label],
+          ['健康记录', `连续失败 ${streak} · 最近成功 ${domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'}`],
+        ]
 
     return `
       <tr class="domain-main-row ${expanded ? 'is-expanded' : ''}">
@@ -399,7 +408,7 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-meta-cell">
           <div class="domain-compact-chips">
-            <span class="chip compact ${domain.mode === 'tracker' ? 'primary' : ''}">${modeLabel}</span>
+            <span class="chip compact ${domain.class === 'follow' || domain.mode === 'tracker' ? 'primary' : ''}">${modeLabel}</span>
             <span class="chip compact ${classVariant}">${classLabel}</span>
           </div>
         </td>
@@ -412,7 +421,7 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-actions-cell">
           <div class="table-actions domain-actions">
-            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="维护 ${esc(domain.host)}" title="只维护这个域名" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon('repair')}</button>
+            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="${domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${domain.class === 'follow' ? '同步跟随域名当前 IP' : '只维护这个域名'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(domain.class === 'follow' ? 'sync' : 'repair')}</button>
             <button class="icon-button domain-action edit" data-edit-domain="${realIndex}" aria-label="编辑 ${esc(domain.host)}" title="编辑">${icon('edit')}</button>
             <button class="icon-button domain-action toggle" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'} ${esc(domain.host)}" title="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
             <button class="icon-button domain-action delete" data-delete-domain="${realIndex}" aria-label="删除 ${esc(domain.host)}" title="删除">${icon('trash')}</button>
@@ -426,12 +435,19 @@ function domainRowsHTML(domains, filtered) {
               <div class="domain-detail-grid">
                 ${detailItems.map(([label, value]) => `<div class="domain-detail-item"><span>${esc(label)}</span><strong class="${label === '当前 IP' ? 'mono' : ''}">${esc(value)}</strong></div>`).join('')}
               </div>
-              <div class="domain-detail-wide">
-                <span>CFHost 探测详情</span>
-                <strong>${esc(domain.mode === 'tracker' ? (sample.detail || sample.label) : (httpProbe.detail || '尚未执行 HTTP 探测'))}</strong>
-              </div>
-              ${httpRuntimePanel(domain)}
-              ${trackerRuntimePanel(domain)}
+              ${domain.class === 'follow' ? `
+                <div class="domain-detail-wide">
+                  <span>跟随状态</span>
+                  <strong>${esc(statuses[domain.host] || (domain.follow ? `等待同步 ${domain.follow}` : '未配置跟随目标'))}</strong>
+                </div>
+              ` : `
+                <div class="domain-detail-wide">
+                  <span>CFHost 探测详情</span>
+                  <strong>${esc(domain.mode === 'tracker' ? (sample.detail || sample.label) : (httpProbe.detail || '尚未执行 HTTP 探测'))}</strong>
+                </div>
+                ${httpRuntimePanel(domain)}
+                ${trackerRuntimePanel(domain)}
+              `}
             </div>
           </td>
         </tr>
@@ -454,11 +470,11 @@ function renderDomains() {
   const { domains, filtered } = filteredDomains()
 
   return `
-    ${pageHeader('域名', '管理需要 Cloudflare 优选的站点、Tracker、策略类别与共享分组。', `<button class="btn" data-action="add-domain">${icon('plus')}添加域名</button>`)}
+    ${pageHeader('域名', '管理 Cloudflare 优选域名、Tracker 与跟随映射策略。', `<button class="btn" data-action="add-domain">${icon('plus')}添加域名</button>`)}
     <section class="card">
       <div class="card-body">
         <div class="toolbar">
-          <div class="search-field">${icon('search')}<input id="domain-search" type="search" value="${esc(store.domainQuery)}" placeholder="搜索域名或分组"></div>
+          <div class="search-field">${icon('search')}<input id="domain-search" type="search" value="${esc(store.domainQuery)}" placeholder="搜索域名、策略或跟随目标"></div>
           <div class="segmented">
             <button data-domain-filter="all" class="${store.domainFilter === 'all' ? 'is-active' : ''}">全部</button>
             <button data-domain-filter="tracker" class="${store.domainFilter === 'tracker' ? 'is-active' : ''}">Tracker</button>

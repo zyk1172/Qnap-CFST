@@ -89,6 +89,9 @@ func normalModeSkipsVerification(d Domain) bool {
 }
 
 func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config, samples map[string]TrackerSample) (bool, string) {
+	if isFollowDomain(d) {
+		return false, "follow strategy has no independent verification"
+	}
 	// Normal is an explicit no-verification strategy for every protocol,
 	// including Tracker domains.
 	if normalModeSkipsVerification(d) {
@@ -108,6 +111,9 @@ func verifyConfiguredDomain(ctx context.Context, d Domain, ip string, cfg Config
 }
 
 func domainRefreshable(d Domain, cfg Config, samples map[string]TrackerSample) bool {
+	if isFollowDomain(d) {
+		return false
+	}
 	if d.Class == "normal" {
 		return true
 	}

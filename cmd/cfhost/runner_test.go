@@ -200,7 +200,7 @@ func TestLoadTrackerSamplesKeepsValidRows(t *testing.T) {
 
 func TestNormalizeLegacyDomainClass(t *testing.T) {
 	c := defaultConfig()
-	c.Domains = []Domain{{Host: "example.com", Group: "site", Mode: "http", Enabled: true}}
+	c.Domains = []Domain{{Host: "example.com", Mode: "http", Enabled: true}}
 	if err := normalizeConfig(&c); err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestNormalRankingUsesLowestDelayFirst(t *testing.T) {
 	}
 }
 
-func TestOrderedNormalCandidatesIgnoreGroupPreferred(t *testing.T) {
+func TestOrderedNormalCandidatesIgnorePreferredIP(t *testing.T) {
 	cfg:=defaultConfig()
 	in:=[]Candidate{
 		{IP:"1.1.1.1",DelayMS:30},
@@ -317,7 +317,7 @@ func TestOrderedNormalCandidatesIgnoreGroupPreferred(t *testing.T) {
 	}
 	got:=orderedCandidates(in,Domain{Class:"normal"},"1.1.1.1","",cfg)
 	if len(got)==0 || got[0].IP!="2.2.2.2" {
-		t.Fatalf("normal strategy must ignore group preferred IP and use lowest latency: %#v",got)
+		t.Fatalf("normal strategy must ignore preferred IP and use lowest latency: %#v",got)
 	}
 }
 
@@ -351,7 +351,6 @@ func TestResolvePendingNormalUsesLowestLatencyWithoutVerification(t *testing.T) 
 		pending,
 		mappings,
 		statuses,
-		map[string]string{},
 	)
 	if len(remaining)!=0 {
 		t.Fatalf("normal domain should resolve directly: %#v",remaining)
@@ -833,7 +832,7 @@ func TestSmartRepairRetainsLastKnownGoodWhenTrackerSampleMissing(t *testing.T) {
 	cfg.Tracker.AutoDiscover=false
 	cfg.Tracker.SamplesPath=filepath.Join(dir,"missing-manual.tsv")
 	cfg.Tracker.AutoSamplesPath=filepath.Join(dir,"missing-auto.tsv")
-	cfg.Domains=[]Domain{{Host:"tracker.example.com",Group:"example",Class:"latency",Mode:"tracker",Endpoint:"/announce",Enabled:true}}
+	cfg.Domains=[]Domain{{Host:"tracker.example.com",Class:"latency",Mode:"tracker",Endpoint:"/announce",Enabled:true}}
 	a:=&App{
 		config:cfg,
 		dataDir:dir,
@@ -855,16 +854,5 @@ func TestSmartRepairRetainsLastKnownGoodWhenTrackerSampleMissing(t *testing.T) {
 	}
 	if a.state.DomainHealth["tracker.example.com"].FailureStreak!=1 {
 		t.Fatalf("retained stale mapping must still count as failed health: %#v",a.state.DomainHealth["tracker.example.com"])
-	}
-}
-
-func TestGroupHardFailureCache(t *testing.T) {
-	cache:=map[string]map[string]bool{}
-	markGroupHardFailure(cache,"mteam|latency","104.16.0.1")
-	if !groupHardFailed(cache,"mteam|latency","104.16.0.1") {
-		t.Fatal("hard failure was not cached")
-	}
-	if groupHardFailed(cache,"ptcafe|latency","104.16.0.1") {
-		t.Fatal("hard failure leaked across groups")
 	}
 }

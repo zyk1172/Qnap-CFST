@@ -22,7 +22,7 @@ func TestSyncPayloadUsesClassNotSiteGroup(t *testing.T) {
 		},
 	}
 	cfg := defaultConfig()
-	cfg.Domains = []Domain{{Host: "tracker.example.com", Group: "mteam", Class: "latency", Mode: "tracker", Enabled: true}}
+	cfg.Domains = []Domain{{Host: "tracker.example.com", Class: "latency", Mode: "tracker", Enabled: true}}
 	cfg.Sync.Repository = "owner/repo"
 	cfg.Sync.Branch = "main"
 	payload, err := a.buildSyncPayload(cfg, time.Date(2026, 9, 22, 1, 1, 0, 0, time.FixedZone("UTC+8", 8*3600)))

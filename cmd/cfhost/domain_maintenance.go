@@ -25,23 +25,6 @@ func copyStatuses(in map[string]string) map[string]string {
 	return out
 }
 
-func groupPreferredIP(cfg Config, current map[string]string, target Domain, skip string) string {
-	key := groupKey(target)
-	if key == "" {
-		return ""
-	}
-	for _, d := range cfg.Domains {
-		if !d.Enabled || d.Host == target.Host || groupKey(d) != key {
-			continue
-		}
-		ip := current[d.Host]
-		if ip != "" && ip != skip {
-			return ip
-		}
-	}
-	return ""
-}
-
 // runDomainMaintenance performs a Smart-Repair style pass for exactly one
 // configured domain. It may refresh the global CFST candidate pool, but it never
 // reselects or removes mappings for any other domain.
@@ -52,6 +35,22 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	}
 	if !d.Enabled {
 		return fmt.Errorf("domain is disabled: %s", d.Host)
+	}
+	if isFollowDomain(d) {
+		a.setJobProgress("同步跟随", d.Host+" ← "+d.Follow, 1, 1, 0, 0)
+		a.mu.RLock()
+		mappings:=copyMappings(a.state.Mappings)
+		statuses:=copyStatuses(a.state.DomainStatus)
+		health:=copyHealth(a.state.DomainHealth)
+		nextRefresh:=a.state.NextRefresh
+		a.mu.RUnlock()
+		resolved:=applyFollowMapping(cfg,d,mappings,statuses,health)
+		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,nextRefresh,false);err!=nil{return err}
+		if !resolved {
+			return fmt.Errorf("%s unresolved: follow target %s has no active mapping",d.Host,d.Follow)
+		}
+		a.completeJobProgress("完成", fmt.Sprintf("%s 已跟随 %s · %s",d.Host,d.Follow,mappings[d.Host]))
+		return nil
 	}
 
 	scopeCfg := cfg
@@ -166,23 +165,9 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	tryCandidates := func(candidates []Candidate) (bool, string) {
 		a.setJobProgress(candidateStage, fmt.Sprintf("%s · %d 个候选", d.Host, len(candidates)), candidateStep, 6, 0, len(candidates))
 		lastDetail := "no candidate"
-		preferred := groupPreferredIP(cfg, current, d, currentIP)
-		if preferred != "" {
-			ok, detail := a.verifyDomain(ctx, d, preferred, cfg, samples)
-			lastDetail = detail
-			if ok {
-				mappings[d.Host] = preferred
-				statuses[d.Host] = "manual verified shared · " + preferred + " · " + detail
-				a.appendLog("%s -> %s (manual shared group IP · %s)", d.Host, preferred, detail)
-				return true, detail
-			}
-		}
 		order := orderedCandidates(candidates, d, "", currentIP, cfg)
 		for index, candidate := range order {
 			a.setJobProgress(candidateStage, fmt.Sprintf("%d/%d · %s", index+1, len(order), candidate.IP), candidateStep, 6, index+1, len(order))
-			if candidate.IP == preferred {
-				continue
-			}
 			ok, detail := a.verifyDomain(ctx, d, candidate.IP, cfg, samples)
 			lastDetail = detail
 			if !ok {

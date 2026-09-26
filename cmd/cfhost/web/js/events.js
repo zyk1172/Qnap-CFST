@@ -23,8 +23,7 @@ document.addEventListener('click', async event => {
   }
 
   const action = event.target.closest('[data-action]')?.dataset.action
-  if (action === 'toggle-sidebar') toggleSidebar()
-  else if (action === 'open-sidebar') openSidebar()
+  if (action === 'open-sidebar') openSidebar()
   else if (action === 'close-sidebar') closeSidebar()
   else if (action === 'open-command') openCommand()
   else if (action === 'open-appearance') openAppearance()
@@ -71,7 +70,7 @@ document.addEventListener('click', async event => {
       const opening = store.expandedDomainHost !== domain.host
       store.expandedDomainHost = opening ? domain.host : ''
       updateDomainResults()
-      if (opening && domain.mode === 'tracker') await loadTrackerRuntime(domain)
+      if (opening && domain.mode === 'tracker' && domain.class !== 'follow') await loadTrackerRuntime(domain)
     }
     return
   }
@@ -139,6 +138,11 @@ document.addEventListener('click', async event => {
 // per keystroke and silently dropped every character typed faster than roughly
 // 12 keys per second.
 document.addEventListener('input', event => {
+  if (event.target.matches?.('#domain-form select[name="class"]')) {
+    syncDomainFollowSelector()
+    return
+  }
+
   if (event.target.id === 'domain-search') {
     store.domainQuery = event.target.value
     updateDomainResults()
@@ -244,9 +248,8 @@ window.addEventListener('beforeunload', event => {
 })
 
 async function boot() {
-  if (localStorage.getItem('cfhost-sidebar-collapsed') === '1' && innerWidth > 960) {
-    document.documentElement.classList.add('sidebar-collapsed')
-  }
+  localStorage.removeItem('cfhost-sidebar-collapsed')
+  document.documentElement.classList.remove('sidebar-collapsed')
 
   renderNavigation()
   renderAppearance()

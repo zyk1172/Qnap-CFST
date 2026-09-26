@@ -74,10 +74,9 @@ svg { display: block; }
   border-right: 1px solid var(--border);
   background: var(--sidebar);
   transition:
-    width var(--motion-shell) var(--ease-standard),
     transform var(--motion-shell) var(--ease-standard),
     background-color 240ms ease;
-  will-change: width, transform;
+  will-change: transform;
 }
 .sidebar-brand {
   display: flex;
@@ -481,6 +480,8 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .field { display: grid; min-width: 0; align-content: start; gap: 6px; }
 .field label { min-height: 17px; color: var(--muted); font-size: 11px; font-weight: 610; line-height: 17px; }
 .field .hint { color: var(--muted-2); font-size: 10px; line-height: 14px; }
+.field.is-disabled { opacity: .58; }
+.field select:disabled { cursor: not-allowed; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
 .form-grid .span-2 { grid-column: span 2; }
 
@@ -874,22 +875,6 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .empty-state { padding: 24px 10px; color: var(--muted); font-size: 11px; text-align: center; }
 .sidebar-scrim { display: none; }
 
-html.sidebar-collapsed .sidebar { width: var(--sidebar-collapsed); }
-html.sidebar-collapsed .workspace { padding-left: var(--sidebar-collapsed); }
-html.sidebar-collapsed .topbar { left: var(--sidebar-collapsed); }
-html.sidebar-collapsed .brand-copy,
-html.sidebar-collapsed .nav-section-title,
-html.sidebar-collapsed .nav-label,
-html.sidebar-collapsed .nav-badge,
-html.sidebar-collapsed .sidebar-runtime-copy,
-html.sidebar-collapsed .sidebar-footer > .icon-button { opacity: 0; pointer-events: none; }
-html.sidebar-collapsed .sidebar-brand { padding-inline: 20px; }
-html.sidebar-collapsed .sidebar-collapse { display: none; }
-html.sidebar-collapsed .nav-item { justify-content: center; padding-inline: 0; }
-html.sidebar-collapsed .nav-groups { padding-inline: 14px; }
-html.sidebar-collapsed .sidebar-footer { justify-content: center; padding-inline: 0; }
-html.sidebar-collapsed .sidebar-runtime { flex: 0; }
-
 @media (max-width: 1180px) {
   .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split-main { grid-template-columns: minmax(0, 1fr); }
@@ -902,7 +887,6 @@ html.sidebar-collapsed .sidebar-runtime { flex: 0; }
   .workspace { padding-left: 0 !important; }
   .topbar { left: 0 !important; padding-inline: 14px; }
   .mobile-menu { display: inline-grid; }
-  .sidebar-collapse { display: none; }
   .sidebar-scrim {
     position: fixed;
     z-index: 45;

@@ -14,8 +14,6 @@ function renderAppearance() {
         ${icon(iconName)}<span>${label}</span><span class="theme-check">${icon('check')}</span>
       </button>
     `).join('')}
-    <div class="popover-separator"></div>
-    <button class="theme-option" data-action="toggle-sidebar">${icon('sidebar')}<span>切换侧栏宽度</span></button>
   `
 }
 
@@ -57,7 +55,7 @@ function renderCommands(query = '') {
   const domainCommands = (store.config?.domains || []).map(domain => ({
     type: '域名',
     label: domain.host,
-    description: `${domain.mode.toUpperCase()} · ${domain.class} · ${domain.group || '无分组'}`,
+    description: `${domain.mode.toUpperCase()} · ${domain.class}${domain.class === 'follow' && domain.follow ? ` · 跟随 ${domain.follow}` : ''}`,
     icon: 'globe',
     action: () => {
       store.domainQuery = domain.host
@@ -151,21 +149,37 @@ function confirmAction(title, description, confirmText = '确认', danger = fals
   })
 }
 
+function syncDomainFollowSelector() {
+  const form = $('#domain-form')
+  if (!form) return
+  const follow = form.elements.follow
+  const strategy = form.elements.class
+  if (!follow || !strategy) return
+  const active = strategy.value === 'follow'
+  follow.disabled = !active
+  follow.required = active
+  follow.closest('.field')?.classList.toggle('is-disabled', !active)
+}
+
 function openDomainEditor(index = null) {
   const current = index === null
-    ? { host: '', group: '', class: 'latency', mode: 'http', endpoint: '/', enabled: true }
+    ? { host: '', follow: '', class: 'latency', mode: 'http', endpoint: '/', enabled: true }
     : store.config.domains[index]
   const title = index === null ? '添加域名' : '编辑域名'
   const sample = index === null ? null : trackerSampleMeta(current)
-  const sampleBlock = sample && current.mode === 'tracker'
+  const sampleBlock = sample && current.mode === 'tracker' && current.class !== 'follow'
     ? `<div class="field span-2"><label>Tracker 样本状态</label><div class="alert ${sample.variant === 'danger' ? '' : sample.variant === 'warning' ? 'warning' : 'info'}"><div><strong>${esc(sample.label)}</strong><span>${esc(sample.detail)}</span></div></div></div>`
     : ''
+  const followOptions = (store.config.domains || [])
+    .filter(domain => domain.host !== current.host && domain.class !== 'follow')
+    .map(domain => `<option value="${esc(domain.host)}" ${current.follow === domain.host ? 'selected' : ''}>${esc(domain.host)}${domain.enabled ? '' : '（已停用）'}</option>`)
+    .join('')
   const body = `
     <form id="domain-form" class="form-grid">
       <div class="field span-2"><label>域名</label><input name="host" required value="${esc(current.host)}" placeholder="tracker.example.com"></div>
-      <div class="field"><label>站点组</label><input name="group" value="${esc(current.group || '')}" placeholder="mteam"></div>
+      <div class="field ${current.class === 'follow' ? '' : 'is-disabled'}"><label>跟随域名</label><select name="follow" ${current.class === 'follow' ? 'required' : 'disabled'}><option value="">请选择已有域名</option>${followOptions}</select><span class="hint">仅 follow 策略生效；前三种策略下此项不会参与映射选择。</span></div>
       <div class="field"><label>路径</label><input name="endpoint" value="${esc(current.endpoint || '/')}" placeholder="/"></div>
-      <div class="field"><label>策略类别</label><select name="class"><option value="latency" ${current.class === 'latency' || !current.class ? 'selected' : ''}>latency · 延迟优先（验证域名）</option><option value="bandwidth" ${current.class === 'bandwidth' ? 'selected' : ''}>bandwidth · 带宽优先（验证域名）</option><option value="normal" ${current.class === 'normal' ? 'selected' : ''}>normal · 普通（不验证域名）</option></select></div>
+      <div class="field"><label>策略类别</label><select name="class"><option value="latency" ${current.class === 'latency' || !current.class ? 'selected' : ''}>latency · 延迟优先（验证域名）</option><option value="bandwidth" ${current.class === 'bandwidth' ? 'selected' : ''}>bandwidth · 带宽优先（验证域名）</option><option value="normal" ${current.class === 'normal' ? 'selected' : ''}>normal · 普通（不验证域名）</option><option value="follow" ${current.class === 'follow' ? 'selected' : ''}>follow · 跟随已有域名（共享当前 IP）</option></select></div>
       <div class="field"><label>验证类型</label><select name="mode"><option value="http" ${current.mode === 'http' ? 'selected' : ''}>HTTP</option><option value="tracker" ${current.mode === 'tracker' ? 'selected' : ''}>Tracker</option></select></div>
       <div class="field span-2">
         <div class="switch-row"><div class="switch-copy"><strong>启用域名</strong><small>关闭后不会参与 Repair 或 Optimize。</small></div><label class="switch"><input name="enabled" type="checkbox" ${current.enabled ? 'checked' : ''}><span></span></label></div>
@@ -175,28 +189,42 @@ function openDomainEditor(index = null) {
   `
   openModal(modalTemplate(
     title,
-    '域名保存后会立即更新配置。',
+    'follow 策略直接复用所选域名的当前 Hosts IP，不再单独测速或验证。',
     body,
     `<button class="btn secondary" data-action="close-modal">取消</button><button class="btn" data-save-domain="${index === null ? 'new' : index}">${icon('check')}保存</button>`,
   ))
-  setTimeout(() => $('#domain-form input[name="host"]')?.focus(), 40)
+  setTimeout(() => {
+    syncDomainFollowSelector()
+    $('#domain-form input[name="host"]')?.focus()
+  }, 40)
 }
 
 async function saveDomain(indexToken) {
   const form = $('#domain-form')
   if (!form.reportValidity()) return
   const data = new FormData(form)
+  const strategy = String(data.get('class') || 'latency')
   const domain = {
     host: String(data.get('host') || '').trim().toLowerCase(),
-    group: String(data.get('group') || '').trim(),
-    class: String(data.get('class') || 'latency'),
+    follow: strategy === 'follow' ? String(data.get('follow') || '').trim().toLowerCase() : '',
+    class: strategy,
     mode: String(data.get('mode') || 'http'),
     endpoint: String(data.get('endpoint') || '/').trim() || '/',
     enabled: form.elements.enabled.checked,
   }
   const next = deepClone(store.config)
-  if (indexToken === 'new') next.domains.push(domain)
-  else next.domains[Number(indexToken)] = domain
+  if (indexToken === 'new') {
+    next.domains.push(domain)
+  } else {
+    const index = Number(indexToken)
+    const previous = next.domains[index]
+    if (previous && previous.host !== domain.host) {
+      next.domains.forEach(item => {
+        if (item.follow === previous.host) item.follow = domain.host
+      })
+    }
+    next.domains[index] = domain
+  }
   await persistConfig(next)
   closeModal()
   toast('域名已保存', domain.host, 'success')
@@ -206,6 +234,11 @@ async function saveDomain(indexToken) {
 async function deleteDomain(index) {
   const domain = store.config.domains[index]
   if (!domain) return
+  const followers = (store.config.domains || []).filter(item => item.follow === domain.host)
+  if (followers.length) {
+    toast('无法删除', `${domain.host} 正被 ${followers.map(item => item.host).join('、')} 跟随，请先修改这些域名的策略。`, 'error')
+    return
+  }
   if (!await confirmAction('删除域名', `将从 CFHost 配置中移除 ${domain.host}。`, '删除', true)) return
   const next = deepClone(store.config)
   next.domains.splice(index, 1)
@@ -366,15 +399,6 @@ function openSidebar() {
 
 function closeSidebar() {
   document.documentElement.classList.remove('sidebar-open')
-}
-
-function toggleSidebar() {
-  if (innerWidth <= 960) {
-    openSidebar()
-    return
-  }
-  document.documentElement.classList.toggle('sidebar-collapsed')
-  localStorage.setItem('cfhost-sidebar-collapsed', document.documentElement.classList.contains('sidebar-collapsed') ? '1' : '0')
 }
 
 function updateSettingsNav() {

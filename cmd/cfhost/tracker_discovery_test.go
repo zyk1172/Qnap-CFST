@@ -843,7 +843,7 @@ func TestPostRepairKeepaliveTargetsRecoveredTracker(t *testing.T) {
 	cfg.Tracker.RealAnnounce = true
 	cfg.Tracker.Transmission.Enabled = true
 	cfg.Domains = []Domain{{
-		Host: "tracker.example.com", Group: "example", Class: "latency",
+		Host: "tracker.example.com", Class: "latency",
 		Mode: "tracker", Endpoint: "/announce", Enabled: true,
 	}}
 	samples := map[string]TrackerSample{
@@ -957,7 +957,7 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	cfg.Tracker.RealAnnounce = true
 	cfg.Tracker.Transmission = DownloaderClientConfig{Enabled: true, URL: srv.URL}
 	cfg.Domains = []Domain{{
-		Host: "tracker.example.com", Group: "example", Class: "latency",
+		Host: "tracker.example.com", Class: "latency",
 		Mode: "tracker", Endpoint: "/announce", Enabled: true,
 	}}
 	samples := map[string]TrackerSample{

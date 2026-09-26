@@ -46,7 +46,7 @@ function renderSettings() {
             ${icon('info')}
             <div>
               <strong>域名策略类别</strong>
-              <span>latency：验证域名后按低延迟优先；bandwidth：验证域名后按高吞吐优先；normal：不做 HTTP/Tracker 有效性验证，直接使用 CFST 已筛选候选中延迟最低的 IP。</span>
+              <span>latency：验证域名后按低延迟优先；bandwidth：验证域名后按高吞吐优先；normal：不做 HTTP/Tracker 有效性验证，直接使用 CFST 候选中延迟最低的 IP；follow：不独立测速或验证，直接复用所选已有域名的当前映射 IP。</span>
             </div>
           </div>
         `)}
