@@ -23,8 +23,7 @@ document.addEventListener('click', async event => {
   }
 
   const action = event.target.closest('[data-action]')?.dataset.action
-  if (action === 'toggle-sidebar') toggleSidebar()
-  else if (action === 'open-sidebar') openSidebar()
+  if (action === 'open-sidebar') openSidebar()
   else if (action === 'close-sidebar') closeSidebar()
   else if (action === 'open-command') openCommand()
   else if (action === 'open-appearance') openAppearance()
@@ -249,9 +248,8 @@ window.addEventListener('beforeunload', event => {
 })
 
 async function boot() {
-  if (localStorage.getItem('cfhost-sidebar-collapsed') === '1' && innerWidth > 960) {
-    document.documentElement.classList.add('sidebar-collapsed')
-  }
+  localStorage.removeItem('cfhost-sidebar-collapsed')
+  document.documentElement.classList.remove('sidebar-collapsed')
 
   renderNavigation()
   renderAppearance()
