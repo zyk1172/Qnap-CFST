@@ -82,11 +82,6 @@ func orderedCandidates(all []Candidate, d Domain, preferred, skipIP string, cfg 
 	return out
 }
 
-func groupKey(d Domain) string {
-	if d.Group == "" { return "" }
-	return d.Group + "|" + d.Class
-}
-
 func verificationHardFailure(detail string) bool {
 	fields := strings.Fields(detail)
 	for i := 0; i+1 < len(fields); i++ {
