@@ -410,6 +410,9 @@ function trackerSampleMeta(domain) {
   if (domain.mode !== 'tracker') {
     return { label: '不适用', variant: '', detail: 'HTTP 域名不使用 Tracker 样本' }
   }
+  if (domain.class === 'follow') {
+    return { label: '无需样本', variant: '', detail: 'follow 策略直接复用目标域名映射，不执行 Tracker 样本验证' }
+  }
   if (domain.class === 'normal') {
     return { label: '无需样本', variant: '', detail: 'normal 策略跳过 Tracker 样本验证' }
   }
