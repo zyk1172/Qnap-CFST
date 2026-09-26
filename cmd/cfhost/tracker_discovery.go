@@ -208,7 +208,7 @@ type rankedTrackerSample struct {
 func trackerTargetDomains(cfg Config) map[string]bool {
 	out := make(map[string]bool)
 	for _, d := range cfg.Domains {
-		if d.Enabled && d.Mode == "tracker" && d.Class != "normal" {
+		if d.Enabled && d.Mode == "tracker" && d.Class != "normal" && !isFollowDomain(d) {
 			out[strings.ToLower(strings.TrimSpace(d.Host))] = true
 		}
 	}
