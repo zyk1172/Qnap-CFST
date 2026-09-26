@@ -43,7 +43,6 @@ const ICONS = {
   refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.2 9A7 7 0 0 0 6.1 6.1L4 8M5.8 15A7 7 0 0 0 17.9 17.9L20 16"/>',
   theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
-  sidebar: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18h1.2a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3.2A5.8 5.8 0 0 0 21 8.2C20.1 5.2 16.4 3 12 3Z"/><circle cx="7.5" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="6.8" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="6.8" r="1" fill="currentColor" stroke="none"/>',
   bolt: '<path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z"/>',
   repair: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.4 2.4-3-3 2.4-2.4Z"/>',
