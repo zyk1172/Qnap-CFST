@@ -14,8 +14,6 @@ function renderAppearance() {
         ${icon(iconName)}<span>${label}</span><span class="theme-check">${icon('check')}</span>
       </button>
     `).join('')}
-    <div class="popover-separator"></div>
-    <button class="theme-option" data-action="toggle-sidebar">${icon('sidebar')}<span>切换侧栏宽度</span></button>
   `
 }
 
@@ -401,15 +399,6 @@ function openSidebar() {
 
 function closeSidebar() {
   document.documentElement.classList.remove('sidebar-open')
-}
-
-function toggleSidebar() {
-  if (innerWidth <= 960) {
-    openSidebar()
-    return
-  }
-  document.documentElement.classList.toggle('sidebar-collapsed')
-  localStorage.setItem('cfhost-sidebar-collapsed', document.documentElement.classList.contains('sidebar-collapsed') ? '1' : '0')
 }
 
 function updateSettingsNav() {
