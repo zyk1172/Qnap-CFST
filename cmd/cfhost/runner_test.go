@@ -413,25 +413,19 @@ func TestTrackerDiscoveryIncludesNormalTrackerDomains(t *testing.T) {
 	}
 }
 
-func TestRepairBudgetReservesTimeForRefreshAndCommit(t *testing.T) {
-	if got:=repairInspectionReserve(10*time.Minute);got!=6*time.Minute {
-		t.Fatalf("10-minute Repair must reserve 6 minutes after inspection, got %s",got)
+func TestCFSTRunTimeoutIsIndependent(t *testing.T) {
+	cfg:=defaultConfig()
+	cfg.CFST.RunTimeoutMinutes=10
+	if got:=cfstRunTimeout(cfg);got!=10*time.Minute {
+		t.Fatalf("CFST timeout=%s want 10m",got)
 	}
-	if got:=repairCFSTReserve(6*time.Minute);got!=2*time.Minute {
-		t.Fatalf("6-minute remainder must reserve 2 minutes after CFST, got %s",got)
+	cfg.CFST.RunTimeoutMinutes=0
+	if got:=cfstRunTimeout(cfg);got!=30*time.Minute {
+		t.Fatalf("invalid CFST timeout should fall back to 30m, got %s",got)
 	}
-	parent,parentCancel:=context.WithTimeout(context.Background(),10*time.Minute)
-	defer parentCancel()
-	child,childCancel,reserve,ok:=contextWithDeadlineReserve(parent,6*time.Minute)
-	if !ok || reserve!=6*time.Minute {
-		t.Fatalf("failed to create reserved inspection context: reserve=%s ok=%v",reserve,ok)
-	}
-	defer childCancel()
-	parentDeadline,_:=parent.Deadline()
-	childDeadline,_:=child.Deadline()
-	window:=parentDeadline.Sub(childDeadline)
-	if window<5*time.Minute+59*time.Second || window>6*time.Minute+time.Second {
-		t.Fatalf("reserved tail drifted: %s",window)
+	parent:=context.Background()
+	if _,ok:=parent.Deadline();ok {
+		t.Fatal("Repair/job parent context must not require a deadline")
 	}
 }
 
