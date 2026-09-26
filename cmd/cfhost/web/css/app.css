@@ -74,10 +74,9 @@ svg { display: block; }
   border-right: 1px solid var(--border);
   background: var(--sidebar);
   transition:
-    width var(--motion-shell) var(--ease-standard),
     transform var(--motion-shell) var(--ease-standard),
     background-color 240ms ease;
-  will-change: width, transform;
+  will-change: transform;
 }
 .sidebar-brand {
   display: flex;
