@@ -161,6 +161,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			}
 		}
 	}
+	defer inspectionCancel()
 
 	mappings:=retainEnabledMappings(current,cfg)
 	statuses:=make(map[string]string)
