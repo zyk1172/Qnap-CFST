@@ -13,6 +13,64 @@ type pendingDomain struct {
 	Refreshable   bool
 }
 
+func repairInspectionReserve(remaining time.Duration) time.Duration {
+	if remaining <= 0 {
+		return 0
+	}
+	reserve := remaining * 3 / 5
+	if reserve > 6*time.Minute {
+		reserve = 6 * time.Minute
+	}
+	if remaining >= 4*time.Minute && reserve < 2*time.Minute {
+		reserve = 2 * time.Minute
+	}
+	if reserve >= remaining {
+		reserve = remaining / 2
+	}
+	return reserve
+}
+
+func repairCFSTReserve(remaining time.Duration) time.Duration {
+	if remaining <= 0 {
+		return 0
+	}
+	reserve := remaining / 3
+	if remaining >= 3*time.Minute && reserve < 90*time.Second {
+		reserve = 90 * time.Second
+	}
+	if reserve > 3*time.Minute {
+		reserve = 3 * time.Minute
+	}
+	if reserve >= remaining {
+		reserve = remaining / 2
+	}
+	return reserve
+}
+
+func contextWithDeadlineReserve(parent context.Context, reserve time.Duration) (context.Context, context.CancelFunc, time.Duration, bool) {
+	if parent == nil || parent.Err() != nil {
+		return nil, func(){}, 0, false
+	}
+	deadline, ok := parent.Deadline()
+	if !ok || reserve <= 0 {
+		ctx, cancel := context.WithCancel(parent)
+		return ctx, cancel, 0, true
+	}
+	remaining := time.Until(deadline)
+	if remaining <= time.Second {
+		return nil, func(){}, 0, false
+	}
+	if reserve >= remaining-time.Second {
+		reserve = remaining / 2
+	}
+	cutoff := deadline.Add(-reserve)
+	if time.Until(cutoff) < time.Second {
+		return nil, func(){}, reserve, false
+	}
+	ctx, cancel := context.WithDeadline(parent, cutoff)
+	return ctx, cancel, reserve, true
+}
+
 func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 	switch kind {
 	case "run":
@@ -84,6 +142,26 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	cached:=freshCandidates(cachedState,time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute,now)
 	a.appendLog("repair: current=%d cached-candidates=%d",len(current),len(cached))
 
+	priorityRuntimeFailure:=make(map[string]bool)
+	for host,failure:=range downloaderFailures {
+		if downloaderFailureIsNewer(failure,health[host].LastSuccess) {
+			priorityRuntimeFailure[host]=true
+		}
+	}
+	inspectionCtx:=ctx
+	inspectionCancel:=func(){}
+	if len(priorityRuntimeFailure)>0 {
+		if deadline,ok:=ctx.Deadline();ok {
+			remaining:=time.Until(deadline)
+			reserve:=repairInspectionReserve(remaining)
+			if reservedCtx,cancel,actualReserve,hasBudget:=contextWithDeadlineReserve(ctx,reserve);hasBudget {
+				inspectionCtx=reservedCtx
+				inspectionCancel=cancel
+				a.appendLog("repair: priority Tracker failure detected; reserving %s of %s remaining for CFST, replacement verification, and commit",actualReserve.Round(time.Second),remaining.Round(time.Second))
+			}
+		}
+	}
+
 	mappings:=retainEnabledMappings(current,cfg)
 	statuses:=make(map[string]string)
 	groupIP:=make(map[string]string)
@@ -97,7 +175,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		currentIP:=current[d.Host]
 
-		if d.Class=="normal" {
+		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(cached,d,"","",cfg)
 			if len(order)>0 {
 				chosen:=order[0]
@@ -136,7 +214,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 				pending=append(pending,pendingDomain{d,skipIP,refreshable})
 				continue
 			}
-			domainCtx,cancel,budget,hasBudget:=domainVerificationContext(ctx,len(cfg.Domains)-index)
+			domainCtx,cancel,budget,hasBudget:=domainVerificationContext(inspectionCtx,len(cfg.Domains)-index)
 			if !hasBudget {
 				statuses[d.Host]="current verification deferred · insufficient task budget"
 				pending=append(pending,pendingDomain{d,currentIP,refreshable})
@@ -166,8 +244,22 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		pending=append(pending,pendingDomain{d,currentIP,refreshable})
 	}
 
+	forceRuntimeRefresh:=false
+	for _,p:=range pending {
+		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
+			forceRuntimeRefresh=true
+			break
+		}
+	}
 	a.setJobProgress("验证缓存候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 3, 7, 0, len(pending))
-	pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证缓存候选",3,7)
+	if forceRuntimeRefresh {
+		inspectionCancel()
+		a.setJobProgress("验证缓存候选", "下载器已确认 Tracker 连接故障，跳过旧候选并优先刷新 CFST", 3, 7, 1, 1)
+		a.appendLog("repair: skipping cached candidate verification after fresh downloader Tracker failure; preserving runtime for CFST refresh")
+	} else {
+		pending=a.resolvePendingWithProgress(inspectionCtx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证缓存候选",3,7)
+		inspectionCancel()
+	}
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 	a.setJobProgress("评估刷新", fmt.Sprintf("仍有 %d 个域名待处理", len(pending)), 4, 7, 0, 0)
 	maxProspective:=0; refreshablePending:=0
@@ -184,13 +276,6 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 	bootstrap:=refreshablePending>0 && len(cached)==0 && (len(current)==0 || normalNeedsBootstrap)
 	refreshNow,nextRefresh,backoff:=refreshDecision(now,lastRefresh,maxProspective,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,bootstrap)
-	forceRuntimeRefresh:=false
-	for _,p:=range pending {
-		if p.Refreshable && freshDownloaderFailure[p.Domain.Host] {
-			forceRuntimeRefresh=true
-			break
-		}
-	}
 	if forceRuntimeRefresh {
 		refreshNow=true
 		nextRefresh=time.Time{}
@@ -206,11 +291,38 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		}
 		a.markRefreshAttempt(now); lastRefresh=now.Format(time.RFC3339)
 		a.setJobProgress("CFST 测速", "正在刷新候选 IP 池", 5, 7, 0, 0)
-		newCandidates,err:=a.runCFST(ctx,cfg)
+		cfstCtx:=ctx
+		cfstCancel:=func(){}
+		cfstBudgetOK:=true
+		if deadline,ok:=ctx.Deadline();ok {
+			remaining:=time.Until(deadline)
+			reserve:=repairCFSTReserve(remaining)
+			var actualReserve time.Duration
+			cfstCtx,cfstCancel,actualReserve,cfstBudgetOK=contextWithDeadlineReserve(ctx,reserve)
+			if cfstBudgetOK && actualReserve>0 {
+				a.appendLog("repair: CFST phase reserving %s of %s remaining for candidate verification and commit",actualReserve.Round(time.Second),remaining.Round(time.Second))
+			}
+		}
+		var newCandidates []Candidate
+		var err error
+		if !cfstBudgetOK {
+			err=fmt.Errorf("insufficient Repair time budget to start CFST while preserving commit time")
+		} else {
+			newCandidates,err=a.runCFST(cfstCtx,cfg)
+		}
+		cfstCancel()
 		if err!=nil {
 			refreshErr=err
 			a.setJobProgress("CFST 测速", "测速失败 · "+err.Error(), 5, 7, 1, 1)
 			a.appendLog("repair: CFST refresh failed: %v",err)
+			if forceRuntimeRefresh && len(cached)>0 && ctx.Err()==nil {
+				a.setJobProgress("验证新候选", "CFST 未产出新候选，回退验证缓存候选", 6, 7, 0, len(pending))
+				pending=a.resolvePendingWithProgress(ctx,cfg,samples,cached,pending,mappings,statuses,groupIP,groupHardFailures,"验证新候选",6,7)
+				if len(pending)==0 {
+					a.appendLog("repair: cached candidate fallback resolved all domains after CFST failure")
+					refreshErr=nil
+				}
+			}
 		} else {
 			a.storeCandidates(newCandidates)
 			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
@@ -286,7 +398,7 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 		}
 		a.setJobDomainProgress(progressStage, progressStep, progressSteps, index+1, len(pending), p.Domain.Host)
 		if !p.Refreshable { remaining=append(remaining,p); continue }
-		if p.Domain.Class=="normal" {
+		if normalModeSkipsVerification(p.Domain) {
 			order:=orderedCandidates(candidates,p.Domain,"","",cfg)
 			if len(order)==0 {
 				statuses[p.Domain.Host]="normal unresolved · no CFST candidate"
