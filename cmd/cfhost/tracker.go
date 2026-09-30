@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -180,7 +181,13 @@ func trackerAnnounceAttempt(parent context.Context, d Domain, ip string, sample 
 	req.Header.Set("User-Agent", cfg.Tracker.UserAgent)
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, err.Error()
+		// url.Error includes the full announce URL, including credentials. Keep
+		// the underlying connection error for the user-facing probe detail.
+		var requestErr *url.Error
+		if errors.As(err, &requestErr) {
+			err = requestErr.Err
+		}
+		return false, sanitizeTrackerReason([]byte(err.Error()))
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 65536))
@@ -412,7 +419,7 @@ func validBencodeInteger(value string) bool {
 }
 
 // Trackers sometimes echo request parameters back in the failure reason.
-var trackerReasonSecretPattern = regexp.MustCompile(`(?i)(passkey|credential|torrent_pass|authkey)=[^&\\s]*`)
+var trackerReasonSecretPattern = regexp.MustCompile(`(?i)(passkey|credential|torrent_pass|authkey)=[^&\s]*`)
 
 func sanitizeTrackerReason(raw []byte) string {
 	reason := strings.Map(func(r rune) rune {

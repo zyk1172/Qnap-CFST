@@ -297,6 +297,9 @@ func normalizeConfig(c *Config) error {
 		d.Mode = strings.ToLower(strings.TrimSpace(d.Mode))
 		d.Endpoint = strings.TrimSpace(d.Endpoint)
 		if d.Host == "" || seen[d.Host] { continue }
+		if err := validateDomainHost(d.Host); err != nil {
+			return err
+		}
 		if d.Class != "latency" && d.Class != "bandwidth" && d.Class != "normal" && d.Class != "follow" { d.Class = "latency" }
 		if d.Class != "follow" { d.Follow = "" }
 		if d.Mode != "tracker" { d.Mode = "http" }
@@ -391,12 +394,52 @@ func saveConfig(dataDir string, c Config) error {
 }
 
 func writeJSON(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil { return err }
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil { return err }
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0644); err != nil { return err }
-	return os.Rename(tmp, path)
+	return writeJSONBytes(path, b)
+}
+
+func writeJSONBytes(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if err := f.Chmod(0644); err != nil {
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+func validateDomainHost(host string) error {
+	name := strings.TrimSuffix(host, ".")
+	if len(name) == 0 || len(name) > 253 {
+		return fmt.Errorf("invalid domain host: %q", host)
+	}
+	for _, label := range strings.Split(name, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("invalid domain host: %q", host)
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return fmt.Errorf("invalid domain host: %q", host)
+			}
+		}
+	}
+	return nil
 }
 
 func getenv(k, fallback string) string {

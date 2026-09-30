@@ -103,6 +103,7 @@ func renderHosts(existing string, mappings map[string]string) (string, error) {
 		out = append(out, "", hostsBegin)
 		hosts := make([]string, 0, len(mappings))
 		for host, ip := range mappings {
+			if err := validateDomainHost(host); err != nil { return "", err }
 			if net.ParseIP(ip) == nil { return "", fmt.Errorf("invalid mapping IP for %s: %s", host, ip) }
 			hosts = append(hosts, host)
 		}

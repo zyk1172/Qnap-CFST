@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -40,14 +41,23 @@ func (a *App) restoreResolution(s resolutionSnapshot) {
 }
 
 func (a *App) persistStateStrict() error {
+	// Serialize writers before taking a snapshot so an older snapshot cannot
+	// overwrite a newer one. Encode under the read lock: maps and slices in the
+	// struct copy still share storage with the live state.
+	a.persistMu.Lock()
+	defer a.persistMu.Unlock()
 	a.mu.RLock()
 	s := a.state
 	s.Running = false
 	s.CurrentJob = ""
 	s.CurrentDomain = ""
 	s.Progress = JobProgress{}
+	b, err := json.MarshalIndent(s, "", "  ")
 	a.mu.RUnlock()
-	return writeJSON(filepath.Join(a.dataDir, "state.json"), s)
+	if err != nil {
+		return err
+	}
+	return writeJSONBytes(filepath.Join(a.dataDir, "state.json"), b)
 }
 
 func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth, nextRefresh string, optimized bool) error {
