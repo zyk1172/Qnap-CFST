@@ -24,7 +24,7 @@ jobs:
           node --check cmd/cfhost/web/js/settings.js
           node --check cmd/cfhost/web/js/interactions.js
           node --check cmd/cfhost/web/js/events.js
-      - run: go test ./cmd/cfhost
+      - run: go test -race ./...
       - run: go build ./...
       - name: Validate QNAP AMD64 Compose
         run: docker compose -f deploy/qnap/compose-amd64.yaml config

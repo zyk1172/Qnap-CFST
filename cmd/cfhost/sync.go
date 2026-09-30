@@ -134,11 +134,12 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 	sort.Strings(hosts)
 
 	var mapBuilder strings.Builder
-	mapBuilder.WriteString("# domain\tip\tgroup\tdelay_ms\tspeed_mb_s\tloss_percent\tcolo\tverified_at\thttp_code\tstatus\n")
+	mapBuilder.WriteString("# domain\tip\tgroup\tdelay_ms\tspeed_mb_s\tloss_percent\tcolo\tverified_at\thttp_code\tstatus\tfollow_target\n")
 	signatureParts := []string{cfg.Sync.Repository, cfg.Sync.Branch}
 	latencyCount := 0
 	bandwidthCount := 0
 	normalCount := 0
+	followCount := 0
 	for _, host := range hosts {
 		d := domains[host]
 		class := d.Class
@@ -147,6 +148,8 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 			bandwidthCount++
 		case "normal":
 			normalCount++
+		case "follow":
+			followCount++
 		default:
 			class = "latency"
 			latencyCount++
@@ -171,22 +174,25 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 		}
 		httpCode := "-"
 		recordStatus := "VERIFIED"
-		if class == "normal" {
+		if class == "follow" {
+			verifiedAt = "-"
+			recordStatus = "FOLLOWED"
+		} else if class == "normal" {
 			recordStatus = "SELECTED"
 		} else if match := httpCodePattern.FindStringSubmatch(statuses[host]); len(match) == 2 {
 			httpCode = match[1]
 		} else if d.Mode == "tracker" && cfg.Tracker.RealAnnounce {
 			httpCode = "200"
 		}
-		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, recordStatus}, "\t"))
+		mapBuilder.WriteString(strings.Join([]string{host, ip, class, delay, speed, loss, colo, verifiedAt, httpCode, recordStatus, d.Follow}, "\t"))
 		mapBuilder.WriteByte('\n')
-		signatureParts = append(signatureParts, strings.Join([]string{host, ip, class, delay, speed, loss, colo}, "\t"))
+		signatureParts = append(signatureParts, strings.Join([]string{host, ip, class, delay, speed, loss, colo, d.Follow}, "\t"))
 	}
 
 	sum := sha256.Sum256([]byte(strings.Join(signatureParts, "\n")))
 	signature := hex.EncodeToString(sum[:])
 	statusDoc := map[string]any{
-		"schema":          3,
+		"schema":          4,
 		"generated_at":    now.Format(time.RFC3339),
 		"source":          "CFHost",
 		"map_file":        "hosts-map.tsv",
@@ -194,6 +200,7 @@ func (a *App) buildSyncPayload(cfg Config, now time.Time) (syncPayload, error) {
 		"latency_count":   latencyCount,
 		"bandwidth_count": bandwidthCount,
 		"normal_count":    normalCount,
+		"follow_count":    followCount,
 		"last_run":        lastRun,
 		"last_refresh":    lastRefresh,
 		"signature":       signature,

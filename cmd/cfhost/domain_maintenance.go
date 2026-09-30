@@ -27,7 +27,8 @@ func copyStatuses(in map[string]string) map[string]string {
 
 // runDomainMaintenance performs a Smart-Repair style pass for exactly one
 // configured domain. It may refresh the global CFST candidate pool, but it never
-// reselects or removes mappings for any other domain.
+// reselects mappings for unrelated domains. Direct followers inherit the target's
+// final mapping without independent candidate selection or verification.
 func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string) error {
 	d, ok := configuredDomain(cfg, host)
 	if !ok {
@@ -57,7 +58,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	scopeCfg.Domains = []Domain{d}
 	a.setJobProgress("读取样本", d.Host, 1, 6, 0, 0)
 	samples := a.loadSamples(ctx, scopeCfg)
-	downloaderFailures := a.loadDownloaderTrackerFailures(ctx, scopeCfg, samples)
+	downloaderFailures := a.evaluateTransmissionTrackerKeepaliveForTargets(ctx, cfg, samples, map[string]bool{d.Host: true})
 	a.setJobProgress("读取样本", d.Host+" · 样本就绪", 1, 6, 1, 1)
 	now := time.Now()
 
@@ -85,6 +86,11 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 			h.LastFailure = stamp
 		}
 		health[d.Host] = h
+		for _, follower := range cfg.Domains {
+			if follower.Enabled && isFollowDomain(follower) && follower.Follow == d.Host {
+				applyFollowMapping(cfg, follower, mappings, statuses, health)
+			}
+		}
 		if err := a.commitResolution(ctx, cfg, mappings, statuses, health, nextRefresh, false); err != nil {
 			return err
 		}

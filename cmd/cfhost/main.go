@@ -15,11 +15,13 @@ import (
 )
 
 type App struct {
-	mu      sync.RWMutex
-	config  Config
-	state   RuntimeState
-	dataDir string
-	cfstBin string
+	mu        sync.RWMutex
+	persistMu sync.Mutex
+	configMu  sync.Mutex
+	config    Config
+	state     RuntimeState
+	dataDir   string
+	cfstBin   string
 }
 
 type DomainHealth struct {

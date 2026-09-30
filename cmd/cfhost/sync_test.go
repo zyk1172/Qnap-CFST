@@ -99,12 +99,12 @@ func TestSyncPayloadPreservesNormalStrategy(t *testing.T) {
 	if !strings.Contains(payload.MapText,"plain.example.com\t104.16.0.9\tnormal\t11\t6\t0.1\tHKG\t") {
 		t.Fatalf("normal sync class missing: %s",payload.MapText)
 	}
-	if !strings.Contains(payload.MapText,"\t-\tSELECTED\n") {
+	if !strings.Contains(payload.MapText,"\t-\tSELECTED\t\n") {
 		t.Fatalf("normal record must be marked SELECTED without fake HTTP code: %s",payload.MapText)
 	}
 	var status map[string]any
 	if err:=json.Unmarshal([]byte(payload.StatusText),&status);err!=nil{t.Fatal(err)}
-	if int(status["schema"].(float64))!=3 || int(status["normal_count"].(float64))!=1 {
-		t.Fatalf("unexpected schema-3 normal status: %#v",status)
+	if int(status["schema"].(float64))!=4 || int(status["normal_count"].(float64))!=1 {
+		t.Fatalf("unexpected schema-4 normal status: %#v",status)
 	}
 }

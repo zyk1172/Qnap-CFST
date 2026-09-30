@@ -47,7 +47,7 @@ Tracker 可选真实 announce
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
 - **Transmission 实际 Tracker 健康反馈**：Repair 会读取样本种子的 `tracker_stats`；Transmission 实际报告 `Could not connect to tracker` / timeout 等连接错误时，即使 CFHost 自身 probe 能通，也会把当前映射视为失效并修复。
 - **样本状态可见**：域名页直接显示 `未获取 / 已获取待测试 / 样本通过 / 样本失败`，并标明手工或下载器来源。
-- **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名；即使需要刷新 CFST，也不会重新选择其他域名的映射。
+- **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名，并同步直接跟随它的域名；即使需要刷新 CFST，也不会重新选择其他独立域名的映射。
 - **QNAP Hosts 管理**
   - 只管理自己的 Marker
   - 保留非受管内容
@@ -428,10 +428,10 @@ Tracker 缺样本时只为该域名尝试自动发现
   ↓
 仍失败则立即刷新一次 CFST
   ↓
-只修改这个域名的映射
+修改这个域名的映射，并同步直接跟随它的域名
 ```
 
-CFST 候选池属于全局测速结果，因此必要时会刷新候选池；但其他域名的当前 Hosts 映射不会因为这次手动维护而重新选择。
+CFST 候选池属于全局测速结果，因此必要时会刷新候选池；但其他独立域名的当前 Hosts 映射不会因为这次手动维护而重新选择。直接跟随所选域名的 follow 映射会同步更新；目标无法解析时，也会移除对应的跟随映射。
 
 默认：
 
@@ -541,6 +541,8 @@ status.json
 ```
 
 两个文件通过 Git Data API 在 **同一个 commit** 中原子更新。
+
+`status.json` 使用 schema 4，并单独统计 `follow_count`。`hosts-map.tsv` 保留原有前十列，在末尾增加 `follow_target` 列；follow 行的策略列为 `follow`、状态为 `FOLLOWED`，不生成独立验证时间或 HTTP 状态码。normal 行仍标记为 `SELECTED`。
 
 默认 Token 文件：
 

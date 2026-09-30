@@ -79,6 +79,10 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// Keep the disk write and the live config update in the same order across
+		// concurrent requests.
+		a.configMu.Lock()
+		defer a.configMu.Unlock()
 		if err := saveConfig(a.dataDir, c); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

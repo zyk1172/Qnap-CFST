@@ -421,7 +421,7 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-actions-cell">
           <div class="table-actions domain-actions">
-            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="${domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${domain.class === 'follow' ? '同步跟随域名当前 IP' : '只维护这个域名'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(domain.class === 'follow' ? 'sync' : 'repair')}</button>
+            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="${domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${domain.class === 'follow' ? '同步跟随域名当前 IP' : '维护域名并同步跟随映射'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(domain.class === 'follow' ? 'sync' : 'repair')}</button>
             <button class="icon-button domain-action edit" data-edit-domain="${realIndex}" aria-label="编辑 ${esc(domain.host)}" title="编辑">${icon('edit')}</button>
             <button class="icon-button domain-action toggle" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'} ${esc(domain.host)}" title="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
             <button class="icon-button domain-action delete" data-delete-domain="${realIndex}" aria-label="删除 ${esc(domain.host)}" title="删除">${icon('trash')}</button>
