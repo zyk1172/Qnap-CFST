@@ -382,11 +382,13 @@ CFHost 会读取 completed torrents，优先使用当前工作 Tracker；目标�
 domain<TAB>announce_path<TAB>40位 info_hash<TAB>完整 HTTPS announce URL
 ```
 
-默认位置：
+默认位置（容器内）：
 
 ```text
-/share/Container/cfhost/data/tracker-samples.tsv
+/data/tracker-samples.tsv
 ```
+
+NAS 上对应 `CFHOST_DATA_DIR/tracker-samples.tsv`；QNAP 默认示例为 `/share/Container/cfhost/data/tracker-samples.tsv`，群晖、飞牛按各自的数据挂载目录放置。
 
 仓库提供：
 
@@ -586,16 +588,16 @@ status.json
 
 `status.json` 使用 schema 4，并单独统计 `follow_count`。`hosts-map.tsv` 保留原有前十列，在末尾增加 `follow_target` 列；follow 行的策略列为 `follow`、状态为 `FOLLOWED`，不生成独立验证时间或 HTTP 状态码。normal 行仍标记为 `SELECTED`。
 
-默认 Token 文件：
-
-```text
-/share/Container/cfhost/data/github-token
-```
-
-容器内：
+默认 Token 文件（容器内）：
 
 ```text
 /data/github-token
+```
+
+NAS 上对应 `CFHOST_DATA_DIR/github-token`，QNAP 默认示例：
+
+```text
+/share/Container/cfhost/data/github-token
 ```
 
 也可以使用运行环境中的 `GITHUB_TOKEN`。
