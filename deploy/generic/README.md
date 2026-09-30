@@ -1,5 +1,7 @@
 # 通用 Linux NAS 部署
 
+> **验证范围：尚未在真实群晖或飞牛设备上运行过 CFHost，也未实测其图形安装界面。** 已在 Linux amd64 Docker 环境校验部署配置、容器运行、Hosts 写入和数据持久化；ARM64 二进制已交叉编译。多架构镜像构建与 NAS 实机验证是不同层级的检查，具体机型、系统版本、权限与重启后的行为仍需使用者确认。
+
 适用于支持 Docker 和 Docker Compose 的其他 Linux NAS，包括具备相应容器功能的自建 NAS。预构建镜像支持 amd64 / arm64。先阅读 [NAS 通用部署说明](../README.md)。
 
 在 NAS 持久化存储上创建项目文件夹，进入该目录，将 [compose.yaml](compose.yaml) 和 [.env.example](.env.example) 保存到此处，然后：

@@ -1,5 +1,7 @@
 # NAS 通用部署说明
 
+> **验证范围：尚未在真实群晖或飞牛设备上运行过 CFHost，也未实测其图形安装界面。** 已在 Linux amd64 Docker 环境校验部署配置、容器运行、Hosts 写入和数据持久化；ARM64 二进制已交叉编译。多架构镜像构建与 NAS 实机验证是不同层级的检查，具体机型、系统版本、权限与重启后的行为仍需使用者确认。
+
 CFHost 的程序、WebUI、配置格式和数据文件在各 NAS 上通用。平台适配提供不同的安装入口和数据路径，无需修改测速、域名验证或 Hosts 管理逻辑。
 
 ## 选择平台与镜像
@@ -14,7 +16,7 @@ CFHost 的程序、WebUI、配置格式和数据文件在各 NAS 上通用。平
 
 多架构镜像为 `ghcr.io/zyk1172/qnap-cfst:cfhost`，包含 `linux/amd64` 与 `linux/arm64`。名称保留 `qnap-cfst`，群晖、飞牛同样使用这个镜像。无需指定 `platform`；Docker 自动匹配宿主机架构。主分支合并后由 GitHub Actions 更新镜像。
 
-首次引入本适配时，需要等待合并后的 `CFHost Image` 工作流成功发布多架构标签。如果拉取提示 `not found`，检查该工作流及 GHCR Package 的访问权限。也可在 NAS 上检出本项目源码，在仓库根目录执行 `sudo docker build -t cfhost:local .`，再将部署 `.env` 中的 `CFHOST_IMAGE` 设为 `cfhost:local`。
+正式版 **1.0.0** 的固定多架构镜像为 `ghcr.io/zyk1172/qnap-cfst:cfhost-v1.0.0`，固定 amd64 镜像为 `ghcr.io/zyk1172/qnap-cfst:cfhost-amd64-v1.0.0`。将 `CFHOST_IMAGE` 改成固定版本可避免跟随主分支更新；默认 `cfhost` / `cfhost-amd64` 标签持续更新。镜像以发布工作流成功推送后的结果为准。如果拉取提示 `not found`，检查该工作流及 GHCR Package 的访问权限。也可在 NAS 上检出本项目源码，在仓库根目录执行 `sudo docker build -t cfhost:local .`，再将部署 `.env` 中的 `CFHOST_IMAGE` 设为 `cfhost:local`。
 
 SSH 下可用 `uname -m` 检查：`x86_64` 对应 `amd64`，`aarch64` / `arm64` 对应 `arm64`。没有 Docker 套件的群晖机型、32 位 `armv7l` 和非 Linux 容器环境不在当前适配范围。
 

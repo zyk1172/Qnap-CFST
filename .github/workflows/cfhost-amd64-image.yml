@@ -7,6 +7,11 @@ on:
       - master
     tags:
       - "cfhost-amd64-v*"
+      - "cfhost-v*"
+
+concurrency:
+  group: cfhost-amd64-image-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -34,11 +39,12 @@ jobs:
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
           tags: |
             type=raw,value=cfhost-amd64
             type=raw,value=qnap-amd64
             type=sha,prefix=cfhost-amd64-
-            type=ref,event=tag
+            type=match,pattern=^cfhost(?:-amd64)?-v(.*)$,group=1,prefix=cfhost-amd64-v
 
       - uses: docker/build-push-action@v6
         with:

@@ -1,5 +1,7 @@
 # 飞牛 fnOS 部署
 
+> **验证范围：尚未在真实群晖或飞牛设备上运行过 CFHost，也未实测其图形安装界面。** 已在 Linux amd64 Docker 环境校验部署配置、容器运行、Hosts 写入和数据持久化；ARM64 二进制已交叉编译。多架构镜像构建与 NAS 实机验证是不同层级的检查，具体机型、系统版本、权限与重启后的行为仍需使用者确认。
+
 使用飞牛的 Docker 应用或 SSH 下的 Docker Compose 部署。多架构镜像自动匹配 amd64 / arm64；设备的 fnOS 版本也需要支持 Docker。先阅读 [NAS 通用部署说明](../README.md)，确认宿主机与下载器容器的 Hosts 生效范围。
 
 ## Docker 应用的 Compose 部署

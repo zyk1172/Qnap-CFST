@@ -32,6 +32,7 @@ jobs:
         id: meta
         with:
           images: ghcr.io/zyk1172/qnap-cfst
+          flavor: latest=false
           tags: |
             type=raw,value=cfhost
             type=ref,event=tag

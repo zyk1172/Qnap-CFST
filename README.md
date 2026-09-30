@@ -12,6 +12,10 @@
 
 CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的测速核心，为 NAS 场景增加 WebUI、Smart Repair、Full Optimize、Tracker 真实 announce、宿主机 Hosts 管理、运行历史和 GitHub 映射同步。
 
+**当前正式版本：CFHost 1.0.0**。完整功能、默认行为、升级方法、支持边界及未验证事项见 [1.0 发布说明](docs/releases/1.0.0.md)，发布入口为 [CFHost 1.0 正式版](https://github.com/zyk1172/Qnap-CFST/releases/tag/cfhost-v1.0.0)。版本号属于 CFHost 服务层，上游 CloudflareSpeedTest 的自身版本号保持独立。
+
+> **群晖和飞牛适配尚未在真实设备上运行过，也未实测其图形安装流程。** 本次确认的是 Linux amd64 Docker 环境中的配置、运行、Hosts 和持久化行为，以及 ARM64 二进制交叉编译；不代表所有 NAS 机型、DSM / fnOS 版本或 ARM64 设备都已验证。设备路径、权限、容器应用版本和重启后的系统 Hosts 行为需要按实际环境确认。
+
 它解决的不是单纯“找一个延迟最低的 Cloudflare IP”，而是：
 
 ```text
@@ -69,6 +73,27 @@ Tracker 可选真实 announce
   - Light / Dark / Glass / 跟随系统
   - Cmd/Ctrl + K 命令面板
   - 响应式手机 / 平板布局
+
+---
+
+# 默认行为与使用边界
+
+| 项目 | 1.0 行为 / 限制 |
+| --- | --- |
+| 自动运行 | 全局自动 Repair、自动应用 Hosts、周期 Full Optimize、GitHub 同步默认关闭。真实 Tracker announce 和自动发现样本默认开启，但下载器连接默认未启用；手动执行相关任务仍可能向站点发请求。已有 Transmission keepalive 观察任务可触发后台 Repair，不能把关闭自动 Repair 理解为暂停所有后台动作。 |
+| 网站验证 | 默认使用 HTTPS，检查状态、正文与 Challenge / 占位页特征。小正文 API、登录页和站点规则可能误判；验证通过不等于登录、下载或所有路径都正常。跨域跳转的后续域名走自身解析，不代表原候选 IP 承载了全部跳转。 |
+| 测速结果 | 延迟和吞吐来自当次网络与测速 URL，无法保证全天最快或具体业务下载速度。优选只适合允许通过候选 Cloudflare IP 访问的域名。 |
+| `normal` / `follow` | `normal` 跳过域名验证；`follow` 只同步目标 IP、不验证自身可用性，且不支持自跟随或链式跟随。映射存在不等于该域名已验证成功。 |
+| Tracker | 样本验证支持 HTTPS announce、40 位 v1 info-hash；不支持 UDP / 明文 HTTP Tracker 或纯 v2 样本。合法业务拒绝可表示候选可达，不能解决 passkey、账号、种子注册、站点风控等问题。 |
+| 下载器 | Transmission 与 qBittorrent 支持自动取样本；主动 reannounce 保活和完整运行时健康反馈针对 Transmission。自动发现本身只读；保活可能对连接失败的种子发 reannounce，请按站点规则使用。 |
+| Hosts 生效 | 默认只管理当前 NAS 的系统 Hosts。其他容器、局域网设备和使用独立 DNS / DoH 的应用不会自动继承；具体共享文件配置见 [部署说明](deploy/README.md#hosts-生效范围)。 |
+| 系统恢复 | NAS 重启、升级或网络变更可能重写系统 Hosts，应用也可能缓存解析。CFHost 不安装系统启动钩子；需检查文件，必要时重建容器并重新应用。 |
+| 平台范围 | Docker / Compose 下的 Linux amd64、arm64；不是群晖 SPK、QNAP QPKG 或飞牛原生应用安装包。32 位 ARM、无容器套件机型、旧 Compose 与所有 NAS 固件版本不保证兼容。 |
+| 局域网与凭据 | 面向可信局域网，没有内置登录、多用户或 TLS 接入。密码输入框遮罩不等于加密存储；配置 / API / 备份及样本文件可能包含密码或 passkey。 |
+| 数据与同步 | 配置与状态依赖 `/data` 持久化，不提供多实例协调。GitHub 同步只发布映射和状态，不会自动应用到远端设备；同步失败不撤销已成功的本地 Hosts 写入。 |
+| 健康状态 | `/healthz` 返回服务状态和版本，仅说明 Web 服务可响应，不证明测速、目标站点、下载器或 Hosts 权限正常。 |
+
+首次使用请先确认下载器实际如何解析域名，手动维护少量域名并检查结果，再按需开启自动应用和周期任务。更完整的参数、判定语义与未覆盖事项见 [1.0 发布说明](docs/releases/1.0.0.md)。
 
 ---
 
@@ -288,7 +313,7 @@ CFHost 支持两种样本来源：
 
 填写 Transmission RPC 地址、用户名和密码即可。
 
-例如同一台 QNAP 上：
+例如同一台 NAS 上：
 
 ```text
 http://192.168.1.10:9091/transmission/rpc
@@ -577,24 +602,32 @@ status.json
 
 ---
 
-# 更新
+# 更新与固定版本
 
-拉取最新版：
-
-```bash
-docker pull ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
-```
-
-如果使用 Container Station Compose，重新创建 / 更新应用即可。
-
-因为以下内容都在 bind mount 中：
+正式版多架构镜像（amd64 / arm64）：
 
 ```text
-/data
-/host/etc/hosts
+ghcr.io/zyk1172/qnap-cfst:cfhost-v1.0.0
 ```
 
-升级镜像不会删除 CFHost 配置和状态。
+固定 amd64 镜像：
+
+```text
+ghcr.io/zyk1172/qnap-cfst:cfhost-amd64-v1.0.0
+```
+
+把部署 `.env` 中的 `CFHOST_IMAGE` 改为所需标签。默认 `cfhost`、`cfhost-amd64` 和兼容标签 `qnap-amd64` 会随主分支更新，不能用于锁定 1.0。
+
+先备份数据目录，然后在项目目录运行：
+
+```bash
+sudo docker compose --env-file .env -f compose.yaml pull
+sudo docker compose --env-file .env -f compose.yaml up -d
+```
+
+使用 QNAP 专用配置时把 `-f` 改为 `compose-amd64.yaml`；图形项目使用其实际保存的文件名，并重新创建 / 更新应用。仅执行 `docker pull` 不会替换正在运行的容器。
+
+数据与状态保存在 `/data` 对应的 NAS 挂载目录。保留挂载目录并不会免除备份需求；不要删除包含数据的图形项目目录。恢复旧版本时还需要与旧版本匹配的数据备份，本项目不保证跨版本降级兼容。
 
 ---
 
@@ -602,11 +635,11 @@ docker pull ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 
 | 项目 | 默认值 |
 | --- | --- |
-| WebUI | `http://QNAP-IP:9876` |
+| WebUI | `http://NAS-IP:9876` |
 | 容器监听端口 | `8080` |
 | QNAP 数据目录 | `/share/Container/cfhost/data` |
 | 容器数据目录 | `/data` |
-| QNAP Hosts | `/etc/hosts` |
+| NAS 宿主机 Hosts | `/etc/hosts` |
 | 容器 Hosts 挂载 | `/host/etc/hosts` |
 | 手工 Tracker 样本 | `/data/tracker-samples.tsv` |
 | 自动 Tracker 样本 | `/data/tracker-samples.auto.tsv` |
@@ -654,7 +687,7 @@ WebUI 由 Go `embed.FS` 直接打包，不需要 Vue / Node / Nginx 等额外运
 
 # 与 CloudflareSpeedTest 的关系
 
-本项目保留 CloudflareSpeedTest 作为候选 IP 测速核心，并在其之上增加 NAS / QNAP 场景的域名验证、Repair、Hosts、Tracker 和 WebUI 服务层。
+本项目保留 CloudflareSpeedTest 作为候选 IP 测速核心，并在其之上增加 NAS 场景的域名验证、Repair、Hosts、Tracker 和 WebUI 服务层。
 
 上游项目：
 

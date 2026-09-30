@@ -163,7 +163,7 @@ func verifyHTTPConnectivity(parent context.Context, d Domain, ip string, cfg Con
 	if endpoint == "" { endpoint = "/" }
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Host+endpoint, nil)
 	if err != nil { return false, "request error" }
-	req.Header.Set("User-Agent", "CFHost/0.4")
+	req.Header.Set("User-Agent", "CFHost/"+cfhostVersion)
 	resp, err := client.Do(req)
 	if err != nil { return false, err.Error() }
 	defer resp.Body.Close()
@@ -270,7 +270,7 @@ func strictHTTPAttempt(parent context.Context, d Domain, ip string, cfg Config) 
 	if endpoint == "" { endpoint = "/" }
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Host+endpoint, nil)
 	if err != nil { return false, "request error" }
-	req.Header.Set("User-Agent", "CFHost/0.4")
+	req.Header.Set("User-Agent", "CFHost/"+cfhostVersion)
 	resp, err := client.Do(req)
 	if err != nil { return false, err.Error() }
 	defer resp.Body.Close()
