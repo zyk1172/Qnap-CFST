@@ -32,6 +32,8 @@ platform: linux/amd64
 
 避免 Container Station 选择错误架构。
 
+固定使用 CFHost 1.0 正式版时，把 `.env` 的 `CFHOST_IMAGE` 设为 `ghcr.io/zyk1172/qnap-cfst:cfhost-amd64-v1.0.0`。默认 `cfhost-amd64` 是随主分支更新的标签。功能、默认行为和限制见 [1.0 发布说明](../../docs/releases/1.0.0.md)，其他 NAS 的部署与 Hosts 生效范围见 [通用说明](../README.md)。群晖、飞牛适配尚未在真实设备上运行验证。
+
 ## QNAP Container Station
 
 在 Container Station 的“应用程序 / Compose”中建立项目，使用：

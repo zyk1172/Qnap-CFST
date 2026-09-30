@@ -52,7 +52,7 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeResponse(w, map[string]string{"status": "ok"})
+	writeResponse(w, map[string]string{"status": "ok", "version": cfhostVersion})
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {

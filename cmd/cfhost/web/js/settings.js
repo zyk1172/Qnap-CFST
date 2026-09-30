@@ -94,7 +94,7 @@ function renderSettings() {
             ${icon('info')}
             <div>
               <strong>下载器地址要从 CFHost 容器内可访问</strong>
-              <span>如果 Transmission / qBittorrent 运行在同一台 QNAP 上，bridge 模式下通常填写 NAS 的局域网 IP，不要填写 127.0.0.1。自动发现只选已完成任务，并只读取 hash 与 Tracker URL。</span>
+              <span>如果 Transmission / qBittorrent 运行在同一台 NAS 上，bridge 模式下通常填写 NAS 的局域网 IP，不要填写 127.0.0.1。自动发现只选已完成任务，并只读取 hash 与 Tracker URL。</span>
             </div>
           </div>
 
