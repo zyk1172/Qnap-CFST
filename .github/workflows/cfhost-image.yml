@@ -3,8 +3,14 @@ name: CFHost Image
 on:
   workflow_dispatch:
   push:
+    branches:
+      - master
     tags:
       - "cfhost-v*"
+
+concurrency:
+  group: cfhost-image-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

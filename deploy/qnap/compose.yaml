@@ -1,6 +1,6 @@
 services:
   cfhost:
-    image: ghcr.io/zyk1172/qnap-cfst:cfhost
+    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost}
     container_name: cfhost
     restart: unless-stopped
     ports:

@@ -26,7 +26,17 @@ jobs:
           node --check cmd/cfhost/web/js/events.js
       - run: go test -race ./...
       - run: go build ./...
-      - name: Validate QNAP AMD64 Compose
-        run: docker compose -f deploy/qnap/compose-amd64.yaml config
+      - name: Validate NAS Compose profiles
+        run: |
+          for compose_file in docker-compose.yml deploy/qnap/compose.yaml deploy/qnap/compose-amd64.yaml deploy/synology/compose.yaml deploy/fnos/compose.yaml deploy/generic/compose.yaml; do
+            docker compose -f "$compose_file" config --quiet
+          done
+          for nas in synology fnos generic; do
+            docker compose --env-file "deploy/$nas/.env.example" -f "deploy/$nas/compose.yaml" config --quiet
+          done
+      - name: Build ARM64 binaries
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o "$RUNNER_TEMP/cfst-arm64" .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o "$RUNNER_TEMP/cfhost-arm64" ./cmd/cfhost
       - name: Build AMD64 image
         run: docker build --platform linux/amd64 -t cfhost:test .

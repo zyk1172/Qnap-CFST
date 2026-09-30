@@ -4,10 +4,10 @@
 
 <h1 align="center">CFHost</h1>
 
-<p align="center"><strong>面向 QNAP / NAS 的 Cloudflare 优选、域名验证与 Hosts 自动管理服务。</strong></p>
+<p align="center"><strong>面向威联通、群晖、飞牛及其他 NAS 的 Cloudflare 优选、域名验证与 Hosts 自动管理服务。</strong></p>
 
 <p align="center">
-  <code>QNAP / NAS</code> · <code>Cloudflare 优选</code> · <code>Smart Repair</code> · <code>Tracker announce</code> · <code>Hosts 管理</code>
+  <code>QNAP / Synology / fnOS</code> · <code>Cloudflare 优选</code> · <code>Smart Repair</code> · <code>Tracker announce</code> · <code>Hosts 管理</code>
 </p>
 
 CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的测速核心，为 NAS 场景增加 WebUI、Smart Repair、Full Optimize、Tracker 真实 announce、宿主机 Hosts 管理、运行历史和 GitHub 映射同步。
@@ -25,7 +25,7 @@ Tracker 可选真实 announce
    ↓
 生成当前有效映射
    ↓
-事务式写入 QNAP /etc/hosts
+事务式写入 NAS /etc/hosts
    ↓
 失效时只 Repair 该域名
    ↓
@@ -48,7 +48,7 @@ Tracker 可选真实 announce
 - **Transmission 实际 Tracker 健康反馈**：Repair 会读取样本种子的 `tracker_stats`；Transmission 实际报告 `Could not connect to tracker` / timeout 等连接错误时，即使 CFHost 自身 probe 能通，也会把当前映射视为失效并修复。
 - **样本状态可见**：域名页直接显示 `未获取 / 已获取待测试 / 样本通过 / 样本失败`，并标明手工或下载器来源。
 - **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名，并同步直接跟随它的域名；即使需要刷新 CFST，也不会重新选择其他独立域名的映射。
-- **QNAP Hosts 管理**
+- **NAS Hosts 管理**
   - 只管理自己的 Marker
   - 保留非受管内容
   - 原地写入，保持 inode
@@ -69,6 +69,23 @@ Tracker 可选真实 announce
   - Light / Dark / Glass / 跟随系统
   - Cmd/Ctrl + K 命令面板
   - 响应式手机 / 平板布局
+
+---
+
+# 选择 NAS 部署方式
+
+CFHost 使用 Linux 容器运行，预构建的 `cfhost` 镜像支持 `linux/amd64` 与 `linux/arm64`，Docker 会按设备架构自动选择。
+
+| 设备 | 部署入口 | 数据目录默认值 |
+| --- | --- | --- |
+| 威联通 QNAP | [QNAP amd64 安装说明](deploy/qnap/README-amd64.md)；[多架构 Compose](deploy/qnap/compose.yaml) | `/share/Container/cfhost/data` |
+| 群晖 Synology | [Container Manager 项目安装](deploy/synology/README.md) | `/volume1/docker/cfhost/data` |
+| 飞牛 fnOS | [Docker Compose 安装](deploy/fnos/README.md) | 项目目录下的 `data` |
+| 其他 Linux NAS | [通用 Compose 安装](deploy/generic/README.md) | 项目目录下的 `data` |
+
+设备需要支持 Docker / 容器应用，具体群晖机型以套件中心是否提供 Container Manager 为准。32 位 ARM 设备暂不提供预构建镜像。
+
+首次部署、下载器网络设置以及宿主机 / 容器 Hosts 的生效范围，请先看 [NAS 通用部署说明](deploy/README.md)。以下保留 QNAP amd64 的详细安装步骤。
 
 ---
 
@@ -229,7 +246,7 @@ Compose 使用：
 HOSTS_PATH=/host/etc/hosts
 ```
 
-这里修改的是 **QNAP 宿主机的真实 `/etc/hosts`**。
+这里修改的是 **NAS 宿主机的真实 `/etc/hosts`**。
 
 不要写成：
 
