@@ -1,0 +1,69 @@
+name: CFHost Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing CFHost release tag (for example cfhost-v1.0.1)
+        required: true
+        type: string
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/cfhost-release-assets.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cfhost-release-assets-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      REQUESTED_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package the immutable release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$REQUESTED_TAG"
+          if [ -z "$tag" ]; then
+            version=$(sed -n 's/^const cfhostVersion = "\([0-9.]*\)"$/\1/p' cmd/cfhost/version.go)
+            tag="cfhost-v$version"
+          fi
+          if [[ ! "$tag" =~ ^cfhost-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid CFHost release tag" >&2
+            exit 1
+          fi
+          git rev-parse --verify "refs/tags/$tag^{commit}" >/dev/null
+          gh release view "$tag" >/dev/null
+          version="${tag#cfhost-v}"
+          root="CFHost-$version"
+          artifact_dir="$RUNNER_TEMP/cfhost-release"
+          mkdir -p "$artifact_dir"
+          git archive --format=tar --prefix="$root/" "$tag" deploy docs/releases/1.0.0.md "docs/releases/$version.md" README.md LICENSE THIRD_PARTY_NOTICES.md | gzip -n > "$artifact_dir/cfhost-$version-nas-deploy.tar.gz"
+          git archive --format=zip --prefix="$root/" "$tag" deploy docs/releases/1.0.0.md "docs/releases/$version.md" README.md LICENSE THIRD_PARTY_NOTICES.md > "$artifact_dir/cfhost-$version-nas-deploy.zip"
+          cd "$artifact_dir"
+          tar -tzf "cfhost-$version-nas-deploy.tar.gz" > tar-files.txt
+          unzip -t "cfhost-$version-nas-deploy.zip"
+          sha256sum "cfhost-$version-nas-deploy.tar.gz" "cfhost-$version-nas-deploy.zip" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE_ASSET_DIR=$artifact_dir" >> "$GITHUB_ENV"
+      - name: Upload deployment archives and checksums
+        shell: bash
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$RELEASE_ASSET_DIR/cfhost-$RELEASE_VERSION-nas-deploy.tar.gz" \
+            "$RELEASE_ASSET_DIR/cfhost-$RELEASE_VERSION-nas-deploy.zip" \
+            "$RELEASE_ASSET_DIR/SHA256SUMS" --clobber
