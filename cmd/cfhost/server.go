@@ -61,8 +61,17 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	writeResponse(w, a.state)
+	// Encode a consistent snapshot, then release the lock before writing to a
+	// potentially slow client. Jobs must not wait for status responses to drain.
+	body, err := json.Marshal(a.state)
+	a.mu.RUnlock()
+	if err != nil {
+		http.Error(w, "failed to encode status", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(append(body, '\n'))
 }
 
 func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {

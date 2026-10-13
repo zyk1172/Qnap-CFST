@@ -258,15 +258,35 @@ async function toggleDomain(index) {
 }
 
 async function persistConfig(next) {
-  const saved = await api('/api/config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(next),
-  })
-  store.config = saved
-  store.configDraft = deepClone(saved)
-  store.dirty = false
-  updateShellStatus()
+  if (store.configSaving) throw new Error('配置正在保存，请稍后再试。')
+  if (store.dirty && next !== store.configDraft) throw new Error('有未保存的设置，请先到设置页保存或放弃更改。')
+  const draftBefore = deepClone(store.configDraft)
+  store.configSaving = true
+  try {
+    const saved = await api('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    })
+    store.config = saved
+    // Keep edits made while the save request was in flight.
+    store.configDraft = mergeConfigEdits(saved, draftBefore, store.configDraft)
+    store.dirty = !deepEqual(store.configDraft, saved)
+    updateShellStatus()
+  } finally {
+    store.configSaving = false
+  }
+}
+
+function mergeConfigEdits(saved, before, current) {
+  const merged = deepClone(saved)
+  for (const [key, value] of Object.entries(current)) {
+    if (deepEqual(value, before[key])) continue
+    merged[key] = value && typeof value === 'object' && !Array.isArray(value)
+      ? mergeConfigEdits(saved[key], before[key], value)
+      : deepClone(value)
+  }
+  return merged
 }
 
 async function saveSettings() {
@@ -280,6 +300,10 @@ async function saveSettings() {
 }
 
 function discardSettings() {
+  if (store.configSaving) {
+    toast('正在保存设置', '保存完成后再放弃更改。')
+    return
+  }
   store.configDraft = deepClone(store.config)
   store.dirty = false
   renderPage(false)

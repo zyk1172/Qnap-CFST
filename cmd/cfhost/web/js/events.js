@@ -1,4 +1,8 @@
-document.addEventListener('click', async event => {
+document.addEventListener('click', event => {
+  handleClick(event).catch(error => toast('操作失败', error.message || String(error), 'error'))
+})
+
+async function handleClick(event) {
   createRipple(event)
 
   const nav = event.target.closest('[data-nav]')
@@ -28,6 +32,11 @@ document.addEventListener('click', async event => {
   else if (action === 'open-command') openCommand()
   else if (action === 'open-appearance') openAppearance()
   else if (action === 'refresh') {
+    if (store.configSaving) {
+      toast('正在保存设置', '保存完成后再刷新。')
+      return
+    }
+    if (store.dirty && !await confirmAction('刷新并放弃更改', '刷新会放弃未保存的设置，重新读取当前配置。', '放弃并刷新', true)) return
     try {
       await loadAll()
       renderPage(false, false)
@@ -131,7 +140,7 @@ document.addEventListener('click', async event => {
   // The appearance toggle buttons are not all inside .popover-anchor (the sidebar
   // footer one is not), so an outside-click must not immediately undo an open.
   if (action !== 'open-appearance' && !event.target.closest('.popover-anchor')) closeAppearance()
-})
+}
 
 // Search inputs only patch the result region. Re-rendering the whole page used
 // to replace the focused <input>, which left the document unfocused for ~80ms

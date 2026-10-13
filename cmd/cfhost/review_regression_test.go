@@ -9,11 +9,119 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+type blockedStatusWriter struct {
+	header  http.Header
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockedStatusWriter) Header() http.Header { return w.header }
+func (w *blockedStatusWriter) WriteHeader(int)     {}
+func (w *blockedStatusWriter) Write(body []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return len(body), nil
+}
+
+func TestStatusSlowClientDoesNotBlockStateUpdates(t *testing.T) {
+	a, _ := newRegressionApp(t)
+	w := &blockedStatusWriter{header: http.Header{}, started: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		a.handleStatus(w, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+		close(done)
+	}()
+	defer func() { close(w.release); <-done }()
+	select {
+	case <-w.started:
+	case <-time.After(time.Second):
+		t.Fatal("status response did not start")
+	}
+	updated := make(chan struct{})
+	go func() { a.appendLog("job progressed"); close(updated) }()
+	select {
+	case <-updated:
+	case <-time.After(time.Second):
+		t.Fatal("slow status client blocked a job's state update")
+	}
+	if w.header.Get("Cache-Control") != "no-store" {
+		t.Fatal("live status must not be cached")
+	}
+}
+
+func TestFailedResolutionCommitRestoresTrackerKeepalive(t *testing.T) {
+	for _, failure := range []string{"hosts", "state"} {
+		t.Run(failure, func(t *testing.T) {
+			a, cfg := newRegressionApp(t)
+			const host = "tracker.example"
+			a.state.Mappings[host] = "104.16.0.1"
+			keepalive := TrackerKeepaliveRuntime{RejectedIP: "104.16.0.1", Attempts: 3, Status: "failed", NextCheck: "2026-10-13T03:00:00Z"}
+			a.state.TrackerKeepalive[host] = keepalive
+			cfg.AutoApply = true
+			original := "127.0.0.1 localhost\n"
+			if failure == "hosts" {
+				cfg.HostsPath = filepath.Join(a.dataDir, "missing-hosts")
+			} else {
+				if err := os.WriteFile(cfg.HostsPath, []byte(original), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(filepath.Join(a.dataDir, "state.json"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := a.commitResolution(context.Background(), cfg, map[string]string{host: "104.16.0.2"}, map[string]string{host: "healthy"}, map[string]DomainHealth{}, "", false)
+			if err == nil {
+				t.Fatal("expected resolution commit to fail")
+			}
+			if a.state.Mappings[host] != "104.16.0.1" || !reflect.DeepEqual(a.state.TrackerKeepalive[host], keepalive) {
+				t.Fatalf("failed commit changed live resolution: %+v", a.state)
+			}
+			if failure == "state" {
+				got, err := os.ReadFile(cfg.HostsPath)
+				if err != nil || string(got) != original {
+					t.Fatalf("Hosts rollback: %q, %v", got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigRejectsDuplicateDomainWithoutLosingSavedConfig(t *testing.T) {
+	a, cfg := newRegressionApp(t)
+	if err := saveConfig(a.dataDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(a.dataDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := cfg.Domains[0]
+	duplicate.Host = " " + strings.ToUpper(duplicate.Host) + " "
+	cfg.Domains = append(append([]Domain(nil), cfg.Domains...), duplicate)
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "duplicate domain") {
+		t.Fatalf("duplicate save returned %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := os.ReadFile(filepath.Join(a.dataDir, "config.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("rejected save changed disk config: %v", err)
+	}
+	if len(a.snapshotConfig().Domains) != len(defaultConfig().Domains) {
+		t.Fatal("rejected save changed live config")
+	}
+}
 
 func newRegressionApp(t *testing.T) (*App, Config) {
 	t.Helper()

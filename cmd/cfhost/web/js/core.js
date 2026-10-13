@@ -88,6 +88,8 @@ const store = {
   commandItems: [],
   modalResolver: null,
   polling: null,
+  statusRequest: null,
+  configSaving: false,
   renderSignature: '',
 }
 
@@ -152,8 +154,15 @@ async function loadAll() {
 }
 
 async function refreshStatus({ quiet = false } = {}) {
+  // Share slow polling requests instead of queueing another one every 3 seconds.
+  if (!store.statusRequest) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    store.statusRequest = api('/api/status', { signal: controller.signal }).finally(() => clearTimeout(timeout))
+  }
+  const request = store.statusRequest
   try {
-    store.state = await api('/api/status')
+    store.state = await request
     updateShellStatus()
     const nextSignature = pageRefreshSignature()
     if (!quiet && canAutoRender() && nextSignature !== store.renderSignature) {
@@ -161,6 +170,8 @@ async function refreshStatus({ quiet = false } = {}) {
     }
   } catch (error) {
     updateConnectionError(error)
+  } finally {
+    if (store.statusRequest === request) store.statusRequest = null
   }
 }
 
@@ -200,6 +211,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       mappings: state.mappings,
       domainStatus: state.domainStatus,
       domainHealth: state.domainHealth,
+      httpProbe: state.httpProbe,
       trackerSamples: state.trackerSamples,
     }
     break
@@ -216,6 +228,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       lastRun: state.lastRun,
       lastOptimize: state.lastOptimize,
       nextRefresh: state.nextRefresh,
+      cfstRateLimit: state.cfstRateLimit,
       history: state.history,
       sync: state.sync,
     }
@@ -224,7 +237,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
     snapshot = {
       running: state.running,
       currentJob: state.currentJob,
-      logs: state.logs,
+      logs: store.logPaused ? store.frozenLogs : state.logs,
     }
     break
   default:

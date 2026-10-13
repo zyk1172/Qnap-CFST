@@ -296,7 +296,8 @@ func normalizeConfig(c *Config) error {
 		d.Class = strings.ToLower(strings.TrimSpace(d.Class))
 		d.Mode = strings.ToLower(strings.TrimSpace(d.Mode))
 		d.Endpoint = strings.TrimSpace(d.Endpoint)
-		if d.Host == "" || seen[d.Host] { continue }
+		if d.Host == "" { continue }
+		if seen[d.Host] { return fmt.Errorf("duplicate domain host: %s", d.Host) }
 		if err := validateDomainHost(d.Host); err != nil {
 			return err
 		}

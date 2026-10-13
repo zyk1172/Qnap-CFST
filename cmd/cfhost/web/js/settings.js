@@ -21,7 +21,7 @@ function renderSettings() {
             ${numberField('cfst.pingTimes', 'Ping 次数', config.cfst.pingTimes)}
             ${numberField('cfst.downloadCount', '下载测速数量', config.cfst.downloadCount)}
             ${numberField('cfst.downloadSeconds', '单 IP 下载时长', config.cfst.downloadSeconds, '秒')}
-            ${numberField('cfst.runTimeoutMinutes', '完整任务超时', config.cfst.runTimeoutMinutes, '分钟')}
+            ${numberField('cfst.runTimeoutMinutes', 'CFST 测速超时', config.cfst.runTimeoutMinutes, '分钟')}
             ${numberField('cfst.degradedDownloadMB', '限流期单次下载量', config.cfst.degradedDownloadMB, 'MB', '0.5')}
             ${numberField('cfst.degradedDownloadCount', '限流期测速数量', config.cfst.degradedDownloadCount, '个')}
             ${numberField('cfst.degradedDownloadSeconds', '限流期单 IP 时长', config.cfst.degradedDownloadSeconds, '秒')}

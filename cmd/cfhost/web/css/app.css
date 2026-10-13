@@ -917,7 +917,7 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
     display: grid;
     grid-template-columns: minmax(0, 1fr) 140px;
     grid-template-areas:
-      "host actions"
+      "host host"
       "meta actions"
       "ip status";
     align-items: center;

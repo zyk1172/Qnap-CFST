@@ -24,6 +24,8 @@ jobs:
           node --check cmd/cfhost/web/js/settings.js
           node --check cmd/cfhost/web/js/interactions.js
           node --check cmd/cfhost/web/js/events.js
+      - name: Web UI regression tests
+        run: node --test cmd/cfhost/ui_regression_test.cjs
       - run: go test -race ./...
       - run: go build ./...
       - name: Validate NAS Compose profiles

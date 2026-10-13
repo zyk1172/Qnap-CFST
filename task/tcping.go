@@ -119,31 +119,21 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (recv int, totalDelay time.Durati
 	return
 }
 
-func (p *Ping) appendIPData(data *utils.PingData) {
-	p.m.Lock()
-	defer p.m.Unlock()
-	p.csv = append(p.csv, utils.CloudflareIPData{
-		PingData: data,
-	})
-}
-
 // handle tcping
 func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 	recv, totalDlay, colo := p.checkConnection(ip)
-	nowAble := len(p.csv)
-	if recv != 0 {
-		nowAble++
+	// Record results and their progress count together. Other probes may append
+	// concurrently; even reading the slice length requires the result lock.
+	p.m.Lock()
+	defer p.m.Unlock()
+	if recv > 0 {
+		p.csv = append(p.csv, utils.CloudflareIPData{PingData: &utils.PingData{
+			IP:       ip,
+			Sended:   PingTimes,
+			Received: recv,
+			Delay:    totalDlay / time.Duration(recv),
+			Colo:     colo,
+		}})
 	}
-	p.bar.Grow(1, strconv.Itoa(nowAble))
-	if recv == 0 {
-		return
-	}
-	data := &utils.PingData{
-		IP:       ip,
-		Sended:   PingTimes,
-		Received: recv,
-		Delay:    totalDlay / time.Duration(recv),
-		Colo:     colo,
-	}
-	p.appendIPData(data)
+	p.bar.Grow(1, strconv.Itoa(len(p.csv)))
 }

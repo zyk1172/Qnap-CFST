@@ -412,7 +412,7 @@ func TestDomainTableIsCompactExpandableAndNonScrolling(t *testing.T) {
 		t.Fatal("domain table must not depend on horizontal scrolling")
 	}
 	if !strings.Contains(cssText, `grid-template-areas:
-      "host actions"
+      "host host"
       "meta actions"
       "ip status";`) {
 		t.Fatal("mobile domain rows must switch to a compact grid")
