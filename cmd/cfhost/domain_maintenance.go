@@ -37,6 +37,10 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	if !d.Enabled {
 		return fmt.Errorf("domain is disabled: %s", d.Host)
 	}
+	a.mu.RLock()
+	paused := maintenancePaused(d, a.state.DomainHealth)
+	a.mu.RUnlock()
+	if paused { return fmt.Errorf("domain maintenance is paused: %s; resume it first", d.Host) }
 	if isFollowDomain(d) {
 		a.setJobProgress("同步跟随", d.Host+" ← "+d.Follow, 1, 1, 0, 0)
 		a.mu.RLock()
@@ -231,6 +235,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 		a.mu.Unlock()
 		return false, nil
 	}
+	if maintenancePaused(d, a.state.DomainHealth) { a.mu.Unlock(); return false, fmt.Errorf("domain maintenance is paused: %s; resume it first", d.Host) }
 	a.state.Running = true
 	a.state.CurrentJob = "maintain"
 	a.state.CurrentDomain = d.Host

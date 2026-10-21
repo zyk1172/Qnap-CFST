@@ -164,3 +164,51 @@ test('domain save failures produce a toast instead of an unhandled rejection', a
   assert.equal(result.message, 'duplicate domain')
   assert.equal(result.type, 'error')
 })
+
+test('opening a page lists paused domains safely; polling does not reopen the notice', async () => {
+  const f = fixture()
+  const modals = []
+  f.context.openModal = html => modals.push(html)
+  f.store.state.maintenanceFailureLimit = 30
+  f.store.state.maintenancePaused = [{ host: '<offline.example>', failureStreak: 131 }]
+  vm.runInContext('showMaintenancePauseNotice()', f.context)
+  assert.equal(modals.length, 1)
+  assert.match(modals[0], /部分站点已暂停维护/)
+  assert.match(modals[0], /&lt;offline.example&gt;/)
+  assert.match(modals[0], /131/)
+  f.context.api = () => Promise.resolve(f.store.state)
+  await f.refreshStatus()
+  await f.refreshStatus()
+  assert.equal(modals.length, 1)
+  // A fresh page opening calls the notice again, without a persistent dismissal.
+  vm.runInContext('showMaintenancePauseNotice()', f.context)
+  assert.equal(modals.length, 2)
+})
+
+test('no paused domains means no popup; resume requires explicit confirmation', async () => {
+  const f = fixture()
+  let popups = 0, requests = 0
+  f.context.openModal = () => popups++
+  vm.runInContext('showMaintenancePauseNotice()', f.context)
+  assert.equal(popups, 0)
+  f.store.config.domains = [{ host: 'offline.example', enabled: true }]
+  f.store.state.maintenancePaused = [{ host: 'offline.example', failureStreak: 30 }]
+  f.context.confirmAction = () => Promise.resolve(false)
+  f.context.api = () => { requests++; return Promise.resolve({}) }
+  await vm.runInContext('resumeDomainMaintenance(0)', f.context)
+  assert.equal(requests, 0)
+  f.context.confirmAction = () => Promise.resolve(true)
+  f.context.toast = () => {}
+  f.context.api = (path, options) => {
+    requests++
+    if (path === '/api/domain-resume') {
+      assert.equal(options.method, 'POST')
+      assert.deepEqual(JSON.parse(options.body), { host: 'offline.example' })
+      return Promise.resolve({ status: 'resumed' })
+    }
+    return Promise.resolve({ maintenancePaused: [], domainHealth: { 'offline.example': { failureStreak: 0 } } })
+  }
+  await vm.runInContext('resumeDomainMaintenance(0)', f.context)
+  assert.equal(requests, 2)
+  assert.equal(f.store.state.maintenancePaused.length, 0)
+})

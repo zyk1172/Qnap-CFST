@@ -69,6 +69,11 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("resolution commit blocked by expired job context: %w", err)
 	}
+	for _, d := range cfg.Domains {
+		if d.Enabled && maintenancePaused(d, health) {
+			statuses[d.Host] = maintenancePauseStatus(health[d.Host])
+		}
+	}
 	old := a.snapshotResolution()
 	a.mu.Lock()
 	a.state.Mappings = mappings
@@ -76,6 +81,14 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 	a.state.DomainHealth = health
 	a.state.NextRefresh = nextRefresh
 	for host, keepalive := range a.state.TrackerKeepalive {
+		if d, ok := configuredDomain(cfg, host); ok && maintenancePaused(d, health) {
+			keepalive.Status = "paused"
+			keepalive.NextCheck = ""
+			keepalive.NextReannounce = ""
+			keepalive.LastEvent = maintenancePauseStatus(health[host])
+			a.state.TrackerKeepalive[host] = keepalive
+			continue
+		}
 		if keepalive.RejectedIP == "" {
 			continue
 		}

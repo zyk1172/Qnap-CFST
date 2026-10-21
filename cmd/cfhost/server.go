@@ -22,6 +22,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/repair", a.handleJob("repair"))
 	mux.HandleFunc("/api/optimize", a.handleJob("optimize"))
 	mux.HandleFunc("/api/domain-maintain", a.handleDomainMaintain)
+	mux.HandleFunc("/api/domain-resume", a.handleDomainResume)
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
@@ -63,7 +64,11 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	// Encode a consistent snapshot, then release the lock before writing to a
 	// potentially slow client. Jobs must not wait for status responses to drain.
-	body, err := json.Marshal(a.state)
+	body, err := json.Marshal(struct {
+		RuntimeState
+		MaintenanceFailureLimit int `json:"maintenanceFailureLimit"`
+		MaintenancePaused []MaintenancePause `json:"maintenancePaused"`
+	}{a.state, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
 	a.mu.RUnlock()
 	if err != nil {
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)

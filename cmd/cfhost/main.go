@@ -190,6 +190,7 @@ func (a *App) scheduler() {
 		a.mu.RLock()
 		running:=a.state.Running; lastRun:=a.state.LastRun; lastOptimize:=a.state.LastOptimize; lastAttempt:=a.state.LastOptimizeAttempt; lastRefresh:=a.state.LastRefresh
 		keepalive:=copyTrackerKeepalive(a.state.TrackerKeepalive)
+		for _, d := range cfg.Domains { if maintenancePaused(d, a.state.DomainHealth) { delete(keepalive, d.Host) } }
 		a.mu.RUnlock()
 		if running { continue }
 		if trackerKeepaliveCheckDue(now,keepalive) { a.startJob("repair"); continue }

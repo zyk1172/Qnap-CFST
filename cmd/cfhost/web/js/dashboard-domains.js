@@ -368,12 +368,13 @@ function domainRowsHTML(domains, filtered) {
     const ip = mappings[domain.host]
     const domainHealth = health[domain.host] || {}
     const streak = domainHealth.failureStreak || 0
+    const paused = !!maintenancePauseFor(domain.host)
     const sample = trackerSampleMeta(domain)
     const httpProbe = httpProbeMeta(domain)
     const maintaining = !!store.state?.running && store.state.currentJob === 'maintain' && store.state.currentDomain === domain.host
     const expanded = store.expandedDomainHost === domain.host
-    const healthLabel = !domain.enabled ? '停用' : ip ? '正常' : '待处理'
-    const healthVariant = !domain.enabled ? '' : ip ? 'success' : 'warning'
+    const healthLabel = !domain.enabled ? '停用' : paused ? '维护已暂停' : ip ? '正常' : '待处理'
+    const healthVariant = !domain.enabled ? '' : paused ? 'warning' : ip ? 'success' : 'warning'
     const modeLabel = domain.class === 'follow' ? 'MAP' : domain.mode === 'tracker' ? 'TRK' : 'HTTP'
     const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : domain.class === 'follow' ? '跟随' : 'LAT'
     const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : domain.class === 'follow' ? 'primary' : 'info'
@@ -421,7 +422,7 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-actions-cell">
           <div class="table-actions domain-actions">
-            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="${domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${domain.class === 'follow' ? '同步跟随域名当前 IP' : '维护域名并同步跟随映射'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(domain.class === 'follow' ? 'sync' : 'repair')}</button>
+            <button class="icon-button domain-action maintain" ${paused ? 'data-resume-domain' : 'data-maintain-domain'}="${realIndex}" aria-label="${paused ? '恢复维护' : domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${paused ? '恢复维护并清零连续失败计数' : domain.class === 'follow' ? '同步跟随域名当前 IP' : '维护域名并同步跟随映射'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(paused ? 'play' : domain.class === 'follow' ? 'sync' : 'repair')}</button>
             <button class="icon-button domain-action edit" data-edit-domain="${realIndex}" aria-label="编辑 ${esc(domain.host)}" title="编辑">${icon('edit')}</button>
             <button class="icon-button domain-action toggle" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'} ${esc(domain.host)}" title="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
             <button class="icon-button domain-action delete" data-delete-domain="${realIndex}" aria-label="删除 ${esc(domain.host)}" title="删除">${icon('trash')}</button>

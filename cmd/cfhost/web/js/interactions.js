@@ -475,3 +475,33 @@ async function discoverTrackerSamplesNow() {
     toast('自动发现失败', error.message, 'error')
   }
 }
+
+function maintenancePauseFor(host) {
+  return (store.state?.maintenancePaused || []).find(item => item.host === host)
+}
+
+function showMaintenancePauseNotice() {
+  const paused = store.state?.maintenancePaused || []
+  if (!paused.length) return
+  const limit = store.state.maintenanceFailureLimit || 30
+  const list = paused.map(item => `<li><strong>${esc(item.host)}</strong> · 连续失败 ${esc(item.failureStreak)} 次</li>`).join('')
+  openModal(modalTemplate(
+    '部分站点已暂停维护',
+    `以下域名连续修复失败达到 ${limit} 次，已暂停维护，避免反复测速影响其他站点。`,
+    `<ul>${list}</ul><p>现有 Hosts 映射保留。站点恢复后，请在域名页面选择“恢复维护”；关闭提醒不会恢复维护，下次打开网页仍会提醒。</p>`,
+    '<button class="btn secondary" data-action="close-modal">知道了</button><button class="btn" data-action="view-paused-domains">查看域名</button>',
+  ))
+}
+
+async function resumeDomainMaintenance(index) {
+  const domain = store.config?.domains?.[index]
+  if (!domain || !maintenancePauseFor(domain.host)) return
+  if (!await confirmAction('恢复站点维护', `恢复 ${domain.host} 后将清零连续失败计数，下一轮维护会重新尝试。请先确认站点已恢复。`, '恢复维护')) return
+  await api('/api/domain-resume', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host: domain.host }),
+  })
+  await refreshStatus({ quiet: true })
+  renderPage(false, false)
+  toast('已恢复维护', domain.host, 'success')
+}

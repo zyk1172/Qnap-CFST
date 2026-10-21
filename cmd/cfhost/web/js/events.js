@@ -47,6 +47,7 @@ async function handleClick(event) {
     }
   } else if (action === 'close-modal') closeModal(false)
   else if (action === 'confirm-modal') closeModal(true)
+  else if (action === 'view-paused-domains') { closeModal(); navigate('domains') }
   else if (action === 'add-domain') openDomainEditor()
   else if (action === 'save-settings') await saveSettings()
   else if (action === 'discard-settings') discardSettings()
@@ -83,6 +84,9 @@ async function handleClick(event) {
     }
     return
   }
+
+  const resume = event.target.closest('[data-resume-domain]')
+  if (resume) { await resumeDomainMaintenance(Number(resume.dataset.resumeDomain)); return }
 
   const maintain = event.target.closest('[data-maintain-domain]')
   if (maintain) {
@@ -272,6 +276,7 @@ async function boot() {
     $('#app').setAttribute('aria-hidden', 'false')
     setTimeout(() => $('#boot-screen').classList.add('is-hidden'), 100)
     store.polling = setInterval(() => refreshStatus({ quiet: false }), 3000)
+    showMaintenancePauseNotice()
   } catch (error) {
     $('#boot-screen').innerHTML = `
       <div class="boot-logo"><span></span><span></span></div>

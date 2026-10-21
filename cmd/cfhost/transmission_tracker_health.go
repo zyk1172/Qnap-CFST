@@ -684,6 +684,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 }
 
 func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context, cfg Config, samples map[string]TrackerSample, only map[string]bool) map[string]downloaderTrackerFailure {
+	cfg = a.maintenanceConfig(cfg)
 	out := make(map[string]downloaderTrackerFailure)
 	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled || len(samples) == 0 {
 		return out
@@ -993,6 +994,7 @@ func (a *App) trackerKeepalivePostRepairTargets(cfg Config, samples map[string]T
 }
 
 func (a *App) reconcileTransmissionTrackerKeepaliveAfterRepair(ctx context.Context, cfg Config, samples map[string]TrackerSample, before, after map[string]string) {
+	cfg = a.maintenanceConfig(cfg)
 	targets := a.trackerKeepalivePostRepairTargets(cfg, samples, before, after)
 	if len(targets) == 0 {
 		return
