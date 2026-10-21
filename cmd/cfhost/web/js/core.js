@@ -211,6 +211,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       mappings: state.mappings,
       domainStatus: state.domainStatus,
       domainHealth: state.domainHealth,
+      maintenancePaused: state.maintenancePaused,
       httpProbe: state.httpProbe,
       trackerSamples: state.trackerSamples,
     }

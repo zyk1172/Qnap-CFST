@@ -708,6 +708,7 @@ func saveTrackerSamples(path string, samples map[string]TrackerSample) error {
 }
 
 func (a *App) refreshAutoTrackerSamples(ctx context.Context, cfg Config) (map[string]TrackerSample, TrackerDiscoveryReport) {
+	cfg = a.maintenanceConfig(cfg)
 	cache := map[string]TrackerSample{}
 	if loaded, err := loadTrackerSamples(cfg.Tracker.AutoSamplesPath); loaded != nil {
 		cache = loaded

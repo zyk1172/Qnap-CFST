@@ -35,6 +35,7 @@ func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 }
 
 func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSample {
+	cfg = a.maintenanceConfig(cfg)
 	samples:=map[string]TrackerSample{}
 	if !cfg.Tracker.RealAnnounce {
 		a.refreshTrackerSampleInventory(cfg)
@@ -103,6 +104,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 		a.setJobDomainProgress("检查当前映射", 2, 7, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
+		if maintenancePaused(d, health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
 		currentIP:=current[d.Host]
 
 		if isFollowDomain(d) {
@@ -187,7 +189,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		for _,d:=range cfg.Domains {
 			if !d.Enabled { continue }
 			configured[d.Host]=true
-			if isFollowDomain(d) { continue }
+			if isFollowDomain(d) || maintenancePaused(d, health) { continue }
 			h:=health[d.Host]
 			h.FailureStreak=0
 			h.LastSuccess=finalNow.Format(time.RFC3339)
@@ -198,11 +200,12 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			if !configured[host] { delete(health,host) }
 		}
 		detail:="全部健康"
+		if paused := len(pausedMaintenanceDomains(cfg, health)); paused > 0 { detail=fmt.Sprintf("其余域名检查完成 · %d 个域名维护已暂停",paused) }
 		if followUnresolved>0 { detail=fmt.Sprintf("%d 个跟随域名未解析",followUnresolved) }
 		a.setJobProgress("应用结果", fmt.Sprintf("%s · 提交 %d 个域名映射", detail, len(mappings)), 7, 7, 0, 0)
 		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",false);err!=nil{return err}
 		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · %s · %d 个映射", detail, len(mappings)))
-		if followUnresolved==0 { a.appendLog("repair: all independent domains healthy; followers synchronized; candidate verification and CFST refresh skipped") }
+		if followUnresolved==0 { a.appendLog("repair: active independent domains healthy; paused domains skipped; followers synchronized; candidate verification and CFST refresh skipped") }
 		return nil
 	}
 
@@ -288,7 +291,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { continue }
 		configured[d.Host]=true
-		if isFollowDomain(d) { continue }
+		if isFollowDomain(d) || maintenancePaused(d, health) { continue }
 		h:=health[d.Host]
 		if unresolved[d.Host] {
 			h.FailureStreak++; h.LastFailure=finalNow.Format(time.RFC3339)
