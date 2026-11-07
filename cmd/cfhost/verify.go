@@ -224,6 +224,7 @@ func evaluateHTTPConnectivityStatus(status int) (bool, string) {
 }
 
 func verifyHTTPDomain(parent context.Context, d Domain, ip string, cfg Config) (bool, string) {
+	if d.HTTPProbe != nil { return verifyCustomHTTPProbe(parent, d, ip, cfg) }
 	if !cfg.Verify.StrictHTTP { return verifyHTTPConnectivity(parent, d, ip, cfg) }
 	var last string
 	for attempt := 1; attempt <= cfg.Verify.HTTPRetries; attempt++ {

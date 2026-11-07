@@ -174,6 +174,8 @@ function openDomainEditor(index = null) {
     .filter(domain => domain.host !== current.host && domain.class !== 'follow')
     .map(domain => `<option value="${esc(domain.host)}" ${current.follow === domain.host ? 'selected' : ''}>${esc(domain.host)}${domain.enabled ? '' : '（已停用）'}</option>`)
     .join('')
+  const probe = current.httpProbe || {}
+  const headerRefs = (probe.headers || []).map(item => `${item.name}=${item.valueRef}`).join('\n')
   const body = `
     <form id="domain-form" class="form-grid">
       <div class="field span-2"><label>域名</label><input name="host" required value="${esc(current.host)}" placeholder="tracker.example.com"></div>
@@ -185,6 +187,12 @@ function openDomainEditor(index = null) {
         <div class="switch-row"><div class="switch-copy"><strong>启用域名</strong><small>关闭后不会参与 Repair 或 Optimize。</small></div><label class="switch"><input name="enabled" type="checkbox" ${current.enabled ? 'checked' : ''}><span></span></label></div>
       </div>
       ${sampleBlock}
+      <div class="field span-2"><label class="switch-row"><span>自定义 HTTP 验证</span><input name="customProbe" type="checkbox" ${current.httpProbe ? 'checked' : ''}></label><span class="hint">仅 latency / bandwidth HTTP 域名生效。选择只读 API 路径；POST 可能被重复请求。</span></div>
+      <div class="field"><label>请求方法</label><select name="probeMethod"><option value="GET" ${(probe.method || 'GET') === 'GET' ? 'selected' : ''}>GET</option><option value="POST" ${probe.method === 'POST' ? 'selected' : ''}>POST</option></select></div>
+      <div class="field"><label>正文类型</label><select name="probeContentType"><option value="">无</option><option value="application/json" ${probe.contentType === 'application/json' ? 'selected' : ''}>application/json</option><option value="text/plain" ${probe.contentType === 'text/plain' ? 'selected' : ''}>text/plain</option><option value="application/x-www-form-urlencoded" ${probe.contentType === 'application/x-www-form-urlencoded' ? 'selected' : ''}>application/x-www-form-urlencoded</option></select></div>
+      <div class="field span-2"><label>自定义请求头引用（每行一个）</label><textarea name="probeHeaders" rows="3" placeholder="x-api-key=env:CFHOST_PROBE_MTEAM_KEY&#10;Authorization=file:api-auth">${esc(headerRefs)}</textarea><span class="hint">只填写引用，不输入密钥。环境变量需以 CFHOST_PROBE_ 开头；file:名称读取 /run/secrets/cfhost/当前域名/ 下的文件；环境变量需有对应的 _HOST 变量绑定当前域名。</span></div>
+      <div class="field span-2"><label>POST 正文引用（可选）</label><input name="probeBodyRef" value="${esc(probe.bodyRef || '')}" placeholder="file:api-probe-body"><span class="hint">正文也通过环境变量或只读文件提供；勿在配置中放入密钥。自定义路径不接受查询参数。</span></div>
+      <div class="field span-2"><label>响应正文匹配正则（可选）</label><input name="probeBodyRegex" value="${esc(probe.bodyRegex || '')}" placeholder="例如：code.*0"><span class="hint">默认检查 2xx 状态；若业务错误也返回 200，请填写成功响应的正则。跨域及降级跳转会被阻止。</span></div>
     </form>
   `
   openModal(modalTemplate(
@@ -211,6 +219,21 @@ async function saveDomain(indexToken) {
     mode: String(data.get('mode') || 'http'),
     endpoint: String(data.get('endpoint') || '/').trim() || '/',
     enabled: form.elements.enabled.checked,
+  }
+  if (form.elements.customProbe.checked) {
+    if (domain.mode !== 'http' || !['latency', 'bandwidth'].includes(strategy)) throw new Error('自定义 HTTP 验证需要选择 HTTP 类型及 latency 或 bandwidth 策略。')
+    const headers = String(data.get('probeHeaders') || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+      const pos = line.indexOf('=')
+      if (pos < 1) throw new Error('请求头每行需按 名称=env:变量 或 名称=file:文件 填写。')
+      return { name: line.slice(0, pos).trim(), valueRef: line.slice(pos + 1).trim() }
+    })
+    domain.httpProbe = {
+      method: String(data.get('probeMethod') || 'GET'),
+      headers,
+      bodyRef: String(data.get('probeBodyRef') || '').trim(),
+      contentType: String(data.get('probeContentType') || ''),
+      bodyRegex: String(data.get('probeBodyRegex') || '').trim(),
+    }
   }
   const next = deepClone(store.config)
   if (indexToken === 'new') {
