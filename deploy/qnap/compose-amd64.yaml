@@ -16,9 +16,11 @@ services:
       CFST_IP_FILE: /app/ip.txt
       CFST_IPV6_FILE: /app/ipv6.txt
       HOSTS_PATH: /host/etc/hosts
+      HOSTS_VERIFY_PATH: /host/etc-check/hosts
 
     volumes:
       - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
       - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
+      - ${CFHOST_HOSTS_DIR:-/etc}:/host/etc-check:ro
 
     stop_grace_period: 15s

@@ -197,6 +197,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       lastOptimize: state.lastOptimize,
       mappings: state.mappings,
       domainStatus: state.domainStatus,
+      hostsBinding: state.hostsBinding,
       history: state.history,
       candidates: state.candidates,
       sync: state.sync,
@@ -415,7 +416,8 @@ function statusCounts() {
   const domains = store.config.domains || []
   const enabled = domains.filter(domain => domain.enabled)
   const mapped = store.state.mappings || {}
-  const ok = enabled.filter(domain => !!mapped[domain.host]).length
+  const statuses = store.state.domainStatus || {}
+  const ok = enabled.filter(domain => !!mapped[domain.host] && !/stale retained|unresolved/i.test(statuses[domain.host] || '') && !maintenancePauseFor(domain.host)).length
   return { total: enabled.length, ok, failed: Math.max(enabled.length - ok, 0), disabled: domains.length - enabled.length }
 }
 

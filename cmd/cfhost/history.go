@@ -1,6 +1,9 @@
 package main
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // resolutionJob reports whether a job is responsible for producing domain
 // mappings. A plain CFST "run" only refreshes the candidate pool and must not be
@@ -12,14 +15,20 @@ func resolutionJob(kind string) bool {
 // unresolvedDomains names enabled domains that ended a resolution job without
 // a mapping.
 func unresolvedDomains(cfg Config, mappings map[string]string) ([]string, int) {
+	return unresolvedDomainsWithStatus(cfg, mappings, nil)
+}
+
+func unresolvedDomainsWithStatus(cfg Config, mappings map[string]string, statuses map[string]string) ([]string, int) {
 	unresolved := make([]string, 0, len(cfg.Domains))
 	for _, d := range cfg.Domains {
 		if !d.Enabled {
 			continue
 		}
-		if _, ok := mappings[d.Host]; !ok {
-			unresolved = append(unresolved, d.Host)
-		}
+		_, ok := mappings[d.Host]
+  status := strings.ToLower(statuses[d.Host])
+  if !ok || strings.Contains(status, "unresolved") || strings.Contains(status, "stale retained") {
+   unresolved = append(unresolved, d.Host)
+  }
 	}
 	sort.Strings(unresolved)
 	total := len(unresolved)

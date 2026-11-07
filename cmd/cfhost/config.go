@@ -92,12 +92,27 @@ type SyncConfig struct {
 	CommitMessage string `json:"commitMessage"`
 }
 
+type HTTPProbeHeader struct {
+	Name     string `json:"name"`
+	ValueRef string `json:"valueRef"`
+}
+
+type HTTPProbeConfig struct {
+	Method      string            `json:"method,omitempty"`
+	Headers     []HTTPProbeHeader `json:"headers,omitempty"`
+	Body        string            `json:"body,omitempty"`
+	BodyRef     string            `json:"bodyRef,omitempty"`
+	ContentType string            `json:"contentType,omitempty"`
+	BodyRegex   string            `json:"bodyRegex,omitempty"`
+}
+
 type Domain struct {
 	Host     string `json:"host"`
 	Follow   string `json:"follow,omitempty"`
 	Class    string `json:"class"`
 	Mode     string `json:"mode"`
 	Endpoint string `json:"endpoint"`
+	HTTPProbe *HTTPProbeConfig `json:"httpProbe,omitempty"`
 	Enabled  bool   `json:"enabled"`
 }
 
@@ -306,6 +321,12 @@ func normalizeConfig(c *Config) error {
 		if d.Mode != "tracker" { d.Mode = "http" }
 		if d.Endpoint == "" { d.Endpoint = "/" }
 		if !strings.HasPrefix(d.Endpoint, "/") { d.Endpoint = "/" + d.Endpoint }
+		if d.HTTPProbe != nil {
+			if d.Mode != "http" || d.Class == "follow" || d.Class == "normal" {
+				return fmt.Errorf("custom HTTP probe requires an HTTP domain with latency or bandwidth strategy: %s", d.Host)
+			}
+			if err := validateCustomHTTPProbe(d); err != nil { return fmt.Errorf("invalid HTTP probe for %s: %w", d.Host, err) }
+		}
 		seen[d.Host] = true
 		clean = append(clean, d)
 	}

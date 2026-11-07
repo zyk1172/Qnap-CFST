@@ -30,7 +30,7 @@ function renderCandidates() {
                 <div class="metric-bar"><i style="--value:${Math.max(4, 100 - (Number(candidate.delayMs) || 0) / maxDelay * 100)}%"></i></div>
                 <div class="metric-bar speed" style="margin-top:5px"><i style="--value:${(Number(candidate.speedMB) || 0) / maxSpeed * 100}%"></i></div>
               </div>
-              <div class="metric-line-value">${Number(candidate.delayMs || 0).toFixed(1)} ms<br>${Number(candidate.speedMB || 0).toFixed(2)} MB/s</div>
+              <div class="metric-line-value">${Number(candidate.delayMs || 0).toFixed(1)} ms<br>${candidate.latencyOnly ? '未测速' : `${Number(candidate.speedMB || 0).toFixed(2)} MB/s`}</div>
             </div>
           `).join('') : emptyState('先执行一次 CFST 测速')}
         </div>
@@ -62,7 +62,7 @@ function renderCandidates() {
         <div class="table-wrap">
           <table class="data-table"><thead><tr><th>#</th><th>IP</th><th>丢包率</th><th>延迟</th><th>下载速度</th><th>地区</th><th>采样时间</th></tr></thead>
           <tbody>${list.length ? list.map((candidate, index) => `
-            <tr><td>${index + 1}</td><td class="mono"><strong>${esc(candidate.ip)}</strong></td><td>${Number(candidate.lossRate || 0).toFixed(3)}</td><td>${Number(candidate.delayMs || 0).toFixed(1)} ms</td><td><strong>${Number(candidate.speedMB || 0).toFixed(2)}</strong> MB/s</td><td>${esc(candidate.colo || '—')}</td><td>${fmtTime(candidate.observedAt)}</td></tr>
+            <tr><td>${index + 1}</td><td class="mono"><strong>${esc(candidate.ip)}</strong></td><td>${Number(candidate.lossRate || 0).toFixed(3)}</td><td>${Number(candidate.delayMs || 0).toFixed(1)} ms</td><td>${candidate.latencyOnly ? '未测速 · 需域名验证' : `<strong>${Number(candidate.speedMB || 0).toFixed(2)}</strong> MB/s`}</td><td>${esc(candidate.colo || '—')}</td><td>${fmtTime(candidate.observedAt)}</td></tr>
           `).join('') : '<tr><td colspan="7" class="table-empty">暂无候选数据</td></tr>'}</tbody></table>
         </div>
       </div>

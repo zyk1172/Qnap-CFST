@@ -127,16 +127,13 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 				lastDetail=fmt.Sprintf("domain verification budget exceeded · %s",budget.Round(time.Second))
 				a.appendLog("%s optimize verification budget exhausted after %s; continuing",d.Host,budget.Round(time.Second))
 			}
-			if oldIP!="" && !oldHardFailed {
+			if oldIP!="" {
 				mappings[d.Host]=oldIP
 				statuses[d.Host]="optimize unresolved · "+lastDetail+" · retained last-known-good · "+oldIP
+    if oldHardFailed { statuses[d.Host] += " · HTTP hard failure" }
 			} else {
 				delete(mappings,d.Host)
-				if oldIP!="" && oldHardFailed {
-					statuses[d.Host]="optimize unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+lastDetail
-				} else {
-					statuses[d.Host]="optimize unresolved · "+lastDetail
-				}
+				statuses[d.Host]="optimize unresolved · "+lastDetail
 			}
 			h.FailureStreak++;h.LastFailure=now
 		} else {

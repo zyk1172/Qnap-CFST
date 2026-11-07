@@ -45,6 +45,7 @@ func (a *App) publishSync(ctx context.Context, cfg Config, force bool) error {
 	if !cfg.Sync.Enabled {
 		return errors.New("github sync is disabled")
 	}
+	if _, err := hostsBindingStatus(cfg.HostsPath); err != nil { return err }
 	payload, err := a.buildSyncPayload(cfg, time.Now())
 	if err != nil {
 		return err

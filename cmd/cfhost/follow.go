@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func isFollowDomain(d Domain) bool {
 	return d.Class == "follow"
@@ -45,6 +48,10 @@ func applyFollowMapping(cfg Config, d Domain, mappings map[string]string, status
 
 	mappings[d.Host] = ip
 	statuses[d.Host] = fmt.Sprintf("follow · %s → %s", target.Host, ip)
+	targetStatus := strings.ToLower(statuses[target.Host])
+	if strings.Contains(targetStatus, "unresolved") || strings.Contains(targetStatus, "stale retained") || strings.Contains(targetStatus, "maintenance paused") {
+  statuses[d.Host] = fmt.Sprintf("follow unresolved · target requires attention · %s → %s", target.Host, ip)
+	}
 	if targetHealth, ok := health[target.Host]; ok {
 		health[d.Host] = targetHealth
 	} else {

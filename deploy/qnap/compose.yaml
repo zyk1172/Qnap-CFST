@@ -9,7 +9,9 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
       HOSTS_PATH: /host/etc/hosts
+      HOSTS_VERIFY_PATH: /host/etc-check/hosts
     volumes:
       - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
       - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts
+      - ${CFHOST_HOSTS_DIR:-/etc}:/host/etc-check:ro
     stop_grace_period: 15s

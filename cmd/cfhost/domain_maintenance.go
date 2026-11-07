@@ -156,7 +156,6 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 			statuses[d.Host] = "manual current failed · " + detail
 			a.recordTrackerSampleTest(cfg, d, false, detail)
 			a.appendLog("%s current %s failed during manual maintain from downloader runtime: %s", d.Host, currentIP, failure.Detail)
-			delete(mappings, d.Host)
 		} else {
 			ok, detail := a.verifyDomain(ctx, d, currentIP, cfg, samples)
 			if ok {
@@ -166,7 +165,6 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 			}
 			statuses[d.Host] = "manual current failed · " + detail
 			a.appendLog("%s current %s failed during manual maintain: %s", d.Host, currentIP, detail)
-			delete(mappings, d.Host)
 		}
 	}
 
@@ -216,7 +214,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return finish(true, "")
 	}
 	statuses[d.Host] = "manual unresolved · " + lastDetail
-	delete(mappings, d.Host)
+ if currentIP != "" { mappings[d.Host] = currentIP; statuses[d.Host] += " · retained last-known-good · " + currentIP }
 	return finish(false, lastDetail)
 }
 

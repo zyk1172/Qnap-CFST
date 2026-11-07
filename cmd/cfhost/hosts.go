@@ -115,7 +115,28 @@ func renderHosts(existing string, mappings map[string]string) (string, error) {
 	return strings.Join(out, "\n"), nil
 }
 
+// The comparison path must come from a directory bind: a second file bind can
+// itself remain attached to the same stale inode after the host replaces it.
+func hostsBindingStatus(path string) (string, error) {
+	check := strings.TrimSpace(os.Getenv("HOSTS_VERIFY_PATH"))
+	if check == "" {
+		if filepath.Clean(path) == "/host/etc/hosts" {
+			return "unverified", errors.New("HOSTS_VERIFY_PATH is required for the host Hosts file")
+		}
+		return "unverified", nil
+	}
+	bound, err := os.Stat(path)
+	if err != nil { return "error", fmt.Errorf("stat Hosts binding: %w", err) }
+	actual, err := os.Stat(check)
+	if err != nil { return "error", fmt.Errorf("stat host Hosts path: %w", err) }
+	if !os.SameFile(bound, actual) {
+		return "diverged", errors.New("Hosts binding differs from the current host file; refusing apply or sync")
+	}
+	return "verified", nil
+}
+
 func (a *App) stageApplyMappings(cfg Config, mappings map[string]string) (hostsStage, error) {
+	if _, err := hostsBindingStatus(cfg.HostsPath); err != nil { return hostsStage{}, err }
 	hostsPath := cfg.HostsPath
 	info, err := os.Lstat(hostsPath)
 	if err != nil { return hostsStage{}, fmt.Errorf("read hosts metadata: %w", err) }
@@ -143,10 +164,12 @@ func (a *App) stageApplyMappings(cfg Config, mappings map[string]string) (hostsS
 		if !bytes.Equal(got, current) { return errors.New("Hosts rollback verification failed") }
 		return nil
 	}
+	if _, err := hostsBindingStatus(hostsPath); err != nil { return hostsStage{}, err }
 	if err := writeHostsInPlace(hostsPath, []byte(rendered)); err != nil {
 		_ = restore()
 		return hostsStage{}, fmt.Errorf("write hosts: %w", err)
 	}
+	if _, err := hostsBindingStatus(hostsPath); err != nil { _ = restore(); return hostsStage{}, err }
 	got, err := os.ReadFile(hostsPath)
 	if err != nil || !bytes.Equal(got, []byte(rendered)) {
 		_ = restore()

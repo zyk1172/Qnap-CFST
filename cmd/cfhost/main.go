@@ -223,7 +223,7 @@ func (a *App) startJob(kind string) bool {
 		if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
 		record:=RunRecord{Kind:kind,StartedAt:started.Format(time.RFC3339),FinishedAt:now,DurationMS:finished.Sub(started).Milliseconds(),Success:err==nil,MappingsBefore:mappingsBefore,MappingsAfter:len(a.state.Mappings),CandidateCount:len(a.state.Candidates),FullRefresh:a.state.LastRefresh!=refreshBefore}
 		if resolutionJob(kind) {
-			record.UnresolvedDomains,record.UnresolvedCount=unresolvedDomains(cfg,a.state.Mappings)
+			record.UnresolvedDomains,record.UnresolvedCount=unresolvedDomainsWithStatus(cfg,a.state.Mappings,a.state.DomainStatus)
 		}
 		if err!=nil{record.Error=err.Error()}
 		a.state.History=append(a.state.History,record); if len(a.state.History)>200{a.state.History=a.state.History[len(a.state.History)-200:]}

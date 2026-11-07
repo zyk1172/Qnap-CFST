@@ -373,7 +373,7 @@ func TestMaintenanceSynchronizesOnlyDirectFollowers(t *testing.T) {
 	}
 }
 
-func TestFailedMaintenanceDropsDependentFollowMapping(t *testing.T) {
+func TestFailedMaintenanceRetainsDependentFollowMapping(t *testing.T) {
 	a, cfg := newRegressionApp(t)
 	cfg.Domains = []Domain{
 		{Host: "origin.example", Class: "latency", Mode: "http", Endpoint: "/%", Enabled: true},
@@ -387,12 +387,11 @@ func TestFailedMaintenanceDropsDependentFollowMapping(t *testing.T) {
 	if err := a.runDomainMaintenance(context.Background(), cfg, "origin.example"); err == nil {
 		t.Fatal("expected failed maintenance")
 	}
-	if a.state.Mappings["origin.example"] != "" || a.state.Mappings["alias.example"] != "" {
-		t.Fatal("unresolved target or follower retained")
-	}
-	if !strings.Contains(a.state.DomainStatus["alias.example"], "target has no mapping") {
-		t.Fatal("unresolved follower status missing")
-	}
+	if a.state.Mappings["origin.example"] != "104.16.0.1" || a.state.Mappings["alias.example"] != "104.16.0.1" {
+        t.Fatal("failed maintenance must retain target and follower")
+    }
+    if !strings.Contains(a.state.DomainStatus["origin.example"], "manual unresolved") { t.Fatal("failure must stay visible") }
+ if !strings.Contains(a.state.DomainStatus["alias.example"], "follow unresolved") { t.Fatal("follower must surface the target failure") }
 }
 
 func TestTrackerMaintenancePreservesOtherKeepalive(t *testing.T) {

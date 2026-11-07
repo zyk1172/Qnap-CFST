@@ -15,6 +15,7 @@ import (
 
 var (
 	version, versionNew string
+	latencyOutput string
 )
 
 func init() {
@@ -98,6 +99,7 @@ https://github.com/XIU2/CloudflareSpeedTest
 	flag.StringVar(&task.IPFile, "f", "ip.txt", "IP段数据文件")
 	flag.StringVar(&task.IPText, "ip", "", "指定IP段数据")
 	flag.StringVar(&utils.Output, "o", "result.csv", "输出结果文件")
+	flag.StringVar(&latencyOutput, "latency-output", "", "输出延迟候选（供域名验证）")
 
 	flag.BoolVar(&task.Disable, "dd", false, "禁用下载测速")
 	flag.BoolVar(&task.TestAll, "allip", false, "测速全部 IP")
@@ -137,6 +139,14 @@ func main() {
 
 	// 开始延迟测速 + 过滤延迟/丢包
 	pingData := task.NewPing().Run().FilterDelay().FilterLossRate()
+	// Preserve a bounded latency-only pool before download tests mutate it.
+	if latencyOutput != "" && len(pingData) > 0 {
+  output := utils.Output
+  utils.Output = latencyOutput
+  limit := len(pingData); if limit > 100 { limit = 100 }
+  utils.ExportCsv(pingData[:limit])
+  utils.Output = output
+	}
 	// 开始下载测速
 	speedData := task.TestDownloadSpeed(pingData)
 	utils.ExportCsv(speedData) // 输出文件

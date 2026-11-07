@@ -41,7 +41,7 @@ func (a *App) routes() http.Handler {
 		if r.URL.Path == "/" {
 			w.Header().Set("Cache-Control", "no-cache")
 		} else if strings.HasSuffix(r.URL.Path, ".css") || strings.HasSuffix(r.URL.Path, ".js") {
-			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		files.ServeHTTP(w, r)
 	}))
@@ -52,6 +52,13 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+	cfg := a.snapshotConfig()
+	if cfg.AutoApply || cfg.Sync.Enabled {
+  if _, err := hostsBindingStatus(cfg.HostsPath); err != nil {
+   http.Error(w, "Hosts binding verification failed", http.StatusServiceUnavailable)
+   return
+  }
 	}
 	writeResponse(w, map[string]string{"status": "ok", "version": cfhostVersion})
 }
@@ -64,11 +71,13 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	// Encode a consistent snapshot, then release the lock before writing to a
 	// potentially slow client. Jobs must not wait for status responses to drain.
+	binding, _ := hostsBindingStatus(a.config.HostsPath)
 	body, err := json.Marshal(struct {
 		RuntimeState
+  HostsBinding string `json:"hostsBinding"`
 		MaintenanceFailureLimit int `json:"maintenanceFailureLimit"`
 		MaintenancePaused []MaintenancePause `json:"maintenancePaused"`
-	}{a.state, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
+	}{a.state, binding, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
 	a.mu.RUnlock()
 	if err != nil {
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)

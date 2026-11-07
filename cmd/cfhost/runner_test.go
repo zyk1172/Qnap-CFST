@@ -787,7 +787,7 @@ func TestCommitResolutionClearsRejectedIPOnlyAfterReplacement(t *testing.T) {
 	}
 }
 
-func TestFinalizeUnresolvedMappingDropsConfirmedHTTPHardFailure(t *testing.T) {
+func TestFinalizeUnresolvedMappingRetainsConfirmedHTTPHardFailure(t *testing.T) {
 	d:=Domain{Host:"moviepilot.example",Class:"latency",Mode:"http",Enabled:true}
 	p:=pendingDomain{Domain:d,FailedCurrent:"104.16.0.10",Refreshable:true}
 	current:=map[string]string{d.Host:"104.16.0.10"}
@@ -795,12 +795,8 @@ func TestFinalizeUnresolvedMappingDropsConfirmedHTTPHardFailure(t *testing.T) {
 	mappings:=copyMappings(current)
 	statuses:=map[string]string{d.Host:"current failed · HTTP 403 · blocked/unusable"}
 	finalizeUnresolvedMapping(mappings,current,statuses,p,map[string]bool{d.Host:true})
-	if _,exists:=mappings[d.Host];exists{
-		t.Fatalf("confirmed HTTP 403 mapping must not be stale-retained: %#v",mappings)
-	}
-	if !strings.Contains(statuses[d.Host],"old mapping removed"){
-		t.Fatalf("hard failure status must expose removal: %q",statuses[d.Host])
-	}
+	if mappings[d.Host] != "104.16.0.10" { t.Fatalf("must preserve last mapping: %#v",mappings) }
+ if !strings.Contains(statuses[d.Host],"HTTP hard failure") { t.Fatalf("hard failure must remain visible: %q",statuses[d.Host]) }
 
 	mappings=copyMappings(current)
 	statuses=map[string]string{d.Host:"current failed · context deadline exceeded"}
