@@ -387,11 +387,7 @@ func finalizeUnresolvedMapping(mappings,current map[string]string,statuses map[s
 	if oldIP=="" {return}
 	detail:=statuses[p.Domain.Host]
 	if detail=="" {detail="no verified candidate"}
-	if confirmedUnusableCurrent[p.Domain.Host] {
-		delete(mappings,p.Domain.Host)
-		statuses[p.Domain.Host]="unresolved · confirmed HTTP hard failure · old mapping removed · "+oldIP+" · "+detail
-		return
-	}
+	if confirmedUnusableCurrent[p.Domain.Host] { detail = "HTTP hard failure · " + detail }
 	mappings[p.Domain.Host]=oldIP
 	statuses[p.Domain.Host]="stale retained · "+oldIP+" · "+detail
 }

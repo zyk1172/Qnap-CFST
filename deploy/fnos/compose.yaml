@@ -9,6 +9,7 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /data
       HOSTS_PATH: /host/etc/hosts
+      HOSTS_VERIFY_PATH: /host/etc-check/hosts
     volumes:
       - type: bind
         source: ${CFHOST_DATA_DIR:-./data}
@@ -19,4 +20,8 @@ services:
         read_only: false
         bind:
           create_host_path: false
+      - type: bind
+        source: ${CFHOST_HOSTS_DIR:-/etc}
+        target: /host/etc-check
+        read_only: true
     stop_grace_period: 15s

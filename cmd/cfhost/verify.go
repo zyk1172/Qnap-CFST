@@ -49,6 +49,8 @@ func freshCandidates(in []Candidate, ttl time.Duration, now time.Time) []Candida
 }
 
 func candidateEligible(c Candidate, d Domain, cfg Config) bool {
+	// Normal skips domain verification, bandwidth needs a measured speed.
+	if c.LatencyOnly && (d.Class == "normal" || d.Class == "bandwidth") { return false }
 	if d.Class != "bandwidth" { return true }
 	return c.LossRate <= cfg.Bandwidth.MaxLossRate &&
 		c.DelayMS <= float64(cfg.Bandwidth.MaxDelayMS) &&
@@ -200,7 +202,7 @@ func classifyHTTPConnectivityStatus(status int) httpProbeDisposition {
 	return httpProbeReachable
 }
 
-var httpStatusCodeDetailPattern = regexp.MustCompile(`(?i)\bHTTP\s+([1-5][0-9]{2})\b`)
+var httpStatusCodeDetailPattern = regexp.MustCompile(`(?i)\bHTTP\b[^0-9\n]{0,30}([1-5][0-9]{2})\b`)
 
 func httpStatusCodeFromDetail(detail string) int {
 	match := httpStatusCodeDetailPattern.FindStringSubmatch(detail)

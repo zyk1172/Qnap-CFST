@@ -3,7 +3,7 @@ function unresolvedDomainsNow() {
   const mappings = store.state?.mappings || {}
   const statuses = store.state?.domainStatus || {}
   return domains
-    .filter(domain => !mappings[domain.host])
+    .filter(domain => !mappings[domain.host] || /stale retained|unresolved/i.test(statuses[domain.host] || ''))
     .map(domain => ({ host: domain.host, detail: statuses[domain.host] || '等待验证' }))
 }
 
@@ -19,7 +19,7 @@ function unresolvedNotice() {
     <div class="alert warning">
       ${icon('warning')}
       <div>
-        <strong>${pending.length} 个已启用域名当前没有映射</strong>
+        <strong>${pending.length} 个已启用域名需要处理</strong>
         ${shown.map(item => `<span class="alert-line"><code>${esc(item.host)}</code> · ${esc(item.detail)}</span>`).join('')}
         ${pending.length > shown.length ? `<span class="alert-line">另有 ${pending.length - shown.length} 个，详见域名页</span>` : ''}
       </div>
@@ -42,6 +42,7 @@ function renderDashboard() {
     ${store.state.lastError ? `
       <div class="alert">${icon('warning')}<div><strong>最近任务失败</strong><span>${esc(store.state.lastError)}</span></div></div>
     ` : ''}
+    ${store.state.hostsBinding && store.state.hostsBinding !== 'verified' ? `<div class="alert warning">${icon('warning')}<div><strong>宿主机 Hosts 绑定${store.state.hostsBinding === 'unverified' ? '未验证' : '异常'}</strong><span>${store.state.hostsBinding === 'unverified' ? '请配置宿主机目录只读挂载及验证路径。' : '已阻止应用和同步映射，请检查文件绑定。'}</span></div></div>` : ''}
     ${unresolvedNotice()}
     <div class="grid cols-4">
       ${statCard('运行状态', store.state.running ? jobLabel(store.state.currentJob) : '空闲', store.state.running ? '任务执行中' : '等待下一次计划任务', 'activity', store.state.running ? '' : 'success', false)}
@@ -347,7 +348,7 @@ function filteredDomains() {
     .filter(({ domain }) => {
       if (store.domainFilter === 'tracker' && (domain.mode !== 'tracker' || domain.class === 'follow')) return false
       if (store.domainFilter === 'enabled' && !domain.enabled) return false
-      if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host]) return false
+      if (store.domainFilter === 'failed' && store.state.mappings?.[domain.host] && !/stale retained|unresolved/i.test(store.state.domainStatus?.[domain.host] || '') && !maintenancePauseFor(domain.host)) return false
       if (!query) return true
       return [domain.host, domain.follow, domain.class, domain.mode].some(value => String(value || '').toLowerCase().includes(query))
     })
@@ -373,8 +374,9 @@ function domainRowsHTML(domains, filtered) {
     const httpProbe = httpProbeMeta(domain)
     const maintaining = !!store.state?.running && store.state.currentJob === 'maintain' && store.state.currentDomain === domain.host
     const expanded = store.expandedDomainHost === domain.host
-    const healthLabel = !domain.enabled ? '停用' : paused ? '维护已暂停' : ip ? '正常' : '待处理'
-    const healthVariant = !domain.enabled ? '' : paused ? 'warning' : ip ? 'success' : 'warning'
+    const needsAttention = /stale retained|unresolved/i.test(statuses[domain.host] || '')
+    const healthLabel = !domain.enabled ? '停用' : paused ? '维护已暂停' : needsAttention ? '待处理' : ip ? '正常' : '待处理'
+    const healthVariant = !domain.enabled ? '' : paused || needsAttention ? 'warning' : ip ? 'success' : 'warning'
     const modeLabel = domain.class === 'follow' ? 'MAP' : domain.mode === 'tracker' ? 'TRK' : 'HTTP'
     const classLabel = domain.class === 'bandwidth' ? 'BW' : domain.class === 'normal' ? '普通' : domain.class === 'follow' ? '跟随' : 'LAT'
     const classVariant = domain.class === 'bandwidth' ? 'success' : domain.class === 'normal' ? 'warning' : domain.class === 'follow' ? 'primary' : 'info'

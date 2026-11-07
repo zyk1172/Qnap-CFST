@@ -57,6 +57,7 @@ type transmissionDomainHealth struct {
 	Connected              int
 	Working                int
 	BusinessErrors         int
+	ServerErrors           int
 	ConnectionFailures     int
 	ForbiddenFailures      int
 	Waiting                int
@@ -257,6 +258,7 @@ func transmissionTrackerStatusLabel(stat transmissionTrackerStat) string {
 	if trackerFailureIndicatesForbidden(reason) {
 		return "Disconnected"
 	}
+	if httpStatusCodeFromDetail(reason) >= 500 { return "ServerError" }
 	if stat.LastAnnounceTimedOut {
 		return "Timeout"
 	}
@@ -309,6 +311,9 @@ func transmissionDomainHealthForTarget(rows []transmissionTrackerStatsRow, targe
 			out.Evaluated++
 			out.Connected++
 			out.BusinessErrors++
+		case "ServerError":
+			out.Evaluated++
+			out.ServerErrors++
 		case "Timeout", "Disconnected":
 			out.Evaluated++
 			out.ConnectionFailures++
@@ -408,7 +413,7 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		}
 
 		label := transmissionTrackerStatusLabel(*selected)
-		if label == "Timeout" || label == "Disconnected" {
+		if label == "Timeout" || label == "Disconnected" || label == "ServerError" {
 			if label == "Timeout" {
 				out.TimeoutTorrents++
 			} else {
@@ -436,11 +441,11 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 	switch {
 	case out.MatchedTorrents == 0:
 		out.TrackerStatus = "NoActive"
-	case out.ConnectionFailures > 0 && out.ConnectedTorrents > 0:
+	case (out.ConnectionFailures > 0 || out.ErrorTorrents > 0) && out.ConnectedTorrents > 0:
 		out.TrackerStatus = "Partial"
 	case out.TimeoutTorrents > 0 && out.ErrorTorrents == 0 && out.ConnectedTorrents == 0:
 		out.TrackerStatus = "Timeout"
-	case out.ConnectionFailures > 0:
+	case out.ConnectionFailures > 0 || out.ErrorTorrents > 0:
 		out.TrackerStatus = "Error"
 	case out.BusinessErrorTorrents > 0:
 		out.TrackerStatus = "Connected"
@@ -462,7 +467,7 @@ func aggregateTransmissionTrackerRuntime(rows []transmissionTrackerStatsRow, tar
 		out.AnnounceState = latest.AnnounceState
 		out.HasAnnounced = latest.HasAnnounced
 		out.LastAnnounceResult = sanitizeTrackerReason([]byte(latest.LastAnnounceResult))
-		out.LastAnnounceSucceeded = out.ConnectionFailures == 0 && out.ConnectedTorrents > 0
+		out.LastAnnounceSucceeded = latest.LastAnnounceSucceeded
 		out.LastAnnounceTimedOut = out.TimeoutTorrents > 0
 		out.LastAnnounceTime = latest.LastAnnounceTime
 		out.NextAnnounceTime = latest.NextAnnounceTime
@@ -824,6 +829,15 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 			continue
 		}
 
+		if health.ServerErrors > 0 && health.ConnectionFailures == 0 {
+			state.Attempts = 0
+			state.Status = "server-error"
+			state.NextCheck = ""
+			state.NextReannounce = ""
+			state.LastEvent = fmt.Sprintf("Tracker HTTP server errors · %d; waiting for the next normal check", health.ServerErrors)
+			states[domain] = state
+			continue
+		}
 		if trackerDomainHealthAcceptable(health) {
 			state.Attempts = 0
 			state.NextCheck = ""

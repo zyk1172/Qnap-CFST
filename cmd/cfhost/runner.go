@@ -23,6 +23,7 @@ type Candidate struct {
 	LossRate   float64 `json:"lossRate"`
 	DelayMS    float64 `json:"delayMs"`
 	SpeedMB    float64 `json:"speedMB"`
+	LatencyOnly bool `json:"latencyOnly,omitempty"`
 	Colo       string  `json:"colo"`
 	ObservedAt string  `json:"observedAt"`
 }
@@ -252,6 +253,9 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 		ipFile = getenv("CFST_IPV6_FILE", "/app/ipv6.txt")
 	}
 	args := buildCFSTArgs(cfg, ipFile, resultPath, degraded)
+	latencyPath := filepath.Join(a.dataDir, "latency-candidates.csv")
+	_ = os.Remove(latencyPath)
+	args = append(args, "-latency-output", latencyPath)
 	mode := "normal"
 	if degraded {
 		mode = "degraded"
@@ -281,8 +285,22 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	}
 	candidates, err := parseCandidates(resultPath)
 	if err != nil {
-		return nil, signal, err
+  if !errors.Is(err, os.ErrNotExist) { return nil, signal, err }
+  candidates = nil
 	}
+	// Delay-only candidates are useful only after domain-specific verification.
+	// Never silently convert a missing/failed bandwidth test into a speed result.
+	if len(candidates) < 20 {
+  if latency, latencyErr := parseCandidates(latencyPath); latencyErr == nil {
+   seen := make(map[string]bool, len(candidates))
+   for _, c := range candidates { seen[c.IP] = true }
+   for _, c := range latency {
+    if !seen[c.IP] { c.LatencyOnly = true; c.SpeedMB = 0; candidates = append(candidates,c); seen[c.IP]=true }
+   }
+   a.appendLog("CFST supplemented candidates with latency-only addresses; domain verification required")
+  }
+	}
+	for i := range candidates { if candidates[i].SpeedMB <= 0 { candidates[i].LatencyOnly = true } }
 	if len(candidates) == 0 {
 		if signal != nil {
 			return nil, signal, fmt.Errorf("CFST rate limited and returned no degraded candidates")
