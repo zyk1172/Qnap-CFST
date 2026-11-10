@@ -212,3 +212,38 @@ test('no paused domains means no popup; resume requires explicit confirmation', 
   assert.equal(requests, 2)
   assert.equal(f.store.state.maintenancePaused.length, 0)
 })
+
+
+test('candidate and operation pages refresh for cooldown and admission changes', () => {
+  const { store, pageRefreshSignature } = fixture()
+  for (const page of ['candidates', 'operations']) {
+    const before = pageRefreshSignature(page)
+    store.state.cfstSchedule = { nextAllowedAt: new Date().toISOString(), reason: page }
+    assert.notEqual(pageRefreshSignature(page), before)
+  }
+})
+
+test('expired provider cooldown displays recovery pending without a new scan', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.store.state.cfstRateLimit = { active: true, mode: 'cooldown', detectedAt: '2026-01-01T00:00:00Z', until: new Date(Date.now() - 60000).toISOString() }
+  assert.equal(vm.runInContext('cfstCooldownMeta().label', f.context), '待恢复验证')
+  f.store.state.cfstRateLimit.until = new Date(Date.now() + 3600000).toISOString()
+  assert.equal(vm.runInContext('cfstCooldownMeta().label', f.context), '冷却中')
+})
+
+
+test('additional download source input stays a list through settings edits', () => {
+  const f = fixture()
+  f.context.updateSaveBar = () => {}
+  f.listeners.input({ target: { dataset: { configPath: 'cfst.downloadUrls', configType: 'lines' }, value: 'https://cf.xiu2.xyz/url\n\n https://speed.cloudflare.com/__down?bytes=5000000 ' } })
+  assert.deepEqual(Array.from(f.store.configDraft.cfst.downloadUrls), ['https://cf.xiu2.xyz/url', 'https://speed.cloudflare.com/__down?bytes=5000000'])
+})
+
+test('one cooling source is not displayed as a global download freeze', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.store.state.cfstSources = { first: { rateLimit: { active: true, until: new Date(Date.now() + 3600000).toISOString() } }, second: { rateLimit: { active: false } } }
+  assert.equal(vm.runInContext('cfstCooldownMeta().active', f.context), false)
+  assert.equal(vm.runInContext('cfstCooldownMeta().label', f.context), '部分源冷却')
+})
