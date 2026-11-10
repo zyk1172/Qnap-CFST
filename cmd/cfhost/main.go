@@ -100,6 +100,8 @@ type RuntimeState struct {
 	HTTPProbe           map[string]HTTPProbeRuntime `json:"httpProbe"`
 	TrackerSamples      map[string]TrackerSampleRuntime    `json:"trackerSamples"`
 	TrackerKeepalive    map[string]TrackerKeepaliveRuntime `json:"trackerKeepalive"`
+	CandidateSweeps map[string]CandidateSweep `json:"candidateSweeps,omitempty"`
+	CFSTSources map[string]CFSTSourceRuntime `json:"cfstSources,omitempty"`
 	CFSTSchedule CFSTScheduleRuntime `json:"cfstSchedule"`
 	CFSTRateLimit       CFSTRateLimitRuntime               `json:"cfstRateLimit"`
 	Sync                SyncRuntimeState        `json:"sync"`

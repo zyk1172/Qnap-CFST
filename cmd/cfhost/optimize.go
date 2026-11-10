@@ -22,6 +22,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	if err!=nil{return err}
 	if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before mapping changes: %w",err)}
 	a.storeCandidates(candidates,cfg)
+	a.mu.RLock();candidates=freshCandidates(append([]Candidate(nil),a.state.Candidates...),time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute,time.Now());a.mu.RUnlock()
 	a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个候选 IP", len(candidates)), 2, 5, 1, 1)
 	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 3, 5, 0, 0)
 	samples:=a.loadSamples(ctx,cfg)

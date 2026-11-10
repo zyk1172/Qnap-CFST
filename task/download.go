@@ -6,6 +6,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strings"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -61,6 +64,7 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 	if len(ipSet) < TestCount || MinSpeed > 0 { // 如果延迟测速并过滤后的 IP 数组长度(IP数量) 小于 下载测速数量(-dn），（即 -dn 预期数量是不够的），或者指定了 下载测速下限 (-sl) 条件（这就可能要全部下载测速一遍，直到找齐预期数量或测完为止），则 等待下载测速的队列数量 修正为 IP 数量
 		testNum = len(ipSet)
 	}
+	if limit,err:=strconv.Atoi(os.Getenv("CFST_MAX_DOWNLOAD_ATTEMPTS"));err==nil && limit>0 && testNum>limit {testNum=limit}
 	if testNum < TestCount { // 如果 等待下载测速的队列数量 小于 下载测速数量(-dn），（显然 -dn 预期数量是不够的），所以 下载测速数量(-dn）修正为 等待下载测速的队列数量
 		TestCount = testNum
 	}
@@ -145,6 +149,7 @@ func downloadHandler(ip *net.IPAddr) (float64, string, bool) {
 		Transport: &http.Transport{DialContext: getDialContext(ip)},
 		Timeout:   Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if downloadOriginBlocked(req.URL) {fmt.Printf("CFST_SOURCE_BLOCKED origin=%s\n",strconv.Quote(downloadOrigin(req.URL)));return fmt.Errorf("redirect destination is cooling down")}
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
 			if len(via) > 10 {                 // 限制最多重定向 10 次
 				if utils.Debug { // 调试模式下，输出更多信息
@@ -169,18 +174,20 @@ func downloadHandler(ip *net.IPAddr) (float64, string, bool) {
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
 
+	if downloadOriginBlocked(req.URL) {fmt.Printf("CFST_SOURCE_BLOCKED origin=%s\n",strconv.Quote(downloadOrigin(req.URL)));return 0.0,"",true}
 	response, err := client.Do(req)
 	if err != nil {
 		if utils.Debug { // 调试模式下，输出更多信息
 			printDownloadDebugInfo(ip, err, 0, URL, lastRedirectURL, response)
 		}
-		return 0.0, "", false
+		return 0.0, "", strings.Contains(err.Error(),"redirect destination is cooling down")
 	}
 	defer response.Body.Close()
+	fmt.Printf("CFST_SOURCE origin=%s\n",strconv.Quote(downloadOrigin(response.Request.URL)))
 	if response.StatusCode != 200 {
 		retryAfter := response.Header.Get("Retry-After")
 		if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode == http.StatusServiceUnavailable && retryAfter != "") {
-			fmt.Printf("CFST_RATE_LIMIT status=%d retry_after=%s\n", response.StatusCode, strconv.Quote(retryAfter))
+			fmt.Printf("CFST_RATE_LIMIT status=%d retry_after=%s origin=%s\n", response.StatusCode, strconv.Quote(retryAfter),strconv.Quote(downloadOrigin(response.Request.URL)))
 			if utils.Debug {
 				printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
 			}
@@ -239,4 +246,16 @@ func downloadHandler(ip *net.IPAddr) (float64, string, bool) {
 		contentRead += int64(bufferRead)
 	}
 	return e.Value() / (Timeout.Seconds() / 120), colo, false
+}
+
+func downloadOrigin(u *url.URL) string {
+ scheme:=strings.ToLower(u.Scheme);host:=strings.ToLower(u.Host)
+ if scheme=="https" {host=strings.TrimSuffix(host,":443")}
+ if scheme=="http" {host=strings.TrimSuffix(host,":80")}
+ return scheme+"://"+host
+}
+
+func downloadOriginBlocked(u *url.URL) bool {
+ for _,origin:=range strings.Split(os.Getenv("CFST_BLOCKED_ORIGINS"),",") {if origin==downloadOrigin(u) {return true}}
+ return false
 }

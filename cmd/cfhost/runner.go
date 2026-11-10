@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type Candidate struct {
+	Source string `json:"source,omitempty"`
 	mappingFallback bool
 	IP         string  `json:"ip"`
 	LossRate   float64 `json:"lossRate"`
@@ -32,33 +34,26 @@ type Candidate struct {
 type cfstRateLimitSignal struct {
 	StatusCode int
 	RetryAfter string
+	Origin string
+	Blocked bool
 }
 
-func parseCFSTRateLimitSignal(output string) (cfstRateLimitSignal, bool) {
-	for _, line := range strings.Split(output, "\n") {
-		marker := strings.Index(line, "CFST_RATE_LIMIT")
-		if marker < 0 {
-			continue
-		}
-		rest := strings.TrimSpace(line[marker+len("CFST_RATE_LIMIT"):])
-		statusPos := strings.Index(rest, "status=")
-		retryPos := strings.Index(rest, "retry_after=")
-		if statusPos < 0 || retryPos < 0 {
-			continue
-		}
-		statusText := strings.TrimSpace(rest[statusPos+len("status="):retryPos])
-		status, err := strconv.Atoi(statusText)
-		if err != nil {
-			continue
-		}
-		raw := strings.TrimSpace(rest[retryPos+len("retry_after="):])
-		retryAfter, err := strconv.Unquote(raw)
-		if err != nil {
-			retryAfter = strings.Trim(raw, "\"")
-		}
-		return cfstRateLimitSignal{StatusCode: status, RetryAfter: retryAfter}, true
-	}
-	return cfstRateLimitSignal{}, false
+func markerField(line,key string) string {
+ pattern:=regexp.MustCompile(regexp.QuoteMeta(key)+`=("(?:\\.|[^"\\])*"|[^ ]*)`)
+ match:=pattern.FindStringSubmatch(line)
+ if len(match)<2 {return ""}
+ if decoded,err:=strconv.Unquote(match[1]);err==nil {return decoded}
+ return match[1]
+}
+
+func parseCFSTRateLimitSignal(output string) (cfstRateLimitSignal,bool) {
+ for _,line:=range strings.Split(output,"\n") {
+  if strings.Contains(line,"CFST_SOURCE_BLOCKED") {return cfstRateLimitSignal{Origin:markerField(line,"origin"),Blocked:true},true}
+  if !strings.Contains(line,"CFST_RATE_LIMIT") {continue}
+  status,err:=strconv.Atoi(markerField(line,"status"));if err!=nil {continue}
+  return cfstRateLimitSignal{StatusCode:status,RetryAfter:markerField(line,"retry_after"),Origin:markerField(line,"origin")},true
+ }
+ return cfstRateLimitSignal{},false
 }
 
 func retryAfterDeadline(now time.Time, raw string, fallback time.Duration) (time.Time, int) {
@@ -178,9 +173,15 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	if degraded {
 		mode = "recovery"
 	}
-	a.appendLog("CFST mode=%s: %s", mode, strings.Join(args, " "))
+	safeArgs:=append([]string(nil),args...)
+	for i:=0;i+1<len(safeArgs);i++ {if safeArgs[i]=="-url" {safeArgs[i+1]=sourceOrigin(safeArgs[i+1])}}
+	a.appendLog("CFST mode=%s: %s", mode, strings.Join(safeArgs, " "))
 	cmd := exec.CommandContext(ctx, a.cfstBin, args...)
 	cmd.Dir = a.dataDir
+	attemptLimit:=cfg.CFST.DownloadCount
+	if attemptLimit<1 {attemptLimit=20}
+	if degraded {attemptLimit=minPositive(attemptLimit,5)}
+	cmd.Env=append(os.Environ(),"CFST_BLOCKED_ORIGINS="+a.blockedSourceOrigins(cfg),"CFST_MAX_DOWNLOAD_ATTEMPTS="+strconv.Itoa(attemptLimit))
 	out, cmdErr := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
 	for _, line := range strings.Split(output, "\n") {
@@ -188,9 +189,11 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 			a.appendLog("cfst | %s", line)
 		}
 	}
+	for _,line:=range strings.Split(output,"\n") {if strings.Contains(line,"CFST_SOURCE ") {a.noteSourceOrigin(cfg.CFST.DownloadURL,markerField(line,"origin"))}}
 	var signal *cfstRateLimitSignal
 	if detected, ok := parseCFSTRateLimitSignal(output); ok {
 		signal = &detected
+		if detected.Origin!="" {a.noteSourceOrigin(cfg.CFST.DownloadURL,detected.Origin)}
 	}
 		if cmdErr != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -225,6 +228,7 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	observed := time.Now().Format(time.RFC3339)
 	for i := range candidates {
 		candidates[i].ObservedAt = observed
+		candidates[i].Source=sourceOrigin(cfg.CFST.DownloadURL)
 	}
 	candidates = rankCandidatesForClass(candidates, "latency")
 	a.appendLog("CFST mode=%s returned %d candidates", mode, len(candidates))

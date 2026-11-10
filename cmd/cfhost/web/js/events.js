@@ -181,7 +181,7 @@ document.addEventListener('input', event => {
       ? Number(event.target.value)
       : type === 'bool'
         ? event.target.checked
-        : event.target.value
+        : type === 'lines' ? event.target.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean) : event.target.value
     setPath(store.configDraft, path, value)
     store.dirty = !deepEqual(store.configDraft, store.config)
     updateSaveBar()
@@ -196,7 +196,7 @@ document.addEventListener('change', event => {
     ? Number(event.target.value)
     : type === 'bool'
       ? event.target.checked
-      : event.target.value
+      : type === 'lines' ? event.target.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean) : event.target.value
   setPath(store.configDraft, path, value)
   store.dirty = !deepEqual(store.configDraft, store.config)
   updateSaveBar()

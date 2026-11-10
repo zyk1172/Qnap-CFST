@@ -105,7 +105,7 @@ func TestRateLimitDeadlineNeverShrinksAndExpiredStatusIsDerived(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	old := now.Add(4 * time.Hour)
 	a.state.CFSTRateLimit = CFSTRateLimitRuntime{Active: true, Until: old.Format(time.RFC3339)}
-	if until := a.recordCFSTRateLimit(now, cfg, cfstRateLimitSignal{429, "60"}); until.Before(old) {
+	if until := a.recordCFSTRateLimit(now, cfg, cfstRateLimitSignal{StatusCode:429,RetryAfter:"60"}); until.Before(old) {
 		t.Fatal("cooldown shortened")
 	}
 	a.state.CFSTRateLimit.Until = now.Add(-time.Minute).Format(time.RFC3339)

@@ -83,7 +83,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	finish := func(resolved bool, detail string) error {
 		a.setJobProgress("应用结果", d.Host+" · 写入映射与状态", 6, 6, 0, 0)
 		h := health[d.Host]
-		if resolved || recordFailure {h=domainOutcome(h,resolved,detail,time.Now(),cfg,d.Host)}
+		if resolved || recordFailure {h=a.candidateOutcome(h,resolved,detail,time.Now(),cfg,d.Host)}
 		health[d.Host] = h
 		for _, follower := range cfg.Domains {
 			if follower.Enabled && isFollowDomain(follower) && follower.Follow == d.Host {
@@ -171,12 +171,13 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	tryCandidates := func(candidates []Candidate) (bool, string) {
 		a.setJobProgress(candidateStage, fmt.Sprintf("%s · %d 个候选", d.Host, len(candidates)), candidateStep, 6, 0, len(candidates))
 		lastDetail := "no candidate"
-		order := orderedCandidates(candidates, d, "", currentIP, cfg)
+		order := a.candidateBatch(candidates,d,currentIP,cfg)
 		for index, candidate := range order {
 			a.setJobProgress(candidateStage, fmt.Sprintf("%d/%d · %s", index+1, len(order), candidate.IP), candidateStep, 6, index+1, len(order))
 			probeAttempted=true
 			ok, detail := a.verifyDomain(ctx, d, candidate.IP, cfg, samples)
 			lastDetail = detail
+			if ctx.Err()==nil {a.recordCandidateAttempt(d.Host,candidate,ok)}
 			if !ok {
 				if !failureNeedsCandidates(detail) {configurationFailure=detail;return false,detail}
 				continue
@@ -192,6 +193,8 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	if resolved, _ := tryCandidates(fresh); resolved {
 		return finish(true, "")
 	}
+
+	if a.cachedCandidatesRemaining(d.Host)>0 && configurationFailure=="" {detail:=fmt.Sprintf("cached candidates remaining %d; next batch before new CFST",a.cachedCandidatesRemaining(d.Host));statuses[d.Host]="manual unresolved · "+detail;return finish(false,detail)}
 
 	if configurationFailure!="" {statuses[d.Host]="unresolved · "+configurationFailure;return finish(false,configurationFailure)}
 
@@ -211,7 +214,8 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	candidateStage = "验证新候选"
 	candidateStep = 5
 	a.setJobProgress(candidateStage, d.Host, candidateStep, 6, 0, len(refreshed))
-	resolved, lastDetail := tryCandidates(refreshed)
+	a.mu.RLock();merged:=append([]Candidate(nil),a.state.Candidates...);a.mu.RUnlock()
+	resolved, lastDetail := tryCandidates(repairCandidates(merged,current,cfg,time.Now()))
 	if resolved {
 		return finish(true, "")
 	}

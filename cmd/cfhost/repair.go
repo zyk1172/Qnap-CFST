@@ -198,7 +198,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			configured[d.Host]=true
 			if isFollowDomain(d) || maintenancePaused(d, health) || !domainCheckDue(health[d.Host],now) { continue }
 			h:=health[d.Host]
-			h=domainOutcome(h,true,"",finalNow,cfg,d.Host)
+			h=a.candidateOutcome(h,true,"",finalNow,cfg,d.Host)
 			health[d.Host]=h
 		}
 		followUnresolved:=applyFollowMappings(cfg,mappings,statuses,health)
@@ -252,7 +252,8 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			a.storeCandidates(newCandidates,cfg)
 			a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(newCandidates)), 5, 7, 1, 1)
 			a.setJobProgress("验证新候选", fmt.Sprintf("待处理 %d 个域名", len(pending)), 6, 7, 0, len(pending))
-			pending=a.resolvePendingWithProgress(ctx,cfg,samples,newCandidates,pending,mappings,statuses,"验证新候选",6,7,checked)
+			a.mu.RLock();merged:=append([]Candidate(nil),a.state.Candidates...);a.mu.RUnlock()
+			pending=a.resolvePendingWithProgress(ctx,cfg,samples,repairCandidates(merged,current,cfg,time.Now()),pending,mappings,statuses,"验证新候选",6,7,checked)
 		}
 	} else if refreshablePending>0 {
 		a.setJobProgress("验证新候选", "无需立即刷新 CFST，保留当前判定", 6, 7, 1, 1)
@@ -276,10 +277,10 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		h:=health[d.Host]
 		if unresolved[d.Host] {
 			if !checked[d.Host] {continue}
-			h=domainOutcome(h,false,statuses[d.Host],finalNow,cfg,d.Host)
+			h=a.candidateOutcome(h,false,statuses[d.Host],finalNow,cfg,d.Host)
 			if statuses[d.Host]==""{statuses[d.Host]="no verified candidate"}
 		} else {
-			h=domainOutcome(h,true,"",finalNow,cfg,d.Host)
+			h=a.candidateOutcome(h,true,"",finalNow,cfg,d.Host)
 		}
 		health[d.Host]=h
 	}
@@ -339,12 +340,13 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 		}
 		resolved:=false
 		lastDetail:="no candidate"
-		order:=orderedCandidates(candidates,p.Domain,"",p.FailedCurrent,cfg)
+		order:=a.candidateBatch(candidates,p.Domain,p.FailedCurrent,cfg)
 		for _,candidate:=range order {
 			if domainCtx.Err()!=nil {break}
 			if len(checked)>0 {checked[0][p.Domain.Host]=true}
 			ok,detail:=a.verifyDomain(domainCtx,p.Domain,candidate.IP,cfg,samples)
 			lastDetail=detail
+			if domainCtx.Err()==nil {a.recordCandidateAttempt(p.Domain.Host,candidate,ok)}
 			if !ok { if !failureNeedsCandidates(detail) {p.Refreshable=false; break}; continue }
 			mappings[p.Domain.Host]=candidate.IP
 			statuses[p.Domain.Host]="verified · "+candidate.IP+" · "+detail
@@ -359,6 +361,7 @@ func (a *App) resolvePendingWithProgress(ctx context.Context,cfg Config,samples 
 			lastDetail=fmt.Sprintf("domain verification budget exceeded · %s",budget.Round(time.Second))
 			a.appendLog("%s verification budget exhausted after %s; continuing with next domain",p.Domain.Host,budget.Round(time.Second))
 		}
+		if a.cachedCandidatesRemaining(p.Domain.Host)>0 && p.Refreshable {p.Refreshable=false;lastDetail=fmt.Sprintf("cached candidates remaining %d; next batch before new CFST",a.cachedCandidatesRemaining(p.Domain.Host))}
 		statuses[p.Domain.Host]="no verified candidate · "+lastDetail
 		remaining=append(remaining,p)
 	}

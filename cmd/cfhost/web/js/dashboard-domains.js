@@ -400,6 +400,7 @@ function domainRowsHTML(domains, filtered) {
           ['CFHost 探测', domain.mode === 'tracker' ? sample.label : httpProbe.label],
           ['健康记录', `连续失败 ${streak} · 最近成功 ${domainHealth.lastSuccess ? fmtTime(domainHealth.lastSuccess) : '—'}`],
           ['下次重试', domainHealth.nextCheck ? fmtTime(domainHealth.nextCheck) : '按维护计划检查'],
+          ['缓存遍历', store.state.candidateSweeps?.[domain.host]?.remaining ? `还有 ${store.state.candidateSweeps[domain.host].remaining} 个候选待验证` : '无待遍历记录'],
           ['失败类别', ({'configuration-or-authentication': '配置或认证', 'rate-limit': '站点限流', 'application-response': '业务响应未通过', network: '网络连接', http: 'HTTP 响应', unresolved: '尚未解决'})[domainHealth.failureClass] || '—'],
         ]
 
