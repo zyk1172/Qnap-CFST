@@ -18,6 +18,7 @@ type App struct {
 	mu        sync.RWMutex
 	persistMu sync.Mutex
 	configMu  sync.Mutex
+	cfstMu    sync.Mutex
 	config    Config
 	state     RuntimeState
 	dataDir   string
@@ -28,6 +29,8 @@ type DomainHealth struct {
 	FailureStreak int    `json:"failureStreak"`
 	LastSuccess   string `json:"lastSuccess"`
 	LastFailure   string `json:"lastFailure"`
+	NextCheck string `json:"nextCheck,omitempty"`
+	FailureClass string `json:"failureClass,omitempty"`
 }
 
 type HTTPProbeRuntime struct {
@@ -44,6 +47,8 @@ type HTTPProbeRuntime struct {
 }
 
 type CFSTRateLimitRuntime struct {
+	Origin string `json:"origin,omitempty"`
+	Consecutive int `json:"consecutive,omitempty"`
 	Active            bool   `json:"active"`
 	Mode              string `json:"mode"`
 	StatusCode        int    `json:"statusCode,omitempty"`
@@ -95,6 +100,7 @@ type RuntimeState struct {
 	HTTPProbe           map[string]HTTPProbeRuntime `json:"httpProbe"`
 	TrackerSamples      map[string]TrackerSampleRuntime    `json:"trackerSamples"`
 	TrackerKeepalive    map[string]TrackerKeepaliveRuntime `json:"trackerKeepalive"`
+	CFSTSchedule CFSTScheduleRuntime `json:"cfstSchedule"`
 	CFSTRateLimit       CFSTRateLimitRuntime               `json:"cfstRateLimit"`
 	Sync                SyncRuntimeState        `json:"sync"`
 	History             []RunRecord             `json:"history"`

@@ -19,6 +19,7 @@ import (
 )
 
 type Candidate struct {
+	mappingFallback bool
 	IP         string  `json:"ip"`
 	LossRate   float64 `json:"lossRate"`
 	DelayMS    float64 `json:"delayMs"`
@@ -79,55 +80,6 @@ func retryAfterDeadline(now time.Time, raw string, fallback time.Duration) (time
 	return now.Add(fallback), int(fallback / time.Second)
 }
 
-func (a *App) rateLimitMode(now time.Time, cfg Config) (bool, time.Time) {
-	if !cfg.CFST.AdaptiveRateLimit {
-		return false, time.Time{}
-	}
-	a.mu.RLock()
-	state := a.state.CFSTRateLimit
-	a.mu.RUnlock()
-	if !state.Active {
-		return false, time.Time{}
-	}
-	until, err := time.Parse(time.RFC3339, state.Until)
-	if err != nil || until.IsZero() || !now.Before(until) {
-		a.mu.Lock()
-		a.state.CFSTRateLimit.Active = false
-		a.state.CFSTRateLimit.Mode = "normal"
-		a.state.CFSTRateLimit.LastEvent = "rate-limit cooldown expired; normal CFST allowed"
-		a.mu.Unlock()
-		return false, time.Time{}
-	}
-	return true, until
-}
-
-func (a *App) recordCFSTRateLimit(now time.Time, cfg Config, signal cfstRateLimitSignal) time.Time {
-	fallback := time.Duration(cfg.CFST.RateLimitFallbackMinutes) * time.Minute
-	until, seconds := retryAfterDeadline(now, signal.RetryAfter, fallback)
-	a.mu.Lock()
-	a.state.CFSTRateLimit = CFSTRateLimitRuntime{
-		Active:            true,
-		Mode:              "degraded",
-		StatusCode:        signal.StatusCode,
-		RetryAfterSeconds: seconds,
-		Until:             until.Format(time.RFC3339),
-		DetectedAt:        now.Format(time.RFC3339),
-		LastEvent:         fmt.Sprintf("HTTP %d rate limit; degraded CFST until %s", signal.StatusCode, until.Format(time.RFC3339)),
-	}
-	a.mu.Unlock()
-	return until
-}
-
-func (a *App) clearCFSTRateLimit(event string) {
-	a.mu.Lock()
-	previous := a.state.CFSTRateLimit
-	a.state.CFSTRateLimit = CFSTRateLimitRuntime{Mode: "normal", LastEvent: event}
-	if previous.DetectedAt != "" && event == "" {
-		a.state.CFSTRateLimit.LastEvent = "normal CFST restored"
-	}
-	a.mu.Unlock()
-}
-
 func minPositive(a, b int) int {
 	if a <= 0 {
 		return b
@@ -175,8 +127,8 @@ func buildCFSTArgs(cfg Config, ipFile, resultPath string, degraded bool) []strin
 		"-t", strconv.Itoa(cfg.CFST.PingTimes),
 	}
 	if degraded {
-		downloadCount = minPositive(cfg.CFST.DownloadCount, cfg.CFST.DegradedDownloadCount)
-		downloadSeconds = cfg.CFST.DegradedDownloadSeconds
+		downloadCount = minPositive(minPositive(cfg.CFST.DownloadCount, cfg.CFST.DegradedDownloadCount), 5)
+		downloadSeconds = minPositive(cfg.CFST.DegradedDownloadSeconds, 3)
 		minSpeed = 0
 		if reducedURL, ok := degradedDownloadURL(downloadURL, cfg.CFST.DegradedDownloadMB); ok {
 			downloadURL = reducedURL
@@ -207,41 +159,7 @@ func cfstRunTimeout(cfg Config) time.Duration {
 }
 
 func (a *App) runCFST(ctx context.Context, cfg Config) ([]Candidate, error) {
-	// RunTimeoutMinutes belongs to CFST only. Callers such as Repair and
-	// Optimize keep their own lifetime and continue after a CFST timeout.
-	cfstCtx, cancel := context.WithTimeout(ctx, cfstRunTimeout(cfg))
-	defer cancel()
-
-	now := time.Now()
-	degraded, until := a.rateLimitMode(now, cfg)
-	if degraded {
-		a.appendLog("CFST rate-limit cooldown active until %s; using degraded probe (%.2f MB request)", until.Format(time.RFC3339), cfg.CFST.DegradedDownloadMB)
-	}
-
-	candidates, signal, err := a.runCFSTMode(cfstCtx, cfg, degraded)
-	if signal != nil && cfg.CFST.AdaptiveRateLimit {
-		until = a.recordCFSTRateLimit(time.Now(), cfg, *signal)
-		a.appendLog("CFST rate limit detected: HTTP %d · retry-after=%q · until=%s", signal.StatusCode, signal.RetryAfter, until.Format(time.RFC3339))
-		if !degraded {
-			a.appendLog("CFST switching immediately to degraded probe: count=%d seconds=%d request=%.2f MB", cfg.CFST.DegradedDownloadCount, cfg.CFST.DegradedDownloadSeconds, cfg.CFST.DegradedDownloadMB)
-			fallbackCandidates, fallbackSignal, fallbackErr := a.runCFSTMode(cfstCtx, cfg, true)
-			if fallbackSignal != nil {
-				until = a.recordCFSTRateLimit(time.Now(), cfg, *fallbackSignal)
-				a.appendLog("CFST degraded probe also reported rate limit until %s", until.Format(time.RFC3339))
-			}
-			if fallbackErr != nil {
-				return nil, fallbackErr
-			}
-			return fallbackCandidates, nil
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !degraded {
-		a.clearCFSTRateLimit("normal CFST succeeded")
-	}
-	return candidates, nil
+	return a.runCFSTFor(ctx, cfg, "manual or scheduled candidate refresh")
 }
 
 func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Candidate, *cfstRateLimitSignal, error) {
@@ -258,7 +176,7 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	args = append(args, "-latency-output", latencyPath)
 	mode := "normal"
 	if degraded {
-		mode = "degraded"
+		mode = "recovery"
 	}
 	a.appendLog("CFST mode=%s: %s", mode, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, a.cfstBin, args...)
@@ -274,10 +192,7 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	if detected, ok := parseCFSTRateLimitSignal(output); ok {
 		signal = &detected
 	}
-	if degraded && signal != nil {
-		return nil, signal, fmt.Errorf("CFST degraded probe is still rate limited")
-	}
-	if cmdErr != nil {
+		if cmdErr != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, signal, fmt.Errorf("CFST timed out")
 		}

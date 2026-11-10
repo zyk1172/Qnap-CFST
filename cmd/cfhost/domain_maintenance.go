@@ -76,19 +76,14 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 
 	mappings := copyMappings(current)
 	currentIP := current[d.Host]
-	fresh := freshCandidates(cachedState, time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute, now)
+	fresh := repairCandidates(cachedState,current,cfg,now)
 
+	recordFailure:=true
+	probeAttempted:=false
 	finish := func(resolved bool, detail string) error {
 		a.setJobProgress("应用结果", d.Host+" · 写入映射与状态", 6, 6, 0, 0)
 		h := health[d.Host]
-		stamp := time.Now().Format(time.RFC3339)
-		if resolved {
-			h.FailureStreak = 0
-			h.LastSuccess = stamp
-		} else {
-			h.FailureStreak++
-			h.LastFailure = stamp
-		}
+		if resolved || recordFailure {h=domainOutcome(h,resolved,detail,time.Now(),cfg,d.Host)}
 		health[d.Host] = h
 		for _, follower := range cfg.Domains {
 			if follower.Enabled && isFollowDomain(follower) && follower.Follow == d.Host {
@@ -106,20 +101,20 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	}
 
 	if normalModeSkipsVerification(d) {
-		candidates := fresh
+		candidates := orderedCandidates(fresh,d,"","",cfg)
 		if len(candidates) == 0 {
 			a.appendLog("%s manual maintain: refreshing CFST candidates", d.Host)
-			a.markRefreshAttempt(now)
-			refreshed, err := a.runCFST(ctx, cfg)
+			refreshed, err := a.runCFSTFor(ctx, cfg, "manual maintenance: "+d.Host)
 			if err != nil {
+				recordFailure=false
 				if currentIP != "" {
-					statuses[d.Host] = "manual normal retained · CFST refresh failed · " + err.Error()
+					statuses[d.Host] = "stale retained · CFST refresh failed · " + err.Error()
 				} else {
 					statuses[d.Host] = "manual normal unresolved · CFST refresh failed · " + err.Error()
 				}
-				return finish(currentIP != "", err.Error())
+				return finish(false, err.Error())
 			}
-			a.storeCandidates(refreshed)
+			a.storeCandidates(refreshed,cfg)
 			candidates = refreshed
 		}
 		order := orderedCandidates(candidates, d, "", "", cfg)
@@ -157,12 +152,14 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 			a.recordTrackerSampleTest(cfg, d, false, detail)
 			a.appendLog("%s current %s failed during manual maintain from downloader runtime: %s", d.Host, currentIP, failure.Detail)
 		} else {
+			probeAttempted=true
 			ok, detail := a.verifyDomain(ctx, d, currentIP, cfg, samples)
 			if ok {
 				statuses[d.Host] = "manual retained · " + currentIP + " · " + detail
 				a.appendLog("%s retained %s (manual maintain · %s)", d.Host, currentIP, detail)
 				return finish(true, "")
 			}
+			if !failureNeedsCandidates(detail) { statuses[d.Host]="unresolved · "+detail;return finish(false,detail) }
 			statuses[d.Host] = "manual current failed · " + detail
 			a.appendLog("%s current %s failed during manual maintain: %s", d.Host, currentIP, detail)
 		}
@@ -170,15 +167,18 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 
 	candidateStage := "验证缓存候选"
 	candidateStep := 3
+	configurationFailure := ""
 	tryCandidates := func(candidates []Candidate) (bool, string) {
 		a.setJobProgress(candidateStage, fmt.Sprintf("%s · %d 个候选", d.Host, len(candidates)), candidateStep, 6, 0, len(candidates))
 		lastDetail := "no candidate"
 		order := orderedCandidates(candidates, d, "", currentIP, cfg)
 		for index, candidate := range order {
 			a.setJobProgress(candidateStage, fmt.Sprintf("%d/%d · %s", index+1, len(order), candidate.IP), candidateStep, 6, index+1, len(order))
+			probeAttempted=true
 			ok, detail := a.verifyDomain(ctx, d, candidate.IP, cfg, samples)
 			lastDetail = detail
 			if !ok {
+				if !failureNeedsCandidates(detail) {configurationFailure=detail;return false,detail}
 				continue
 			}
 			mappings[d.Host] = candidate.IP
@@ -193,18 +193,20 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return finish(true, "")
 	}
 
+	if configurationFailure!="" {statuses[d.Host]="unresolved · "+configurationFailure;return finish(false,configurationFailure)}
+
 	// A manual per-domain maintenance action is explicit user intent, so it
-	// refreshes CFST immediately instead of waiting for the automatic failure
-	// threshold/backoff. Only the selected domain consumes the new candidates.
+	// requests CFST without the automatic domain failure
+	// threshold; the shared service cooldown still applies.
 	a.appendLog("%s manual maintain: cached candidates exhausted, refreshing CFST", d.Host)
-	a.markRefreshAttempt(now)
 	a.setJobProgress("CFST 测速", d.Host+" · 刷新候选池", 4, 6, 0, 0)
-	refreshed, err := a.runCFST(ctx, cfg)
+	refreshed, err := a.runCFSTFor(ctx, cfg, "manual maintenance: "+d.Host)
 	if err != nil {
-		statuses[d.Host] = "manual unresolved · CFST refresh failed · " + err.Error()
+		recordFailure=probeAttempted
+		statuses[d.Host] = "manual unresolved · stale retained · CFST refresh failed · " + err.Error()
 		return finish(false, err.Error())
 	}
-	a.storeCandidates(refreshed)
+	a.storeCandidates(refreshed,cfg)
 	a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个新候选", len(refreshed)), 4, 6, 1, 1)
 	candidateStage = "验证新候选"
 	candidateStep = 5
@@ -214,7 +216,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 		return finish(true, "")
 	}
 	statuses[d.Host] = "manual unresolved · " + lastDetail
- if currentIP != "" { mappings[d.Host] = currentIP; statuses[d.Host] += " · retained last-known-good · " + currentIP }
+ if currentIP != "" { mappings[d.Host] = currentIP; statuses[d.Host] += " · stale retained · " + currentIP }
 	return finish(false, lastDetail)
 }
 

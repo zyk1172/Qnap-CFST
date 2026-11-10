@@ -10,19 +10,18 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	attempt:=time.Now()
 	a.setJobProgress("准备完整优化", "记录优化状态", 1, 5, 0, 0)
 	a.mu.Lock(); a.state.LastOptimizeAttempt=attempt.Format(time.RFC3339); a.mu.Unlock()
-	active := a.maintenanceConfig(cfg)
+	active := a.maintenanceConfig(a.retryDueConfig(cfg,attempt))
 	hasActive := false
 	for _, d := range active.Domains {
 		if d.Enabled && !isFollowDomain(d) { hasActive = true; break }
 	}
 	if !hasActive { a.appendLog("full optimize skipped: no active independent domains"); return nil }
-	a.markRefreshAttempt(attempt)
 	a.setJobProgress("准备完整优化", "准备完成", 1, 5, 1, 1)
 	a.setJobProgress("CFST 测速", "重新生成全局候选池", 2, 5, 0, 0)
 	candidates,err:=a.runCFST(ctx,cfg)
 	if err!=nil{return err}
 	if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before mapping changes: %w",err)}
-	a.storeCandidates(candidates)
+	a.storeCandidates(candidates,cfg)
 	a.setJobProgress("CFST 测速", fmt.Sprintf("得到 %d 个候选 IP", len(candidates)), 2, 5, 1, 1)
 	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 3, 5, 0, 0)
 	samples:=a.loadSamples(ctx,cfg)
@@ -32,13 +31,13 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	a.mu.RLock(); current:=copyMappings(a.state.Mappings); health:=copyHealth(a.state.DomainHealth); a.mu.RUnlock()
 	mappings:=retainEnabledMappings(current,cfg)
 	statuses:=make(map[string]string)
-	now:=time.Now().Format(time.RFC3339)
 
 	for index,d:=range cfg.Domains {
 		if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before commit: %w",err)}
 		a.setJobDomainProgress("验证并选择域名", 4, 5, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
 		if maintenancePaused(d, health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
+		if !domainCheckDue(health[d.Host],attempt) && !isFollowDomain(d) { statuses[d.Host]="unresolved · retry deferred until "+health[d.Host].NextCheck;continue }
 		oldIP:=current[d.Host]
 		h:=health[d.Host]
 		if isFollowDomain(d) {
@@ -49,10 +48,10 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		if normalModeSkipsVerification(d) {
 			order:=orderedCandidates(candidates,d,"","",cfg)
 			if len(order)==0 {
-				h.FailureStreak++;h.LastFailure=now;health[d.Host]=h
+				h=domainOutcome(h,false,statuses[d.Host],time.Now(),cfg,d.Host);health[d.Host]=h
 				if oldIP!="" {
 					mappings[d.Host]=oldIP
-					statuses[d.Host]="normal optimize unresolved · retained last-known-good · "+oldIP
+					statuses[d.Host]="normal optimize unresolved · stale retained · "+oldIP
 				} else {
 					statuses[d.Host]="normal optimize unresolved · no CFST candidate"
 				}
@@ -61,15 +60,15 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 			chosen:=order[0]
 			mappings[d.Host]=chosen.IP
 			statuses[d.Host]=fmt.Sprintf("normal optimized · lowest latency · %s · %.2f ms · verification skipped",chosen.IP,chosen.DelayMS)
-			h.FailureStreak=0;h.LastSuccess=now;health[d.Host]=h
+			h=domainOutcome(h,true,"",time.Now(),cfg,d.Host);health[d.Host]=h
 			a.appendLog("%s -> %s (normal full optimize · %.2f ms · verification skipped)",d.Host,chosen.IP,chosen.DelayMS)
 			continue
 		}
 		if !domainRefreshable(d,cfg,samples) {
-			h.FailureStreak++;h.LastFailure=now;health[d.Host]=h
+			h=domainOutcome(h,false,statuses[d.Host],time.Now(),cfg,d.Host);health[d.Host]=h
 			if oldIP!="" {
 				mappings[d.Host]=oldIP
-				statuses[d.Host]="tracker sample missing · retained last-known-good · "+oldIP
+				statuses[d.Host]="tracker sample missing · stale retained · "+oldIP
 			} else {
 				statuses[d.Host]="tracker sample missing"
 			}
@@ -78,10 +77,10 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 
 		domainCtx,cancel,budget,hasBudget:=domainVerificationContext(ctx,len(cfg.Domains)-index)
 		if !hasBudget {
-			h.FailureStreak++;h.LastFailure=now;health[d.Host]=h
+			h=domainOutcome(h,false,statuses[d.Host],time.Now(),cfg,d.Host);health[d.Host]=h
 			if oldIP!="" {
 				mappings[d.Host]=oldIP
-				statuses[d.Host]="optimize deferred · insufficient task budget · retained last-known-good · "+oldIP
+				statuses[d.Host]="optimize deferred · insufficient task budget · stale retained · "+oldIP
 			} else {
 				statuses[d.Host]="optimize deferred · insufficient task budget"
 			}
@@ -99,6 +98,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 			ok,detail:=a.verifyDomain(domainCtx,d,candidate.IP,cfg,samples)
 			lastDetail=detail
 			if !ok {
+				if !failureNeedsCandidates(detail) {break}
 				if verificationHardFailure(detail) && d.Mode=="http" && candidate.IP==oldIP {
 					oldHardFailed=true
 				}
@@ -129,19 +129,20 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 			}
 			if oldIP!="" {
 				mappings[d.Host]=oldIP
-				statuses[d.Host]="optimize unresolved · "+lastDetail+" · retained last-known-good · "+oldIP
+				statuses[d.Host]="optimize unresolved · "+lastDetail+" · stale retained · "+oldIP
     if oldHardFailed { statuses[d.Host] += " · HTTP hard failure" }
 			} else {
 				delete(mappings,d.Host)
 				statuses[d.Host]="optimize unresolved · "+lastDetail
 			}
-			h.FailureStreak++;h.LastFailure=now
+			h=domainOutcome(h,false,statuses[d.Host],time.Now(),cfg,d.Host)
 		} else {
-			h.FailureStreak=0;h.LastSuccess=now
+			h=domainOutcome(h,true,"",time.Now(),cfg,d.Host)
 		}
 		health[d.Host]=h
 	}
 	if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before commit: %w",err)}
+	for _,d:=range cfg.Domains {h:=health[d.Host];if d.Enabled && !isFollowDomain(d) && h.FailureStreak>0 && !maintenancePaused(d,health) {h.FailureClass=domainFailureClass(statuses[d.Host]);health[d.Host]=h}}
 	applyFollowMappings(cfg,mappings,statuses,health)
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 5, 5, 0, 0)
 	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",true);err!=nil{return err}

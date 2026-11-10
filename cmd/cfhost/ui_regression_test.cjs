@@ -212,3 +212,22 @@ test('no paused domains means no popup; resume requires explicit confirmation', 
   assert.equal(requests, 2)
   assert.equal(f.store.state.maintenancePaused.length, 0)
 })
+
+
+test('candidate and operation pages refresh for cooldown and admission changes', () => {
+  const { store, pageRefreshSignature } = fixture()
+  for (const page of ['candidates', 'operations']) {
+    const before = pageRefreshSignature(page)
+    store.state.cfstSchedule = { nextAllowedAt: new Date().toISOString(), reason: page }
+    assert.notEqual(pageRefreshSignature(page), before)
+  }
+})
+
+test('expired provider cooldown displays recovery pending without a new scan', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.store.state.cfstRateLimit = { active: true, mode: 'cooldown', detectedAt: '2026-01-01T00:00:00Z', until: new Date(Date.now() - 60000).toISOString() }
+  assert.equal(vm.runInContext('cfstCooldownMeta().label', f.context), '待恢复验证')
+  f.store.state.cfstRateLimit.until = new Date(Date.now() + 3600000).toISOString()
+  assert.equal(vm.runInContext('cfstCooldownMeta().label', f.context), '冷却中')
+})

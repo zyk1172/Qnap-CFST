@@ -22,14 +22,14 @@ function renderSettings() {
             ${numberField('cfst.downloadCount', '下载测速数量', config.cfst.downloadCount)}
             ${numberField('cfst.downloadSeconds', '单 IP 下载时长', config.cfst.downloadSeconds, '秒')}
             ${numberField('cfst.runTimeoutMinutes', 'CFST 测速超时', config.cfst.runTimeoutMinutes, '分钟')}
-            ${numberField('cfst.degradedDownloadMB', '限流期单次下载量', config.cfst.degradedDownloadMB, 'MB', '0.5')}
-            ${numberField('cfst.degradedDownloadCount', '限流期测速数量', config.cfst.degradedDownloadCount, '个')}
-            ${numberField('cfst.degradedDownloadSeconds', '限流期单 IP 时长', config.cfst.degradedDownloadSeconds, '秒')}
+            ${numberField('cfst.degradedDownloadMB', '冷却后恢复探测下载量', config.cfst.degradedDownloadMB, 'MB', '0.5')}
+            ${numberField('cfst.degradedDownloadCount', '冷却后恢复探测数量（最多 5）', config.cfst.degradedDownloadCount, '个')}
+            ${numberField('cfst.degradedDownloadSeconds', '冷却后恢复探测时长（最多 3 秒）', config.cfst.degradedDownloadSeconds, '秒')}
             ${numberField('cfst.rateLimitFallbackMinutes', '无 Retry-After 时冷却', config.cfst.rateLimitFallbackMinutes, '分钟')}
             ${textField('cfst.downloadUrl', '下载测速 URL', config.cfst.downloadUrl, '', 'span-2')}
           </div>
           ${switchRow('cfst.ipv6', 'IPv6 IP 池', '开启后 CFST 使用 ipv6.txt 候选池。', config.cfst.ipv6)}
-          ${switchRow('cfst.adaptiveRateLimit', '测速地址限流自适应', '检测到 429 或带 Retry-After 的 503 后记录解封时间；解封前将支持 bytes 参数的测速 URL 缩小到配置的单次下载量，并使用少量候选进行降级测速。', config.cfst.adaptiveRateLimit)}
+          <div class="alert info">遇到 429 或带 Retry-After 的 503 后暂停下载测速；冷却后先进行少量恢复探测。手动操作同样遵守全局测速间隔与服务端冷却。</div>
         `)}
 
         ${settingsSection('verify', '域名验证', '决定候选 IP 是否真正适用于目标站点，严格 HTTP 会识别挑战页和占位页。', `
@@ -56,7 +56,7 @@ function renderSettings() {
             ${numberField('repairIntervalMinutes', 'Repair 间隔', config.repairIntervalMinutes, '分钟')}
             ${numberField('repair.candidateTTLMinutes', '候选缓存 TTL', config.repair.candidateTTLMinutes, '分钟')}
             ${numberField('repair.failureThreshold', '完整测速失败阈值', config.repair.failureThreshold, '次')}
-            ${numberField('repair.refreshCooldownMinutes', 'Refresh 基础冷却', config.repair.refreshCooldownMinutes, '分钟')}
+            ${numberField('repair.refreshCooldownMinutes', '全局测速最小间隔', config.repair.refreshCooldownMinutes, '分钟')}
             ${numberField('repair.refreshMaxBackoffMinutes', 'Refresh 最大退避', config.repair.refreshMaxBackoffMinutes, '分钟')}
             ${numberField('optimize.intervalMinutes', '完整优化周期', config.optimize.intervalMinutes, '分钟')}
             ${numberField('optimize.retryMinutes', '优化失败重试', config.optimize.retryMinutes, '分钟')}

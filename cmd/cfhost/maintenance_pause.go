@@ -86,6 +86,8 @@ func (a *App) handleDomainResume(w http.ResponseWriter, r *http.Request) {
 	oldKeepalive, hadKeepalive := a.state.TrackerKeepalive[d.Host]
 	h := oldHealth
 	h.FailureStreak = 0
+	h.NextCheck=""
+	h.FailureClass=""
 	a.state.DomainHealth[d.Host] = h
 	a.state.DomainStatus[d.Host] = "maintenance resumed · awaiting next repair"
 	delete(a.state.TrackerKeepalive, d.Host)

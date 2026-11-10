@@ -220,6 +220,9 @@ function pageRefreshSignature(page = store.page, state = store.state) {
   case 'candidates':
     snapshot = {
       candidates: state.candidates,
+      cfstRateLimit: state.cfstRateLimit,
+      cfstSchedule: state.cfstSchedule,
+      candidateFreshness: (state.candidates || []).map(c => !!c.observedAt && Date.parse(c.observedAt) + Number(store.config?.repair?.candidateTTLMinutes || 1440) * 60000 > Date.now()),
       lastRefresh: state.lastRefresh,
     }
     break
@@ -231,6 +234,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       lastOptimize: state.lastOptimize,
       nextRefresh: state.nextRefresh,
       cfstRateLimit: state.cfstRateLimit,
+      cfstSchedule: state.cfstSchedule,
       history: state.history,
       sync: state.sync,
     }
