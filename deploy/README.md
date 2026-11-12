@@ -55,6 +55,23 @@ SSH 下可用 `uname -m` 检查：`x86_64` 对应 `amd64`，`aarch64` / `arm64` 
 
 NAS 重启、升级或网络设置变化可能重新生成系统 Hosts。检查受管区块是否仍存在，必要时在 WebUI 再应用一次；若原文件被替换，先重新创建 CFHost 容器以刷新绑定挂载。不要用定时任务整份覆盖 `/etc/hosts`。
 
+### CFHost 更新成功，但下载器仍看到旧 Hosts
+
+文件绑定挂载持有的是当时的文件。宿主机用临时文件加 `mv` 等方式替换 `/etc/hosts` 后，已经运行的下载器仍可能挂在被删除的旧文件上；即使源路径还写着 `/etc/hosts`，也不会自动切换到新文件。原地写入只能更新持有同一个 inode 的容器。
+
+CFHost 的 `HOSTS_VERIFY_PATH` 只校验自己的绑定与当前宿主机文件，不覆盖 Transmission、代理或其他消费者。因此 CFHost 健康、页面映射已更新，不能作为下游绑定已更新的证据。可以只读核对：
+
+```sh
+stat -c '%d:%i links=%h' /etc/hosts
+docker exec cfhost stat -c '%d:%i links=%h' /host/etc/hosts /host/etc-check/hosts
+docker exec transmission stat -c '%d:%i links=%h' /etc/hosts
+docker exec transmission awk '$5=="/etc/hosts" {print}' /proc/self/mountinfo
+```
+
+比较设备号和 inode。若下载器的硬链接数为 0，或 mountinfo 中的源包含 `deleted`，说明它持有已删除的旧文件。先保留原配置并重新建立受影响容器的绑定，再核对 inode、目标域名解析和真实 Tracker 汇报。更换 CFHost 镜像不会刷新其他容器的挂载。
+
+长期共享建议使用持久化目录下专用的 `downloader-hosts` 文件，避免直接绑定可能被 NAS 网络服务替换的系统 Hosts。CFHost 与消费者须使用同一个文件，并为 CFHost 配置对应的父目录校验挂载。不要为刷新文件挂载而把整个宿主机 `/etc` 覆盖到下载器的 `/etc`。
+
 ## 下载器设置
 
 Transmission / qBittorrent 的 RPC URL 通常使用 `http://NAS局域网IP:已发布端口/...`。bridge 网络中的 `127.0.0.1` 指向 CFHost 容器自身。若通过容器服务名连接下载器，需让两个容器加入同一个 Docker 网络；各自独立项目的默认网络不能直接互通服务名。
