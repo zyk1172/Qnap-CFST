@@ -27,6 +27,8 @@ func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 		return nil
 	case "repair":
 		return a.runSmartRepair(ctx, cfg)
+	case "reserve":
+		return a.replenishCandidateReserve(ctx, cfg)
 	case "optimize":
 		return a.runFullOptimize(ctx, cfg)
 	default:

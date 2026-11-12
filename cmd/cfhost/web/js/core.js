@@ -224,6 +224,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       cfstRateLimit: state.cfstRateLimit,
       cfstSchedule: state.cfstSchedule,
       cfstSources: state.cfstSources,
+      candidateReserve: state.candidateReserve,
       candidateFreshness: (state.candidates || []).map(c => !!c.observedAt && Date.parse(c.observedAt) + Number(store.config?.repair?.candidateTTLMinutes || 1440) * 60000 > Date.now()),
       lastRefresh: state.lastRefresh,
     }
@@ -238,6 +239,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       cfstRateLimit: state.cfstRateLimit,
       cfstSchedule: state.cfstSchedule,
       cfstSources: state.cfstSources,
+      candidateReserve: state.candidateReserve,
       history: state.history,
       sync: state.sync,
     }

@@ -31,6 +31,8 @@ type CFSTConfig struct {
 
 type RepairConfig struct {
 	CandidateTTLMinutes      int `json:"candidateTTLMinutes"`
+	CandidateMinCount        int `json:"candidateMinCount"`
+	CandidateRefreshMinutes  int `json:"candidateRefreshMinutes"`
 	FailureThreshold         int `json:"failureThreshold"`
 	RefreshCooldownMinutes   int `json:"refreshCooldownMinutes"`
 	RefreshMaxBackoffMinutes int `json:"refreshMaxBackoffMinutes"`
@@ -163,6 +165,8 @@ func defaultConfig() Config {
 		},
 		Repair: RepairConfig{
 			CandidateTTLMinutes:      1440,
+			CandidateMinCount:        10,
+			CandidateRefreshMinutes: 360,
 			FailureThreshold:         2,
 			RefreshCooldownMinutes:   60,
 			RefreshMaxBackoffMinutes: 720,
@@ -249,6 +253,9 @@ func normalizeConfig(c *Config) error {
 	if c.CFST.RateLimitFallbackMinutes < 1 { c.CFST.RateLimitFallbackMinutes = 15 }
 
 	if c.Repair.CandidateTTLMinutes < 1 { c.Repair.CandidateTTLMinutes = 1440 }
+	if c.Repair.CandidateMinCount < 0 || c.Repair.CandidateMinCount > 200 { return errors.New("candidateMinCount must be between 0 and 200") }
+	if c.Repair.CandidateRefreshMinutes < 1 { c.Repair.CandidateRefreshMinutes = 360 }
+	if c.Repair.CandidateRefreshMinutes > 10080 { return errors.New("candidateRefreshMinutes must not exceed 10080") }
 	if c.Repair.FailureThreshold < 1 { c.Repair.FailureThreshold = 2 }
 	if c.Repair.RefreshCooldownMinutes < 1 { c.Repair.RefreshCooldownMinutes = 60 }
 	if c.Repair.RefreshMaxBackoffMinutes < c.Repair.RefreshCooldownMinutes { c.Repair.RefreshMaxBackoffMinutes = c.Repair.RefreshCooldownMinutes }
@@ -376,6 +383,10 @@ func loadConfig(dataDir string) (Config, error) {
 	var raw map[string]json.RawMessage
 	_ = json.Unmarshal(b, &raw)
 	d := defaultConfig()
+	var repairFields map[string]json.RawMessage
+	_ = json.Unmarshal(raw["repair"], &repairFields)
+	if _, ok := repairFields["candidateMinCount"]; !ok { c.Repair.CandidateMinCount = d.Repair.CandidateMinCount }
+	if _, ok := repairFields["candidateRefreshMinutes"]; !ok { c.Repair.CandidateRefreshMinutes = d.Repair.CandidateRefreshMinutes }
 	if cfstRaw, ok := raw["cfst"]; !ok {
 		c.CFST = d.CFST
 	} else {

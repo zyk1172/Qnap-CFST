@@ -62,6 +62,8 @@ func initialJobProgress(kind string) JobProgress {
 		return newJobProgress("准备完整优化", "初始化任务", 1, 5, 0, 0)
 	case "run":
 		return newJobProgress("准备测速", "初始化 CFST", 1, 3, 0, 0)
+	case "reserve":
+		return newJobProgress("补充候选", "检查有效储备与测速预算", 1, 3, 0, 0)
 	case "maintain":
 		return newJobProgress("准备单域名维护", "初始化任务", 1, 6, 0, 0)
 	default:
