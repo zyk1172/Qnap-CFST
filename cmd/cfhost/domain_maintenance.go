@@ -91,7 +91,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 				applyFollowMapping(cfg, follower, mappings, statuses, health)
 			}
 		}
-		if err := a.commitResolution(ctx, cfg, mappings, statuses, health, nextRefresh, false); err != nil {
+		if err := a.commitMaintenanceResolution(ctx, cfg, samples, current, mappings, statuses, health, nextRefresh, false); err != nil {
 			return err
 		}
 		if !resolved {

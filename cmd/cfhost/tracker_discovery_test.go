@@ -963,7 +963,7 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	samples := map[string]TrackerSample{
 		"tracker.example.com": {Domain: "tracker.example.com"},
 	}
-	a := &App{state: RuntimeState{
+	a := &App{dataDir: t.TempDir(), state: RuntimeState{
 		Mappings: map[string]string{"tracker.example.com": "104.16.0.11"},
 		TrackerSamples: map[string]TrackerSampleRuntime{
 			"tracker.example.com": {
@@ -977,11 +977,10 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 		Logs: []string{},
 	}}
 
-	a.reconcileTransmissionTrackerKeepaliveAfterRepair(
-		context.Background(), cfg, samples,
+	if err := a.commitMaintenanceResolution(context.Background(), cfg, samples,
 		map[string]string{"tracker.example.com": "104.16.0.10"},
 		map[string]string{"tracker.example.com": "104.16.0.11"},
-	)
+		map[string]string{"tracker.example.com": "healthy"}, map[string]DomainHealth{}, "", false); err != nil { t.Fatal(err) }
 
 	if got := reannounceCalls.Load(); got != 1 {
 		t.Fatalf("same Repair cycle must call torrent_reannounce once, got %d", got)
@@ -996,6 +995,16 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	if !strings.Contains(state.LastEvent, "reannounce 1/3") {
 		t.Fatalf("post-repair state must expose the actual reannounce action, got %q", state.LastEvent)
 	}
+	// A successful retained-current exit must preserve the observation window,
+	// rather than issuing another announce or clearing the minimum interval.
+	if err := a.commitMaintenanceResolution(context.Background(), cfg, samples, a.state.Mappings, a.state.Mappings,
+		map[string]string{}, map[string]DomainHealth{}, "", false); err != nil { t.Fatal(err) }
+	if reannounceCalls.Load() != 1 || a.state.TrackerKeepalive["tracker.example.com"].NextReannounce != state.NextReannounce { t.Fatal("repeated commit bypassed announce interval") }
+	cfg.AutoApply = true
+	cfg.HostsPath = filepath.Join(a.dataDir, "missing-hosts")
+	if err := a.commitMaintenanceResolution(context.Background(), cfg, samples, a.state.Mappings,
+		map[string]string{"tracker.example.com": "104.16.0.12"}, map[string]string{}, map[string]DomainHealth{}, "", false); err == nil { t.Fatal("expected failed apply") }
+	if reannounceCalls.Load() != 1 || a.state.Mappings["tracker.example.com"] != "104.16.0.11" { t.Fatal("failed apply reannounced or changed mapping") }
 }
 
 func TestNormalTrackerNeverEntersPostRepairKeepalive(t *testing.T) {

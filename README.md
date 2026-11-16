@@ -64,6 +64,7 @@ Tracker 可选真实 announce
 - **Tracker 真实 announce**：使用真实种子样本验证候选 IP 是否真正能用于 PT Tracker。
 - **下载器自动取样本**：支持 Transmission 与 qBittorrent；每个 Tracker 域名只取 1 个已完成 v1 种子样本，手工样本仍具有最高优先级。
 - **Transmission 实际 Tracker 健康反馈**：Repair 会读取样本种子的 `tracker_stats`；Transmission 实际报告 `Could not connect to tracker` / timeout 等连接错误时，即使 CFHost 自身 probe 能通，也会把当前映射视为失效并修复。
+- **维护后的下载器恢复**：Repair 的快捷完成分支、单域名维护和完整优化均在映射成功提交后接续现有 Transmission 保活流程；写入失败时不触发。样本通过不等于下载器已恢复，仍保留 2 分钟观察窗口和 30 分钟最小主动汇报间隔。
 - **样本状态可见**：域名页直接显示 `未获取 / 已获取待测试 / 样本通过 / 样本失败`，并标明手工或下载器来源。
 - **单域名维护**：每个域名都有独立“维护”按钮，只检查/修复该域名，并同步直接跟随它的域名；即使需要刷新 CFST，也不会重新选择其他独立域名的映射。
 - **NAS Hosts 管理**

@@ -26,6 +26,14 @@ type ResolutionAttempt struct {
 	DomainStatus map[string]string `json:"domainStatus,omitempty"`
 }
 
+// Every maintenance exit reconciles downloader recovery only after committing
+// the mappings. This includes retained-current and single-domain success.
+func (a *App) commitMaintenanceResolution(ctx context.Context, cfg Config, samples map[string]TrackerSample, before, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth, nextRefresh string, optimized bool) error {
+	if err := a.commitResolution(ctx, cfg, mappings, statuses, health, nextRefresh, optimized); err != nil { return err }
+	a.reconcileTransmissionTrackerKeepaliveAfterRepair(ctx, cfg, samples, before, mappings)
+	return nil
+}
+
 func (a *App) snapshotResolution() resolutionSnapshot {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

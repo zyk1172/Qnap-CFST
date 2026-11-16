@@ -147,7 +147,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	for _,d:=range cfg.Domains {h:=health[d.Host];if d.Enabled && !isFollowDomain(d) && h.FailureStreak>0 && !maintenancePaused(d,health) {h.FailureClass=domainFailureClass(statuses[d.Host]);health[d.Host]=h}}
 	applyFollowMappings(cfg,mappings,statuses,health)
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 5, 5, 0, 0)
-	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",true);err!=nil{return err}
+	if err:=a.commitMaintenanceResolution(ctx,cfg,samples,current,mappings,statuses,health,"",true);err!=nil{return err}
 	a.completeJobProgress("完成", fmt.Sprintf("完整优化完成 · %d 个映射", len(mappings)))
 	a.appendLog("full optimize completed: %d mappings",len(mappings))
 	return nil
