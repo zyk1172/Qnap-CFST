@@ -198,6 +198,8 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       mappings: state.mappings,
       domainStatus: state.domainStatus,
       hostsBinding: state.hostsBinding,
+      hostsMaintenance: state.hostsMaintenance,
+      resolutionAttempt: state.resolutionAttempt,
       history: state.history,
       candidates: state.candidates,
       sync: state.sync,
@@ -216,6 +218,8 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       maintenancePaused: state.maintenancePaused,
       httpProbe: state.httpProbe,
       trackerSamples: state.trackerSamples,
+      hostsBinding: state.hostsBinding,
+      hostsMaintenance: state.hostsMaintenance,
     }
     break
   case 'candidates':
@@ -225,12 +229,15 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       cfstSchedule: state.cfstSchedule,
       cfstSources: state.cfstSources,
       candidateReserve: state.candidateReserve,
+      hostsMaintenance: state.hostsMaintenance,
       candidateFreshness: (state.candidates || []).map(c => !!c.observedAt && Date.parse(c.observedAt) + Number(store.config?.repair?.candidateTTLMinutes || 1440) * 60000 > Date.now()),
       lastRefresh: state.lastRefresh,
     }
     break
   case 'operations':
     snapshot = {
+      hostsBinding: state.hostsBinding,
+      hostsMaintenance: state.hostsMaintenance,
       running: state.running,
       currentJob: state.currentJob,
       lastRun: state.lastRun,
@@ -345,17 +352,18 @@ function updateSidebarProgress(running, fallbackSubtitle) {
 
 function updateShellStatus() {
   const running = !!store.state?.running
+  const blocked = hostsMaintenanceBlocked()
   const error = store.state?.lastError
   const counts = statusCounts()
   const unresolved = counts.failed > 0
-  const text = running
+  const text = blocked ? '维护已暂停' : running
     ? jobLabel(store.state.currentJob)
     : error
       ? '需要注意'
       : unresolved
         ? '有域名待处理'
         : '运行正常'
-  const subtitle = running
+  const subtitle = blocked ? 'Hosts 异常，等待重新检查；当前映射状态待确认' : running
     ? (store.state.currentJob === 'maintain' && store.state.currentDomain
         ? `正在维护 ${store.state.currentDomain}`
         : '任务执行中')
@@ -366,7 +374,7 @@ function updateShellStatus() {
         : store.state?.lastSuccess
           ? `最近成功 ${fmtTime(store.state.lastSuccess, true)}`
           : 'CFHost Service'
-  const statusClass = running ? 'is-running' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
+  const statusClass = blocked ? 'is-error' : running ? 'is-running' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
   $('#sidebar-status').textContent = text
   updateSidebarProgress(running, subtitle)
   const sideDot = $('#sidebar-status-dot')
@@ -421,13 +429,18 @@ function renderPage(animate = true, animateDashboardNumbers = animate) {
   store.renderSignature = pageRefreshSignature()
 }
 
+function hostsMaintenanceBlocked() {
+  return !!store.state?.hostsMaintenance?.blocked || ['diverged', 'error'].includes(store.state?.hostsBinding)
+}
+
 function statusCounts() {
   const domains = store.config.domains || []
   const enabled = domains.filter(domain => domain.enabled)
+  if (hostsMaintenanceBlocked()) return { total: enabled.length, ok: 0, failed: 0, unverified: enabled.length, disabled: domains.length - enabled.length }
   const mapped = store.state.mappings || {}
   const statuses = store.state.domainStatus || {}
   const ok = enabled.filter(domain => !!mapped[domain.host] && !/stale retained|unresolved/i.test(statuses[domain.host] || '') && !maintenancePauseFor(domain.host)).length
-  return { total: enabled.length, ok, failed: Math.max(enabled.length - ok, 0), disabled: domains.length - enabled.length }
+  return { total: enabled.length, ok, failed: Math.max(enabled.length - ok, 0), unverified: 0, disabled: domains.length - enabled.length }
 }
 
 function trackerSampleMeta(domain) {

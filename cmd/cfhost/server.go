@@ -55,8 +55,11 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := a.snapshotConfig()
 	if cfg.AutoApply || cfg.Sync.Enabled {
-  if _, err := hostsBindingStatus(cfg.HostsPath); err != nil {
-   http.Error(w, "Hosts binding verification failed", http.StatusServiceUnavailable)
+  a.mu.RLock()
+  blocked := a.state.HostsMaintenance.Blocked
+  a.mu.RUnlock()
+  if err := maintenanceHostsError(cfg); err != nil || blocked {
+   http.Error(w, "Hosts maintenance preflight failed", http.StatusServiceUnavailable)
    return
   }
 	}

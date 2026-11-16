@@ -30,6 +30,7 @@ func copyStatuses(in map[string]string) map[string]string {
 // reselects mappings for unrelated domains. Direct followers inherit the target's
 // final mapping without independent candidate selection or verification.
 func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string) error {
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	d, ok := configuredDomain(cfg, host)
 	if !ok {
 		return fmt.Errorf("domain not found: %s", host)

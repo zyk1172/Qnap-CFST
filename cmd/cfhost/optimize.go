@@ -7,6 +7,7 @@ import (
 )
 
 func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	attempt:=time.Now()
 	a.setJobProgress("准备完整优化", "记录优化状态", 1, 5, 0, 0)
 	a.mu.Lock(); a.state.LastOptimizeAttempt=attempt.Format(time.RFC3339); a.mu.Unlock()

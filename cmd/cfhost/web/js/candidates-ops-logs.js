@@ -91,6 +91,7 @@ function renderCandidates() {
 function candidateReserveInfo() {
   const reserve = store.state.candidateReserve
   if (!reserve) return ''
+  if (hostsMaintenanceBlocked()) return infoLine('候选自动补充已暂停', 'Hosts 异常，恢复后继续沿用原测速间隔与冷却。', 'warning')
   const label = { disabled: '自动补充关闭', sufficient: '储备充足', waiting: '等待补充间隔或源冷却', ready: '等待空闲时补充' }[reserve.status] || reserve.status
   return infoLine('有效候选储备', `${reserve.usableCount}/${reserve.minimumCount} · ${label}`) +
     (reserve.nextAllowedAt ? infoLine('最早补充时间', fmtTime(reserve.nextAllowedAt)) : '')
@@ -111,6 +112,7 @@ function renderOperations() {
       <section class="card">
         <div class="card-head"><div><h2 class="card-title">调度器</h2><div class="card-subtitle">自动任务计划</div></div></div>
         <div class="card-body metric-stack">
+          ${hostsMaintenanceBlocked() ? infoLine('自动维护已暂停', `Hosts 异常 · 下次本地检查 ${fmtTime(store.state.hostsMaintenance?.nextCheck)}`, 'warning') : ''}
           ${infoLine('Smart Repair', store.config.autoRepair ? `启用 · ${store.config.repairIntervalMinutes} 分钟` : '关闭', store.config.autoRepair ? 'success' : '')}
           ${infoLine('周期 Full Optimize', store.config.optimize.scheduledFull ? `启用 · ${store.config.optimize.intervalMinutes} 分钟` : '关闭 · 自动维护仅 Repair', store.config.optimize.scheduledFull ? 'warning' : 'success')}
           ${infoLine('下次允许 Refresh', fmtTime(store.state.nextRefresh))}

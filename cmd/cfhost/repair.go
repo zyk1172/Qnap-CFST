@@ -84,6 +84,7 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	now:=time.Now()
 	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 1, 7, 0, 0)
 	samples:=a.loadSamples(ctx,a.retryDueConfig(cfg,now))
