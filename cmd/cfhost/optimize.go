@@ -7,11 +7,13 @@ import (
 )
 
 func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
+	cfg = manualConfig(ctx, cfg)
+	a.resetManualSweeps(ctx, cfg)
 	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	attempt:=time.Now()
 	a.setJobProgress("准备完整优化", "记录优化状态", 1, 5, 0, 0)
 	a.mu.Lock(); a.state.LastOptimizeAttempt=attempt.Format(time.RFC3339); a.mu.Unlock()
-	active := a.maintenanceConfig(a.retryDueConfig(cfg,attempt))
+	active := a.jobMaintenanceConfig(ctx,a.jobDueConfig(ctx,cfg,attempt))
 	hasActive := false
 	for _, d := range active.Domains {
 		if d.Enabled && !isFollowDomain(d) { hasActive = true; break }
@@ -38,8 +40,8 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 		if err:=ctx.Err();err!=nil{return fmt.Errorf("full optimize aborted before commit: %w",err)}
 		a.setJobDomainProgress("验证并选择域名", 4, 5, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
-		if maintenancePaused(d, health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
-		if !domainCheckDue(health[d.Host],attempt) && !isFollowDomain(d) { statuses[d.Host]="unresolved · retry deferred until "+health[d.Host].NextCheck;continue }
+		if jobMaintenancePaused(ctx,d,health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
+		if !jobDomainCheckDue(ctx,health[d.Host],attempt) && !isFollowDomain(d) { statuses[d.Host]="unresolved · retry deferred until "+health[d.Host].NextCheck;continue }
 		oldIP:=current[d.Host]
 		h:=health[d.Host]
 		if isFollowDomain(d) {

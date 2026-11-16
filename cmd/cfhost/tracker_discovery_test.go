@@ -1000,11 +1000,22 @@ func TestPostRepairKeepaliveReannouncesInSameRepairCycle(t *testing.T) {
 	if err := a.commitMaintenanceResolution(context.Background(), cfg, samples, a.state.Mappings, a.state.Mappings,
 		map[string]string{}, map[string]DomainHealth{}, "", false); err != nil { t.Fatal(err) }
 	if reannounceCalls.Load() != 1 || a.state.TrackerKeepalive["tracker.example.com"].NextReannounce != state.NextReannounce { t.Fatal("repeated commit bypassed announce interval") }
+	// Explicit manual work overrides the persisted observation/announce/attempt
+	// budgets, but its multiple verification phases cannot duplicate the RPC.
+	state.Attempts = trackerKeepaliveMaxAttempts
+	state.Status = "observing"
+	state.NextCheck = time.Now().Add(time.Hour).Format(time.RFC3339)
+	state.NextReannounce = state.NextCheck
+	a.state.TrackerKeepalive["tracker.example.com"] = state
+	manual := withManualOperation(context.Background())
+	a.evaluateTransmissionTrackerKeepalive(manual, cfg, samples)
+	a.evaluateTransmissionTrackerKeepalive(manual, cfg, samples)
+	if reannounceCalls.Load() != 2 { t.Fatal("manual announce was blocked by an internal budget or repeated within one action") }
 	cfg.AutoApply = true
 	cfg.HostsPath = filepath.Join(a.dataDir, "missing-hosts")
 	if err := a.commitMaintenanceResolution(context.Background(), cfg, samples, a.state.Mappings,
 		map[string]string{"tracker.example.com": "104.16.0.12"}, map[string]string{}, map[string]DomainHealth{}, "", false); err == nil { t.Fatal("expected failed apply") }
-	if reannounceCalls.Load() != 1 || a.state.Mappings["tracker.example.com"] != "104.16.0.11" { t.Fatal("failed apply reannounced or changed mapping") }
+	if reannounceCalls.Load() != 2 || a.state.Mappings["tracker.example.com"] != "104.16.0.11" { t.Fatal("failed apply reannounced or changed mapping") }
 }
 
 func TestNormalTrackerNeverEntersPostRepairKeepalive(t *testing.T) {

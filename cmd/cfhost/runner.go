@@ -181,7 +181,9 @@ func (a *App) runCFSTMode(ctx context.Context, cfg Config, degraded bool) ([]Can
 	attemptLimit:=cfg.CFST.DownloadCount
 	if attemptLimit<1 {attemptLimit=20}
 	if degraded {attemptLimit=minPositive(attemptLimit,5)}
-	cmd.Env=append(os.Environ(),"CFST_BLOCKED_ORIGINS="+a.blockedSourceOrigins(cfg),"CFST_MAX_DOWNLOAD_ATTEMPTS="+strconv.Itoa(attemptLimit))
+	blocked := a.blockedSourceOrigins(cfg)
+	if isManualOperation(ctx) { blocked = "" }
+	cmd.Env=append(os.Environ(),"CFST_BLOCKED_ORIGINS="+blocked,"CFST_MAX_DOWNLOAD_ATTEMPTS="+strconv.Itoa(attemptLimit))
 	out, cmdErr := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
 	for _, line := range strings.Split(output, "\n") {

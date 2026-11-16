@@ -124,6 +124,15 @@ func selectSource(s RuntimeState, cfg Config, now time.Time) (string, time.Time)
 	return "", earliest
 }
 
+func selectManualSource(s RuntimeState, cfg Config) string {
+	urls := configuredSources(cfg)
+	if len(urls) == 0 { return "" }
+	for i, raw := range urls {
+		if sourceOrigin(raw) == s.CFSTSchedule.Source { return urls[(i+1)%len(urls)] }
+	}
+	return urls[0]
+}
+
 func (a *App) noteSourceOrigin(raw, actual string) {
 	origin := sourceOrigin(raw)
 	actual = sourceOrigin(actual)

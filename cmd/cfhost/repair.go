@@ -37,7 +37,7 @@ func (a *App) runJob(ctx context.Context, kind string, cfg Config) error {
 }
 
 func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSample {
-	cfg = a.maintenanceConfig(cfg)
+	cfg = a.jobMaintenanceConfig(ctx, cfg)
 	samples:=map[string]TrackerSample{}
 	if !cfg.Tracker.RealAnnounce {
 		a.refreshTrackerSampleInventory(cfg)
@@ -84,12 +84,14 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
+	cfg = manualConfig(ctx, cfg)
+	a.resetManualSweeps(ctx, cfg)
 	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	now:=time.Now()
 	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 1, 7, 0, 0)
-	samples:=a.loadSamples(ctx,a.retryDueConfig(cfg,now))
+	samples:=a.loadSamples(ctx,a.jobDueConfig(ctx,cfg,now))
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before mapping changes: %w",err)}
-	downloaderFailures:=a.loadDownloaderTrackerFailures(ctx,a.retryDueConfig(cfg,now),samples)
+	downloaderFailures:=a.loadDownloaderTrackerFailures(ctx,a.jobDueConfig(ctx,cfg,now),samples)
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before mapping changes: %w",err)}
 	a.setJobProgress("读取样本", fmt.Sprintf("样本就绪 · %d 个域名配置", len(cfg.Domains)), 1, 7, 1, 1)
 	a.mu.RLock()
@@ -107,8 +109,8 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 		a.setJobDomainProgress("检查当前映射", 2, 7, index+1, len(cfg.Domains), d.Host)
 		if !d.Enabled { statuses[d.Host]="disabled"; delete(mappings,d.Host); continue }
-		if maintenancePaused(d, health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
-		if !domainCheckDue(health[d.Host],now) && !isFollowDomain(d) {
+		if jobMaintenancePaused(ctx,d,health) { statuses[d.Host]=maintenancePauseStatus(health[d.Host]); continue }
+		if !jobDomainCheckDue(ctx,health[d.Host],now) && !isFollowDomain(d) {
 			statuses[d.Host]="unresolved · retry deferred until "+health[d.Host].NextCheck
 			continue
 		}
@@ -199,7 +201,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		for _,d:=range cfg.Domains {
 			if !d.Enabled { continue }
 			configured[d.Host]=true
-			if isFollowDomain(d) || maintenancePaused(d, health) || !domainCheckDue(health[d.Host],now) { continue }
+			if isFollowDomain(d) || jobMaintenancePaused(ctx,d,health) || !jobDomainCheckDue(ctx,health[d.Host],now) { continue }
 			h:=health[d.Host]
 			h=a.candidateOutcome(h,true,"",finalNow,cfg,d.Host)
 			health[d.Host]=h
@@ -209,7 +211,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 			if !configured[host] { delete(health,host) }
 		}
 		detail:="全部健康"
-		deferred:=0;for _,d:=range cfg.Domains {if d.Enabled && !domainCheckDue(health[d.Host],now) && !maintenancePaused(d,health) {deferred++}}
+		deferred:=0;for _,d:=range cfg.Domains {if d.Enabled && !jobDomainCheckDue(ctx,health[d.Host],now) && !jobMaintenancePaused(ctx,d,health) {deferred++}}
 		if deferred>0 {detail=fmt.Sprintf("其余域名检查完成 · %d 个域名等待重试",deferred)}
 		if paused := len(pausedMaintenanceDomains(cfg, health)); paused > 0 { detail=fmt.Sprintf("其余域名检查完成 · %d 个域名维护已暂停",paused) }
 		if followUnresolved>0 { detail=fmt.Sprintf("%d 个跟随域名未解析",followUnresolved) }
@@ -238,6 +240,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 	bootstrap:=refreshablePending>0 && len(freshCandidates(cachedState,time.Duration(cfg.Repair.CandidateTTLMinutes)*time.Minute,now))==0 && (len(current)==0 || normalNeedsBootstrap)
 	refreshNow,nextRefresh,backoff:=refreshDecision(now,lastRefresh,maxProspective,cfg.Repair.FailureThreshold,time.Duration(cfg.Repair.RefreshCooldownMinutes)*time.Minute,time.Duration(cfg.Repair.RefreshMaxBackoffMinutes)*time.Minute,bootstrap)
+	if isManualOperation(ctx) && refreshablePending > 0 { refreshNow = true; nextRefresh = time.Time{} }
 	var refreshErr error
 	a.setJobProgress("评估刷新", fmt.Sprintf("可刷新 %d 个域名", refreshablePending), 4, 7, 1, 1)
 	if refreshablePending>0 && refreshNow {
@@ -276,7 +279,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	for _,d:=range cfg.Domains {
 		if !d.Enabled { continue }
 		configured[d.Host]=true
-		if isFollowDomain(d) || maintenancePaused(d, health) || !domainCheckDue(health[d.Host],now) { continue }
+		if isFollowDomain(d) || jobMaintenancePaused(ctx,d,health) || !jobDomainCheckDue(ctx,health[d.Host],now) { continue }
 		h:=health[d.Host]
 		if unresolved[d.Host] {
 			if !checked[d.Host] {continue}

@@ -199,6 +199,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       domainStatus: state.domainStatus,
       hostsBinding: state.hostsBinding,
       hostsMaintenance: state.hostsMaintenance,
+      hostsClearedAt: state.hostsClearedAt,
       resolutionAttempt: state.resolutionAttempt,
       history: state.history,
       candidates: state.candidates,
@@ -354,10 +355,12 @@ function updateShellStatus() {
   const running = !!store.state?.running
   const blocked = hostsMaintenanceBlocked()
   const error = store.state?.lastError
+  const waitingUntil = budgetWaitUntil(error)
   const counts = statusCounts()
   const unresolved = counts.failed > 0
   const text = blocked ? '维护已暂停' : running
     ? jobLabel(store.state.currentJob)
+    : waitingUntil ? '等待自动测速间隔'
     : error
       ? '需要注意'
       : unresolved
@@ -367,6 +370,7 @@ function updateShellStatus() {
     ? (store.state.currentJob === 'maintain' && store.state.currentDomain
         ? `正在维护 ${store.state.currentDomain}`
         : '任务执行中')
+    : waitingUntil ? `自动任务最早 ${fmtTime(waitingUntil)}；手动操作可立即执行`
     : error
       ? String(error)
       : unresolved
@@ -374,7 +378,7 @@ function updateShellStatus() {
         : store.state?.lastSuccess
           ? `最近成功 ${fmtTime(store.state.lastSuccess, true)}`
           : 'CFHost Service'
-  const statusClass = blocked ? 'is-error' : running ? 'is-running' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
+  const statusClass = blocked ? 'is-error' : running ? 'is-running' : waitingUntil ? 'is-warning' : error ? 'is-error' : unresolved ? 'is-warning' : 'is-ok'
   $('#sidebar-status').textContent = text
   updateSidebarProgress(running, subtitle)
   const sideDot = $('#sidebar-status-dot')
@@ -431,6 +435,11 @@ function renderPage(animate = true, animateDashboardNumbers = animate) {
 
 function hostsMaintenanceBlocked() {
   return !!store.state?.hostsMaintenance?.blocked || ['diverged', 'error'].includes(store.state?.hostsBinding)
+}
+
+function budgetWaitUntil(message) {
+  const match = /^CFST deferred until ([^;]+); cached candidates remain available for verification$/.exec(String(message || ''))
+  return match && Number.isFinite(Date.parse(match[1])) ? match[1] : ''
 }
 
 function statusCounts() {

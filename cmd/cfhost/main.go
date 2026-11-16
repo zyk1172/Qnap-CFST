@@ -93,6 +93,7 @@ type RuntimeState struct {
 	LastOptimizeAttempt string                  `json:"lastOptimizeAttempt"`
 	HostsMaintenance    HostsMaintenanceRuntime `json:"hostsMaintenance"`
 	ResolutionAttempt   ResolutionAttempt       `json:"resolutionAttempt"`
+	HostsClearedAt      string                  `json:"hostsClearedAt,omitempty"`
 	MigrationAt         string                  `json:"migrationAt"`
 	MigrationStatus     string                  `json:"migrationStatus"`
 	Candidates          []Candidate             `json:"candidates"`
@@ -216,6 +217,14 @@ func (a *App) scheduledJob(now time.Time) string {
 }
 
 func (a *App) startJob(kind string) bool {
+	return a.startJobWithOrigin(kind, false)
+}
+
+func (a *App) startManualJob(kind string) bool {
+	return a.startJobWithOrigin(kind, true)
+}
+
+func (a *App) startJobWithOrigin(kind string, manual bool) bool {
 	a.mu.Lock()
 	if a.state.Running { a.mu.Unlock(); return false }
 	a.state.Running=true; a.state.CurrentJob=kind; a.state.CurrentDomain=""; a.state.Progress=initialJobProgress(kind); a.state.LastError=""
@@ -228,12 +237,16 @@ func (a *App) startJob(kind string) bool {
 		// to finish their finite verification/retry work even when CFST itself
 		// reaches its own timeout.
 		ctx:=context.Background()
+		if manual { ctx = withManualOperation(ctx) }
 		a.appendLog("%s started",kind)
 		err:=a.runJob(ctx,kind,cfg)
+		var deferred *cfstDeferredError
+		errors.As(err, &deferred)
 		finished:=time.Now(); now:=finished.Format(time.RFC3339)
 		a.mu.Lock()
-		a.state.Running=false; a.state.CurrentJob=""; a.state.CurrentDomain=""; a.state.Progress=JobProgress{}; a.state.LastRun=now
-		if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
+		a.state.Running=false; a.state.CurrentJob=""; a.state.CurrentDomain=""; a.state.Progress=JobProgress{}
+		if deferred==nil || kind=="repair" { a.state.LastRun=now }
+		if deferred!=nil { a.state.LastError="" } else if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
 		record:=RunRecord{Kind:kind,StartedAt:started.Format(time.RFC3339),FinishedAt:now,DurationMS:finished.Sub(started).Milliseconds(),Success:err==nil,MappingsBefore:mappingsBefore,MappingsAfter:len(a.state.Mappings),CandidateCount:len(a.state.Candidates),FullRefresh:a.state.LastRefresh!=refreshBefore}
 		if resolutionJob(kind) {
 			record.UnresolvedDomains,record.UnresolvedCount=unresolvedDomainsWithStatus(cfg,a.state.Mappings,a.state.DomainStatus)
@@ -241,7 +254,7 @@ func (a *App) startJob(kind string) bool {
 		if err!=nil{record.Error=err.Error()}
 		a.state.History=append(a.state.History,record); if len(a.state.History)>200{a.state.History=a.state.History[len(a.state.History)-200:]}
 		a.mu.Unlock()
-		if err!=nil { a.appendLog("%s failed: %v",kind,err) } else { a.appendLog("%s finished",kind) }
+		if deferred!=nil { a.appendLog("%s deferred: %v",kind,err) } else if err!=nil { a.appendLog("%s failed: %v",kind,err) } else { a.appendLog("%s finished",kind) }
 		a.persistState()
 	}()
 	return true

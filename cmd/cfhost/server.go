@@ -24,6 +24,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/domain-maintain", a.handleDomainMaintain)
 	mux.HandleFunc("/api/domain-resume", a.handleDomainResume)
 	mux.HandleFunc("/api/apply", a.handleApply)
+	mux.HandleFunc("/api/hosts/clear", a.handleClearHosts)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
 	mux.HandleFunc("/api/tracker-runtime", a.handleTrackerRuntime)
@@ -136,7 +137,7 @@ func (a *App) handleJob(kind string) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !a.startJob(kind) {
+		if !a.startManualJob(kind) {
 			http.Error(w, "another job is running", http.StatusConflict)
 			return
 		}
@@ -180,6 +181,8 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !a.beginHostsOperation("apply") { http.Error(w, "another job is running", http.StatusConflict); return }
+	defer a.endHostsOperation()
 	cfg := a.snapshotConfig()
 	a.mu.RLock()
 	mappings := copyMappings(a.state.Mappings)
@@ -188,6 +191,7 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	a.mu.Lock(); a.state.HostsClearedAt = ""; a.mu.Unlock()
 	response := map[string]string{"status": "applied"}
 	if cfg.Sync.Enabled {
 		if err := a.publishSync(r.Context(), cfg, false); err != nil {
@@ -197,7 +201,6 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 			response["sync"] = "ok"
 		}
 	}
-	a.persistState()
 	writeResponse(w, response)
 }
 

@@ -78,9 +78,9 @@ func TestLegacyPausedDomainDoesNotTriggerCFSTOrBlockOtherDomains(t *testing.T) {
 	if err := a.runFullOptimize(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if started, err := a.startDomainMaintenance("offline.example"); started || err == nil {
-		t.Fatal("manual maintenance bypassed pause")
-	}
+	a.state.Running = true
+	if started, err := a.startDomainMaintenance("offline.example"); started || err != nil { t.Fatal("manual operation bypassed running-job exclusion") }
+	a.state.Running = false
 	if err := a.runDomainMaintenance(context.Background(), cfg, "offline.example"); err == nil {
 		t.Fatal("direct maintenance bypassed pause")
 	}

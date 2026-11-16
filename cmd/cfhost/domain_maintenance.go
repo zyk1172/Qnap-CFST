@@ -30,6 +30,7 @@ func copyStatuses(in map[string]string) map[string]string {
 // reselects mappings for unrelated domains. Direct followers inherit the target's
 // final mapping without independent candidate selection or verification.
 func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string) error {
+	cfg = manualConfig(ctx, cfg)
 	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	d, ok := configuredDomain(cfg, host)
 	if !ok {
@@ -41,7 +42,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 	a.mu.RLock()
 	paused := maintenancePaused(d, a.state.DomainHealth)
 	a.mu.RUnlock()
-	if paused { return fmt.Errorf("domain maintenance is paused: %s; resume it first", d.Host) }
+	if paused && !isManualOperation(ctx) { return fmt.Errorf("domain maintenance is paused: %s; resume it first", d.Host) }
 	if isFollowDomain(d) {
 		a.setJobProgress("同步跟随", d.Host+" ← "+d.Follow, 1, 1, 0, 0)
 		a.mu.RLock()
@@ -61,6 +62,7 @@ func (a *App) runDomainMaintenance(ctx context.Context, cfg Config, host string)
 
 	scopeCfg := cfg
 	scopeCfg.Domains = []Domain{d}
+	a.resetManualSweeps(ctx, scopeCfg)
 	a.setJobProgress("读取样本", d.Host, 1, 6, 0, 0)
 	samples := a.loadSamples(ctx, scopeCfg)
 	downloaderFailures := a.evaluateTransmissionTrackerKeepaliveForTargets(ctx, cfg, samples, map[string]bool{d.Host: true})
@@ -240,7 +242,6 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 		a.mu.Unlock()
 		return false, nil
 	}
-	if maintenancePaused(d, a.state.DomainHealth) { a.mu.Unlock(); return false, fmt.Errorf("domain maintenance is paused: %s; resume it first", d.Host) }
 	a.state.Running = true
 	a.state.CurrentJob = "maintain"
 	a.state.CurrentDomain = d.Host
@@ -253,7 +254,7 @@ func (a *App) startDomainMaintenance(host string) (bool, error) {
 	go func() {
 		started := time.Now()
 		cfg := a.snapshotConfig()
-		ctx := context.Background()
+		ctx := withManualOperation(context.Background())
 
 		a.appendLog("maintain started: %s", d.Host)
 		err := a.runDomainMaintenance(ctx, cfg, d.Host)

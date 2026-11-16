@@ -22,6 +22,7 @@ async function handleClick(event) {
     const action = op.dataset.op
     if (['run', 'repair', 'optimize'].includes(action)) await runJob(action)
     else if (action === 'apply') await applyHosts()
+    else if (action === 'clear') await clearHosts()
     else if (action === 'sync') await syncGitHub()
     return
   }
