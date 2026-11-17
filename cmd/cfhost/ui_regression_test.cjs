@@ -4,6 +4,51 @@ const { join } = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 
+test('automatic continuation and background generation remain visible independently', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.context.infoLine = (label, value) => `${label}:${value}\n`
+  f.context.fmtTime = value => value || '—'
+  const before = ['candidates', 'operations'].map(page => f.pageRefreshSignature(page))
+  f.store.state.candidateRefresh = { running: true, readyTargets: ['recover.example'] }
+  f.store.state.automaticRepair = { passed: 3, failed: 1, pending: { 'slow.example': {} }, nextCheck: '2026-11-17T16:00:00+08:00' }
+  const output = vm.runInContext('automaticMaintenanceInfo()', f.context)
+  assert.match(output, /通过 3 · 失败 1 · 未完成 1/)
+  assert.match(output, /域名维护独立执行/)
+  assert.match(output, /2026-11-17T16:00:00/)
+  assert.match(output, /1 个域名等待修复/)
+  for (const [index, page] of ['candidates', 'operations'].entries()) assert.notEqual(f.pageRefreshSignature(page), before[index])
+})
+
+test('history distinguishes queued, unfinished and failed work with phase timings', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.context.fmtTime = value => value
+  f.context.fmtDuration = value => `${value}ms`
+  f.context.jobLabel = value => value
+  f.context.row = { success: true, deferredCount: 1, stages: { samples: 10, verification: 1200, commit: 20 } }
+  let output = vm.runInContext('historyRow(row)', f.context)
+  assert.match(output, /等待续跑/)
+  assert.match(output, /域名与候选验证 1200ms/)
+  assert.doesNotMatch(output, />失败</)
+  f.context.row = { success: true, queued: true }
+  output = vm.runInContext('historyRow(row)', f.context)
+  assert.match(output, /已排队/)
+  assert.doesNotMatch(output, />成功</)
+  f.context.row = { success: false, error: 'actual failure' }
+  assert.match(vm.runInContext('historyRow(row)', f.context), />失败</)
+})
+
+test('automatic slice settings preserve numeric edits', () => {
+  const f = fixture()
+  f.store.configDraft.repair = {}
+  f.context.updateSaveBar = () => {}
+  for (const [name, value] of Object.entries({ timeSliceSeconds: 120, domainSliceSeconds: 30, concurrency: 3, continueAfterSeconds: 30 })) {
+    f.listeners.input({ target: { dataset: { configPath: `repair.${name}`, configType: 'number' }, value: String(value) } })
+    assert.equal(f.store.configDraft.repair[name], value)
+  }
+})
+
 function fixture() {
   const listeners = {}
   const node = { classList: { contains: () => false }, addEventListener() {} }

@@ -56,6 +56,7 @@ function renderCandidates() {
           ${infoLine('冷却后恢复探测参数', `${store.config.cfst.degradedDownloadMB} MB/次 · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
           ${infoLine('当前限流状态', rateLimit.detail, rateLimit.active ? 'warning' : 'success')}
           ${infoLine('最近测速尝试', fmtTime(store.state.lastRefresh))}
+          ${automaticMaintenanceInfo()}
           ${candidateReserveInfo()}
           ${infoLine('下次允许测速', fmtTime(store.state.cfstSchedule?.nextAllowedAt))}
           ${infoLine('最近触发入口', store.state.cfstSchedule?.trigger || '—')}
@@ -97,6 +98,17 @@ function candidateReserveInfo() {
     (reserve.nextAllowedAt ? infoLine('最早补充时间', fmtTime(reserve.nextAllowedAt)) : '')
 }
 
+function automaticMaintenanceInfo() {
+  const repair = store.state.automaticRepair || {}
+  const refresh = store.state.candidateRefresh || {}
+  const pending = Object.keys(repair.pending || {}).length
+  const ready = (refresh.readyTargets || []).length
+  return infoLine('自动验证结果', `通过 ${Number(repair.passed) || 0} · 失败 ${Number(repair.failed) || 0} · 未完成 ${pending}`) +
+    (pending ? infoLine('未完成任务续跑', fmtTime(repair.nextCheck), 'warning') : '') +
+    (ready ? infoLine('新候选待验证', `${ready} 个域名等待修复`) : '') +
+    (refresh.running ? infoLine('候选生成', '运行中；域名维护独立执行', 'info') : refresh.requested ? infoLine('候选生成', `已排队 · 最早测速 ${fmtTime(store.state.cfstSchedule?.nextAllowedAt)}`, 'warning') : '')
+}
+
 function renderOperations() {
   const history = [...(store.state.history || [])].reverse()
   const sync = store.state.sync || {}
@@ -119,6 +131,7 @@ function renderOperations() {
           ${infoLine('测速服务限流', cfstCooldownMeta().detail, cfstCooldownMeta().active ? 'warning' : 'success')}
           ${infoLine('最近 Optimize', fmtTime(store.state.lastOptimize))}
           ${infoLine('最近任务', fmtTime(store.state.lastRun))}
+          ${automaticMaintenanceInfo()}
           ${candidateReserveInfo()}
         </div>
       </section>
@@ -151,16 +164,20 @@ function historyRow(item) {
   const waitingUntil = budgetWaitUntil(item.error)
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
-  const verdict = waitingUntil ? { cls: 'warning', label: '等待预算' } : !item.success
+  const verdict = waitingUntil ? { cls: 'warning', label: '等待预算' } : item.queued ? { cls: 'warning', label: '已排队' } : !item.success
     ? { cls: 'danger', label: '失败' }
+    : Number(item.deferredCount) > 0
+      ? { cls: 'warning', label: '等待续跑' }
     : unresolved
       ? { cls: 'warning', label: '部分完成' }
       : { cls: 'success', label: '成功' }
   const unresolvedCell = unresolved
     ? `<span class="chip warning" title="${esc(names.join('、'))}">${unresolved}</span>`
     : '—'
+  const stageNames = { samples: '样本与下载器', verification: '域名与候选验证', commit: '提交与同步', keepalive: '保活', cfst: 'CFST' }
+  const stages = Object.entries(item.stages || {}).map(([name, ms]) => `${stageNames[name] || name} ${fmtDuration(ms)}`).join(' · ')
   return `
-    <tr><td><strong>${esc(jobLabel(item.kind))}</strong>${item.targetDomain ? `<div class="card-subtitle mono">${esc(item.targetDomain)}</div>` : ''}</td><td>${fmtTime(item.startedAt)}</td><td>${fmtDuration(item.durationMs)}</td><td><span class="chip ${verdict.cls}"><span class="dot"></span>${verdict.label}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${unresolvedCell}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
+    <tr><td><strong>${esc(jobLabel(item.kind))}</strong>${item.targetDomain ? `<div class="card-subtitle mono">${esc(item.targetDomain)}</div>` : ''}</td><td>${fmtTime(item.startedAt)}</td><td title="${esc(stages)}">${fmtDuration(item.durationMs)}${stages ? `<div class="card-subtitle">${esc(stages)}</div>` : ''}</td><td><span class="chip ${verdict.cls}"><span class="dot"></span>${verdict.label}</span></td><td>${item.fullRefresh ? '<span class="chip primary">是</span>' : '否'}</td><td>${item.mappingsBefore} → ${item.mappingsAfter}</td><td>${item.candidateCount}</td><td>${unresolvedCell}</td><td>${item.error ? esc(item.error) : '—'}</td></tr>
   `
 }
 

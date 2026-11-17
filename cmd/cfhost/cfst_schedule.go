@@ -145,6 +145,7 @@ func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Cand
 	recovery := prior.Failures > 0 || (prior.RateLimit.DetectedAt != "" && (prior.RateLimit.Consecutive > 0 || prior.RateLimit.Mode != "normal"))
 	if manual { recovery = false }
 	trigger := a.state.CurrentJob
+	if override,ok:=ctx.Value(cfstTriggerKey{}).(string);ok {trigger=override}
 	if trigger == "" {
 		trigger = "run"
 	}

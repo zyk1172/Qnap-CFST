@@ -80,6 +80,8 @@ type TrackerKeepaliveRuntime struct {
 }
 
 type RuntimeState struct {
+	AutomaticRepair AutomaticRepairRuntime `json:"automaticRepair"`
+	CandidateRefresh CandidateRefreshRuntime `json:"candidateRefresh"`
 	Running             bool                    `json:"running"`
 	CurrentJob          string                  `json:"currentJob"`
 	CurrentDomain       string                  `json:"currentDomain,omitempty"`
@@ -155,6 +157,7 @@ func (a *App) loadState() {
 	b,err:=os.ReadFile(filepath.Join(a.dataDir,"state.json")); if err!=nil{return}
 	var s RuntimeState; if decodeJSON(b,&s)!=nil{return}
 	s.Running=false; s.CurrentJob=""; s.CurrentDomain=""; s.Progress=JobProgress{}
+	s.CandidateRefresh.Running = false
 	if s.Mappings==nil{s.Mappings=map[string]string{}}
 	if s.DomainStatus==nil{s.DomainStatus=map[string]string{}}
 	if s.DomainHealth==nil{s.DomainHealth=map[string]DomainHealth{}}
@@ -197,8 +200,11 @@ func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveR
 func (a *App) scheduler() {
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
+		a.startCandidateRefresh(now)
 		kind := a.scheduledJob(now)
-		if kind != "" { a.startJob(kind) }
+		if kind == "reserve" {
+			if err:=a.requestCandidateRefresh("candidate reserve low", nil, false);err!=nil {a.appendLog("candidate refresh queue failed: %v",err)} else {a.startCandidateRefresh(now)}
+		} else if kind != "" { a.startJob(kind) }
 	}
 }
 
@@ -228,26 +234,37 @@ func (a *App) startJobWithOrigin(kind string, manual bool) bool {
 	a.mu.Lock()
 	if a.state.Running { a.mu.Unlock(); return false }
 	a.state.Running=true; a.state.CurrentJob=kind; a.state.CurrentDomain=""; a.state.Progress=initialJobProgress(kind); a.state.LastError=""
+	if !manual&&kind=="repair" {a.state.AutomaticRepair.Stages=nil}
 	mappingsBefore:=len(a.state.Mappings); refreshBefore:=a.state.LastRefresh
 	a.mu.Unlock()
 
 	go func(){
 		started:=time.Now(); cfg:=a.snapshotConfig()
-		// Jobs are not bounded by the CFST timeout. Repair/optimize must be able
-		// to finish their finite verification/retry work even when CFST itself
-		// reaches its own timeout.
+		// Manual work retains its full configured verification/CFST limits.
+		// Automatic resolution checkpoints bounded slices independently of CFST.
 		ctx:=context.Background()
 		if manual { ctx = withManualOperation(ctx) }
 		a.appendLog("%s started",kind)
-		err:=a.runJob(ctx,kind,cfg)
+		var err error
+		if !manual && kind == "repair" {
+			err = a.runAutomaticRepair(ctx, cfg)
+		} else if !manual && kind == "optimize" {
+			err = a.requestAutomaticOptimize(cfg)
+		} else {
+			err = a.runJob(ctx,kind,cfg)
+		}
 		var deferred *cfstDeferredError
 		errors.As(err, &deferred)
 		finished:=time.Now(); now:=finished.Format(time.RFC3339)
 		a.mu.Lock()
-		a.state.Running=false; a.state.CurrentJob=""; a.state.CurrentDomain=""; a.state.Progress=JobProgress{}
-		if deferred==nil || kind=="repair" { a.state.LastRun=now }
-		if deferred!=nil { a.state.LastError="" } else if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
+		queuedOptimize:=!manual&&kind=="optimize"&&err==nil
+		if manual&&err==nil&&(kind=="repair"||kind=="optimize"){a.state.AutomaticRepair.LastSweep=finished.Format(time.RFC3339Nano)}
+		if (deferred==nil || kind=="repair")&&!queuedOptimize { a.state.LastRun=now }
+		if deferred!=nil||queuedOptimize { a.state.LastError="" } else if err!=nil { a.state.LastError=err.Error() } else { a.state.LastSuccess=now; a.state.LastError="" }
 		record:=RunRecord{Kind:kind,StartedAt:started.Format(time.RFC3339),FinishedAt:now,DurationMS:finished.Sub(started).Milliseconds(),Success:err==nil,MappingsBefore:mappingsBefore,MappingsAfter:len(a.state.Mappings),CandidateCount:len(a.state.Candidates),FullRefresh:a.state.LastRefresh!=refreshBefore}
+		if !manual && kind == "repair" { record.Stages = a.state.AutomaticRepair.Stages; record.DeferredCount = len(a.state.AutomaticRepair.Pending) }
+		if !manual && (kind=="repair"||kind=="optimize") {record.FullRefresh=false}
+		if !manual && kind=="optimize" && err==nil {record.Queued=a.state.CandidateRefresh.Requested}
 		if resolutionJob(kind) {
 			record.UnresolvedDomains,record.UnresolvedCount=unresolvedDomainsWithStatus(cfg,a.state.Mappings,a.state.DomainStatus)
 		}
@@ -256,6 +273,9 @@ func (a *App) startJobWithOrigin(kind string, manual bool) bool {
 		a.mu.Unlock()
 		if deferred!=nil { a.appendLog("%s deferred: %v",kind,err) } else if err!=nil { a.appendLog("%s failed: %v",kind,err) } else { a.appendLog("%s finished",kind) }
 		a.persistState()
+		// Release the job slot only after logs/state are finished. Otherwise a
+		// new job (or shutdown/test cleanup) races the previous writer.
+		a.mu.Lock();a.state.Running=false;a.state.CurrentJob="";a.state.CurrentDomain="";a.state.Progress=JobProgress{};a.mu.Unlock()
 	}()
 	return true
 }

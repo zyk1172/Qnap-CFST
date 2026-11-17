@@ -55,6 +55,10 @@ function renderSettings() {
         ${settingsSection('repair', 'Repair 与完整优化', '自动维护默认只修复失效域名；Full Optimize 是显式的全局重新选择操作。', `
           <div class="form-grid">
             ${numberField('repairIntervalMinutes', 'Repair 间隔', config.repairIntervalMinutes, '分钟')}
+            ${numberField('repair.timeSliceSeconds', '自动验证时间片', config.repair.timeSliceSeconds ?? 120, '秒；到期保存进度，提交结果与同步另行收尾')}
+            ${numberField('repair.domainSliceSeconds', '每域名自动验证时间片', config.repair.domainSliceSeconds ?? 30, '秒；自动单次请求不超过此值一半')}
+            ${numberField('repair.concurrency', '自动验证并发域名', config.repair.concurrency ?? 3, '1～8；Tracker 探测仍串行')}
+            ${numberField('repair.continueAfterSeconds', '未完成验证续跑间隔', config.repair.continueAfterSeconds ?? 30, '秒；真实失败仍遵守站点退避')}
             ${numberField('repair.candidateTTLMinutes', '候选缓存 TTL', config.repair.candidateTTLMinutes, '分钟')}
             ${numberField('repair.candidateMinCount', '有效候选储备下限', config.repair.candidateMinCount, '0 关闭自动补充；按活动策略统计，最多 200 个')}
             ${numberField('repair.candidateRefreshMinutes', '候选补充最小间隔', config.repair.candidateRefreshMinutes, '分钟；仍遵守全局测速间隔与各源冷却')}
@@ -73,7 +77,7 @@ function renderSettings() {
             ${icon('info')}
             <div>
               <strong>自动维护采用逐域名修复</strong>
-              <span>某个域名失效时，只为该域名寻找替代 IP。健康域名不会因为其他域名故障而更换当前映射。</span>
+              <span>自动验证保存已完成结果和剩余候选，未完成不计作失败。不同域名有限并发，探测开始至少间隔 250 ms；自动探测每个 IP 尝试一次。CFST 独立生成候选，不占用域名维护任务。手动操作继续使用完整配置并突破内部预算。</span>
             </div>
           </div>
         `)}
