@@ -196,17 +196,9 @@ func (a *App) scheduler() {
 	for now:=range ticker.C {
 		cfg:=a.snapshotConfig()
 		a.mu.RLock()
-		running:=a.state.Running; lastRun:=a.state.LastRun; lastOptimize:=a.state.LastOptimize; lastAttempt:=a.state.LastOptimizeAttempt; lastRefresh:=a.state.LastRefresh
-		keepalive:=copyTrackerKeepalive(a.state.TrackerKeepalive)
-		for _, d := range cfg.Domains { if maintenancePaused(d, a.state.DomainHealth) { delete(keepalive, d.Host) } }
+		kind := nextScheduledJob(now, cfg, a.state)
 		a.mu.RUnlock()
-		if running { continue }
-		if trackerKeepaliveCheckDue(now,keepalive) { a.startJob("repair"); continue }
-		if optimizeDue(now,lastOptimize,lastAttempt,lastRefresh,cfg.Optimize) { a.startJob("optimize"); continue }
-		if !cfg.AutoRepair { continue }
-		lastTime,_:=time.Parse(time.RFC3339,lastRun)
-		if !lastTime.IsZero() && time.Since(lastTime)<time.Duration(cfg.RepairIntervalMinutes)*time.Minute { continue }
-		a.startJob("repair")
+		if kind != "" { a.startJob(kind) }
 	}
 }
 

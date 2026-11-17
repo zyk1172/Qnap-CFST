@@ -56,6 +56,7 @@ function renderCandidates() {
           ${infoLine('冷却后恢复探测参数', `${store.config.cfst.degradedDownloadMB} MB/次 · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
           ${infoLine('当前限流状态', rateLimit.detail, rateLimit.active ? 'warning' : 'success')}
           ${infoLine('最近测速尝试', fmtTime(store.state.lastRefresh))}
+          ${candidateReserveInfo()}
           ${infoLine('下次允许测速', fmtTime(store.state.cfstSchedule?.nextAllowedAt))}
           ${infoLine('最近触发入口', store.state.cfstSchedule?.trigger || '—')}
           ${infoLine('最近测速源', store.state.cfstSchedule?.source || '—')}
@@ -87,6 +88,14 @@ function renderCandidates() {
   `
 }
 
+function candidateReserveInfo() {
+  const reserve = store.state.candidateReserve
+  if (!reserve) return ''
+  const label = { disabled: '自动补充关闭', sufficient: '储备充足', waiting: '等待补充间隔或源冷却', ready: '等待空闲时补充' }[reserve.status] || reserve.status
+  return infoLine('有效候选储备', `${reserve.usableCount}/${reserve.minimumCount} · ${label}`) +
+    (reserve.nextAllowedAt ? infoLine('最早补充时间', fmtTime(reserve.nextAllowedAt)) : '')
+}
+
 function renderOperations() {
   const history = [...(store.state.history || [])].reverse()
   const sync = store.state.sync || {}
@@ -108,6 +117,7 @@ function renderOperations() {
           ${infoLine('测速服务限流', cfstCooldownMeta().detail, cfstCooldownMeta().active ? 'warning' : 'success')}
           ${infoLine('最近 Optimize', fmtTime(store.state.lastOptimize))}
           ${infoLine('最近任务', fmtTime(store.state.lastRun))}
+          ${candidateReserveInfo()}
         </div>
       </section>
       <section class="card">

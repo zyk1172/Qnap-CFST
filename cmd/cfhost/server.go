@@ -78,10 +78,11 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if next:=cfstNextAllowed(a.state,a.config); !next.IsZero() { view.CFSTSchedule.NextAllowedAt=next.Format(time.RFC3339) }
 	body, err := json.Marshal(struct {
 		RuntimeState
+		CandidateReserve CandidateReserveStatus `json:"candidateReserve"`
   HostsBinding string `json:"hostsBinding"`
 		MaintenanceFailureLimit int `json:"maintenanceFailureLimit"`
 		MaintenancePaused []MaintenancePause `json:"maintenancePaused"`
-	}{view, binding, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
+	}{view, candidateReserveStatus(a.state, a.config, time.Now()), binding, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
 	a.mu.RUnlock()
 	if err != nil {
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)

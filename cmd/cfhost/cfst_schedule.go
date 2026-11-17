@@ -33,6 +33,10 @@ func effectiveRateLimit(s CFSTRateLimitRuntime, now time.Time) CFSTRateLimitRunt
 }
 
 func cfstNextAllowed(s RuntimeState, cfg Config) time.Time {
+	return cfstNextAllowedAt(s, cfg, time.Now())
+}
+
+func cfstNextAllowedAt(s RuntimeState, cfg Config, now time.Time) time.Time {
 	var next time.Time
 	if last, err := time.Parse(time.RFC3339, s.LastRefresh); err == nil {
 		base := time.Duration(cfg.Repair.RefreshCooldownMinutes) * time.Minute
@@ -41,7 +45,7 @@ func cfstNextAllowed(s RuntimeState, cfg Config) time.Time {
 		}
 		next = last.Add(base + scheduleJitter(s.LastRefresh, base))
 	}
-	_, available := selectSource(s, cfg, time.Now())
+	_, available := selectSource(s, cfg, now)
 	if available.After(next) {
 		next = available
 	}

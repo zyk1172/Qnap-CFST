@@ -223,6 +223,37 @@ test('candidate and operation pages refresh for cooldown and admission changes',
   }
 })
 
+test('reserve eligibility changes refresh both candidate and operation pages', () => {
+  const { store, pageRefreshSignature } = fixture()
+  const before = ['candidates', 'operations'].map(page => pageRefreshSignature(page))
+  store.state.candidateReserve = { status: 'ready', usableCount: 0, minimumCount: 10 }
+  for (const [index, page] of ['candidates', 'operations'].entries()) {
+    assert.notEqual(pageRefreshSignature(page), before[index])
+  }
+})
+
+test('reserve settings preserve explicit zero and numeric interval through edits', () => {
+  const f = fixture()
+  f.store.configDraft.repair = { candidateMinCount: 10, candidateRefreshMinutes: 360 }
+  f.context.updateSaveBar = () => {}
+  f.listeners.input({ target: { dataset: { configPath: 'repair.candidateMinCount', configType: 'number' }, value: '0' } })
+  f.listeners.input({ target: { dataset: { configPath: 'repair.candidateRefreshMinutes', configType: 'number' }, value: '360' } })
+  assert.equal(f.store.configDraft.repair.candidateMinCount, 0)
+  assert.equal(f.store.configDraft.repair.candidateRefreshMinutes, 360)
+})
+
+test('reserve display separates expired storage from usable reserve and cooldown', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.context.infoLine = (label, value) => `${label}:${value}`
+  f.context.fmtTime = value => value
+  f.store.state.candidateReserve = { status: 'waiting', freshCount: 0, usableCount: 0, minimumCount: 10, nextAllowedAt: '2026-11-12T20:00:00+08:00' }
+  const output = vm.runInContext('candidateReserveInfo()', f.context)
+  assert.match(output, /有效候选储备:0\/10/)
+  assert.match(output, /等待补充间隔或源冷却/)
+  assert.match(output, /2026-11-12T20:00:00\+08:00/)
+})
+
 test('expired provider cooldown displays recovery pending without a new scan', () => {
   const f = fixture()
   vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)

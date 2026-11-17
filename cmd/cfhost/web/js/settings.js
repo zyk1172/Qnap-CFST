@@ -56,6 +56,8 @@ function renderSettings() {
           <div class="form-grid">
             ${numberField('repairIntervalMinutes', 'Repair 间隔', config.repairIntervalMinutes, '分钟')}
             ${numberField('repair.candidateTTLMinutes', '候选缓存 TTL', config.repair.candidateTTLMinutes, '分钟')}
+            ${numberField('repair.candidateMinCount', '有效候选储备下限', config.repair.candidateMinCount, '0 关闭自动补充；按活动策略统计，最多 200 个')}
+            ${numberField('repair.candidateRefreshMinutes', '候选补充最小间隔', config.repair.candidateRefreshMinutes, '分钟；仍遵守全局测速间隔与各源冷却')}
             ${numberField('repair.failureThreshold', '完整测速失败阈值', config.repair.failureThreshold, '次')}
             ${numberField('repair.refreshCooldownMinutes', '全局测速最小间隔', config.repair.refreshCooldownMinutes, '分钟')}
             ${numberField('repair.refreshMaxBackoffMinutes', 'Refresh 最大退避', config.repair.refreshMaxBackoffMinutes, '分钟')}
@@ -65,7 +67,7 @@ function renderSettings() {
             ${numberField('bandwidth.maxLossRate', 'Bandwidth 最大丢包率', config.bandwidth.maxLossRate, '0 ~ 1', '0.01')}
             ${numberField('bandwidth.minSpeedMB', 'Bandwidth 最低速度', config.bandwidth.minSpeedMB, 'MB/s', '0.1')}
           </div>
-          ${switchRow('autoRepair', '自动 Smart Repair', '按 Repair 间隔检查当前映射；正常域名保持原 IP，仅修复失效域名。', config.autoRepair)}
+          ${switchRow('autoRepair', '自动 Smart Repair', '按 Repair 间隔检查当前映射；空闲时按储备下限补充候选。补充任务只更新候选池。', config.autoRepair)}
           ${switchRow('optimize.scheduledFull', '允许周期性全局优化', '开启后才会按完整优化周期重新选择所有域名。默认关闭；手动“完整优化”不受此开关影响。', config.optimize.scheduledFull)}
           <div class="alert info" style="margin-top:14px">
             ${icon('info')}
@@ -197,7 +199,7 @@ function emptyState(text) {
 }
 
 function jobLabel(kind) {
-  return ({ run: 'CFST 测速', repair: '智能 Repair', optimize: '完整优化', maintain: '单域名维护' })[kind] || kind || '任务'
+  return ({ run: 'CFST 测速', repair: '智能 Repair', reserve: '补充候选', optimize: '完整优化', maintain: '单域名维护' })[kind] || kind || '任务'
 }
 
 function hydrateIcons(root = document) {
