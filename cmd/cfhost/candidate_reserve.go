@@ -21,7 +21,7 @@ func nextScheduledJob(now time.Time, cfg Config, s RuntimeState) string {
 	}
 	keepalive := copyTrackerKeepalive(s.TrackerKeepalive)
 	for _, d := range cfg.Domains {
-		if maintenancePaused(d, s.DomainHealth) {
+		if maintenancePaused(d, s.DomainHealth) || !domainCheckDue(s.DomainHealth[d.Host],now) {
 			delete(keepalive, d.Host)
 		}
 	}

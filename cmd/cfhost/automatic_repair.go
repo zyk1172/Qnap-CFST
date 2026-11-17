@@ -355,8 +355,12 @@ func (a *App) runAutomaticRepairWithPolicy(ctx context.Context, cfg Config, poli
 		sampleBudget = 15 * time.Second
 	}
 	sampleCtx, sampleCancel := context.WithTimeout(probeCtx, sampleBudget)
-	samples := a.loadSamples(sampleCtx, scope)
-	downloader := a.loadDownloaderTrackerFailures(sampleCtx, scope, samples)
+	samples := map[string]TrackerSample{}
+	downloader := map[string]downloaderTrackerFailure{}
+	if len(work) > 0 {
+		samples = a.loadSamples(sampleCtx, scope)
+		downloader = a.loadDownloaderTrackerFailures(sampleCtx, scope, samples)
+	}
 	sampleCancel()
 	stages["samples"] = time.Since(sampleStarted).Milliseconds()
 	if err := ctx.Err(); err != nil {

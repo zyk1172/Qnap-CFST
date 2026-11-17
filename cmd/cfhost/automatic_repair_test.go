@@ -391,3 +391,18 @@ func TestAutomaticJobRouterRecordsStagesBeforeReleasingSlot(t *testing.T) {
 		t.Fatal("job slot released before history persisted")
 	}
 }
+
+func TestKeepaliveCannotRedispatchADeferredDomainEveryTick(t *testing.T) {
+	a, cfg := prepareAutomaticApp(t)
+	cfg.AutoRepair = false
+	cfg.Domains = []Domain{{Host: "retry.example", Class: "latency", Mode: "tracker", Enabled: true}}
+	now := time.Now()
+	a.state.DomainHealth["retry.example"] = DomainHealth{NextCheck: now.Add(time.Hour).Format(time.RFC3339)}
+	a.state.TrackerKeepalive["retry.example"] = TrackerKeepaliveRuntime{NextCheck: now.Add(-time.Minute).Format(time.RFC3339)}
+	if got := nextScheduledJob(now, cfg, a.state); got != "" {
+		t.Fatalf("keepalive bypassed domain backoff: %s", got)
+	}
+	if got := nextScheduledJob(now.Add(2*time.Hour), cfg, a.state); got != "repair" {
+		t.Fatalf("due keepalive never resumed: %s", got)
+	}
+}
