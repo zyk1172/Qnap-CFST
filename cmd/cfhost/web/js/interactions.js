@@ -390,7 +390,7 @@ async function runJob(kind) {
     return
   }
   if (kind === 'optimize') {
-    const ok = await confirmAction('执行完整优化', '将运行完整 CFST，并重新验证和选择全部域名的候选 IP。', '开始优化')
+    const ok = await confirmAction('执行完整优化', '手动操作将跳过内部测速间隔、源冷却、站点退避及验证批次限制，运行完整 CFST 并重新选择域名映射。', '开始优化')
     if (!ok) return
   }
   try {
@@ -414,6 +414,23 @@ async function applyHosts() {
   } catch (error) {
     toast('Hosts 应用失败', error.message, 'error')
   }
+}
+
+async function clearHosts() {
+  if (store.state?.running) { toast('已有任务运行中', jobLabel(store.state.currentJob), 'error'); return }
+  if (store.configSaving || store.dirty) { toast('请先处理设置', '保存或放弃未保存的设置后，再清空 Hosts 规则。', 'error'); return }
+  if (!await confirmAction('全部清空 CFHost 规则', '只删除本容器添加的 CFHost Hosts 区块，保留文件中的其他内容，并关闭自动应用，避免后台重新写回。域名配置和候选结果保留，可通过“应用 Hosts”恢复。', '全部清空', true)) return
+  if (store.configSaving || store.dirty) return
+  store.configSaving = true
+  try {
+    const result = await api('/api/hosts/clear', { method: 'POST' })
+    store.config.autoApply = false
+    if (!store.dirty) store.configDraft = deepClone(store.config)
+    await refreshStatus({ quiet: true })
+    renderPage(false, false)
+    toast('CFHost 规则已清空', `移除 ${Number(result.removedRules) || 0} 条规则；自动应用已关闭，其他 Hosts 内容保留。`, 'success')
+  } catch (error) { toast('清空失败', error.message, 'error') }
+  finally { store.configSaving = false }
 }
 
 async function syncGitHub() {

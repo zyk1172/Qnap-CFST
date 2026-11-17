@@ -16,6 +16,7 @@ type resolutionSnapshot struct {
 	NextRefresh      string
 	LastOptimize     string
 	ResolutionAttempt ResolutionAttempt
+	HostsClearedAt string
 }
 
 // Validation evidence is separate from the mappings actually applied to Hosts.
@@ -49,6 +50,7 @@ func (a *App) snapshotResolution() resolutionSnapshot {
 		NextRefresh:      a.state.NextRefresh,
 		LastOptimize:     a.state.LastOptimize,
 		ResolutionAttempt: a.state.ResolutionAttempt,
+		HostsClearedAt: a.state.HostsClearedAt,
 	}
 }
 
@@ -61,6 +63,7 @@ func (a *App) restoreResolution(s resolutionSnapshot) {
 	a.state.NextRefresh = s.NextRefresh
 	a.state.LastOptimize = s.LastOptimize
 	a.state.ResolutionAttempt = s.ResolutionAttempt
+	a.state.HostsClearedAt = s.HostsClearedAt
 	a.mu.Unlock()
 }
 
@@ -151,6 +154,7 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 	}
 	a.mu.Lock()
 	a.state.ResolutionAttempt = ResolutionAttempt{CheckedAt: time.Now().Format(time.RFC3339), Applied: true}
+	if cfg.AutoApply { a.state.HostsClearedAt = "" }
 	a.mu.Unlock()
 	if err := a.persistStateStrict(); err != nil {
 		rollbackErr := stage.Rollback()

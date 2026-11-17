@@ -30,7 +30,7 @@ function renderSettings() {
             <div class="field span-2"><label>其他测速 URL（每行一个）</label><textarea data-config-path="cfst.downloadUrls" data-config-type="lines" rows="3">${esc((config.cfst.downloadUrls || []).join('\n'))}</textarea><span class="hint">按轮次选择可用源；每轮只测速一次。相同后端共享限流冷却。</span></div>
           </div>
           ${switchRow('cfst.ipv6', 'IPv6 IP 池', '开启后 CFST 使用 ipv6.txt 候选池。', config.cfst.ipv6)}
-          <div class="alert info">遇到 429 或带 Retry-After 的 503 后暂停下载测速；冷却后先进行少量恢复探测。手动操作同样遵守全局测速间隔与服务端冷却。</div>
+          <div class="alert info">自动任务遇到 429 或带 Retry-After 的 503 后暂停下载测速，冷却后先进行少量恢复探测。手动操作可跳过内部预算；新的服务端拒绝仍会记录并停止本轮下载。</div>
         `)}
 
         ${settingsSection('verify', '域名验证', '决定候选 IP 是否真正适用于目标站点，严格 HTTP 会识别挑战页和占位页。', `
@@ -199,6 +199,7 @@ function emptyState(text) {
 }
 
 function jobLabel(kind) {
+	if (kind === 'clear') return '清空 CFHost 规则'
   return ({ run: 'CFST 测速', repair: '智能 Repair', reserve: '补充候选', optimize: '完整优化', maintain: '单域名维护' })[kind] || kind || '任务'
 }
 

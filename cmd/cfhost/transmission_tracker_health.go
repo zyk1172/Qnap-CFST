@@ -689,7 +689,7 @@ func (a *App) evaluateTransmissionTrackerKeepalive(ctx context.Context, cfg Conf
 }
 
 func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context, cfg Config, samples map[string]TrackerSample, only map[string]bool) map[string]downloaderTrackerFailure {
-	cfg = a.maintenanceConfig(cfg)
+	cfg = a.jobMaintenanceConfig(ctx, cfg)
 	out := make(map[string]downloaderTrackerFailure)
 	if !cfg.Tracker.RealAnnounce || !cfg.Tracker.Transmission.Enabled || len(samples) == 0 {
 		return out
@@ -747,6 +747,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 		healthByDomain[domain] = health
 		samplePassed, sampleTestAt := a.trackerSamplePassInfo(domain)
 
+		if manualAlreadyAnnounced(ctx, health.FailureTorrentIDs) { continue }
 		state := states[domain]
 		currentIP := currentMappings[domain]
 		mappingChanged := state.MappingIP != "" && currentIP != "" && currentIP != state.MappingIP
@@ -813,7 +814,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 			continue
 		}
 
-		if state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
+		if !isManualOperation(ctx) && state.Status=="observing" && !trackerKeepaliveNextDue(state,now) {
 			state.LastEvent=fmt.Sprintf("waiting 2-minute post-reannounce observation window · current snapshot connected %.1f%% · failures %d (not evaluated yet)",health.ConnectedPercent,health.ConnectionFailures)
 			states[domain]=state
 			continue
@@ -878,7 +879,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 			state.NextCheck=""
 		}
 
-		if state.Attempts >= trackerKeepaliveMaxAttempts {
+		if !isManualOperation(ctx) && state.Attempts >= trackerKeepaliveMaxAttempts {
 			state.Status = "repair"
 			if currentIP != "" {
 				state.RejectedIP = currentIP
@@ -897,7 +898,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 			continue
 		}
 
-		if strings.TrimSpace(state.NextReannounce)!="" {
+		if !isManualOperation(ctx) && strings.TrimSpace(state.NextReannounce)!="" {
 			nextReannounce,err:=time.Parse(time.RFC3339,state.NextReannounce)
 			if err==nil && now.Before(nextReannounce) {
 				state.Status="waiting"
@@ -919,7 +920,7 @@ func (a *App) evaluateTransmissionTrackerKeepaliveForTargets(ctx context.Context
 
 	if len(dueDomains) > 0 {
 		reannounceCtx, reannounceCancel := context.WithTimeout(ctx, 20*time.Second)
-		err := transmissionReannounce(reannounceCtx, cfg.Tracker.Transmission, dueTorrentIDs)
+		err := transmissionReannounce(reannounceCtx, cfg.Tracker.Transmission, manualAnnounceIDs(ctx, dueTorrentIDs))
 		reannounceCancel()
 		stamp := now.Format(time.RFC3339)
 		observeAt := now.Add(trackerKeepaliveObservationDelay).Format(time.RFC3339)
@@ -1008,7 +1009,7 @@ func (a *App) trackerKeepalivePostRepairTargets(cfg Config, samples map[string]T
 }
 
 func (a *App) reconcileTransmissionTrackerKeepaliveAfterRepair(ctx context.Context, cfg Config, samples map[string]TrackerSample, before, after map[string]string) {
-	cfg = a.maintenanceConfig(cfg)
+	cfg = a.jobMaintenanceConfig(ctx, cfg)
 	targets := a.trackerKeepalivePostRepairTargets(cfg, samples, before, after)
 	if len(targets) == 0 {
 		return

@@ -34,6 +34,56 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+test('clear shortcut confirms scope and persists automatic-apply off', async () => {
+  const f = fixture()
+  const calls = []
+  f.store.config.autoApply = true
+  f.context.toast = () => {}
+  f.context.jobLabel = value => value
+  f.context.confirmAction = async (title, description, label, danger) => {
+    assert.match(description, /其他内容/)
+    assert.match(description, /关闭自动应用/)
+    assert.equal(danger, true)
+    return true
+  }
+  f.context.api = async (path, options) => {
+    calls.push([path, options?.method])
+    return path === '/api/hosts/clear' ? { removedRules: 3, autoApply: false } : { running: false, hostsClearedAt: '2026-11-17T00:00:00+08:00', logs: [] }
+  }
+  await f.handleClick({ target: { closest: selector => selector === '[data-op]' ? { dataset: { op: 'clear' } } : null } })
+  assert.deepEqual(calls.map(c => c[0]), ['/api/hosts/clear', '/api/status'])
+  assert.equal(calls[0][1], 'POST')
+  assert.equal(f.store.config.autoApply, false)
+  assert.equal(f.store.configSaving, false)
+})
+
+test('canceling clear or unsaved settings never changes Hosts', async () => {
+  const f = fixture()
+  let requests = 0, confirmations = 0
+  f.context.api = async () => { requests++; return {} }
+  f.context.toast = () => {}
+  f.context.confirmAction = async () => { confirmations++; return false }
+  await vm.runInContext('clearHosts()', f.context)
+  assert.equal(confirmations, 1)
+  assert.equal(requests, 0)
+  f.store.dirty = true
+  await vm.runInContext('clearHosts()', f.context)
+  assert.equal(confirmations, 1)
+  assert.equal(requests, 0)
+})
+
+test('budget deferrals are waiting states while real failures remain errors', () => {
+  const f = fixture()
+  f.context.jobLabel = value => value
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  const wait = 'CFST deferred until 2026-11-17T00:23:34+08:00; cached candidates remain available for verification'
+  f.context.wait = wait
+  assert.equal(vm.runInContext('budgetWaitUntil(wait)', f.context), '2026-11-17T00:23:34+08:00')
+  assert.match(vm.runInContext('historyRow({kind:"optimize", error:wait, success:false})', f.context), /等待预算/)
+  assert.equal(vm.runInContext('budgetWaitUntil("HTTP 403")', f.context), '')
+  assert.match(vm.runInContext('historyRow({kind:"optimize", error:"HTTP 403", success:false})', f.context), /失败/)
+})
+
 test('HTTP probe and rate limit changes invalidate their visible pages', () => {
   const { store, pageRefreshSignature } = fixture()
   const domains = pageRefreshSignature('domains')

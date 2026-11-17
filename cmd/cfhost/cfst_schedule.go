@@ -13,6 +13,13 @@ type CFSTScheduleRuntime struct {
 	NextAllowedAt string `json:"nextAllowedAt,omitempty"`
 	Trigger       string `json:"trigger,omitempty"`
 	Reason        string `json:"reason,omitempty"`
+	Manual        bool   `json:"manual,omitempty"`
+}
+
+type cfstDeferredError struct { Until time.Time }
+
+func (e *cfstDeferredError) Error() string {
+	return fmt.Sprintf("CFST deferred until %s; cached candidates remain available for verification", e.Until.Format(time.RFC3339))
 }
 
 // Positive, stable jitter survives restarts and never shortens Retry-After.
@@ -109,8 +116,8 @@ func (a *App) recordCFSTRateLimit(now time.Time, cfg Config, signal cfstRateLimi
 	return until
 }
 
-// All entry points share one persisted admission budget. A manual action may
-// bypass a domain's retry delay, but cannot bypass a provider's cooldown.
+// Automatic work shares a persisted budget. Explicit user operations bypass
+// admission throttles while still recording their requests and server feedback.
 func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Candidate, error) {
 	a.cfstMu.Lock()
 	defer a.cfstMu.Unlock()
@@ -120,12 +127,14 @@ func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Cand
 	now := time.Now()
 	a.mu.Lock()
 	next := cfstNextAllowed(a.state, cfg)
-	if now.Before(next) {
+	manual := isManualOperation(ctx)
+	if !manual && now.Before(next) {
 		a.state.CFSTSchedule.NextAllowedAt = next.Format(time.RFC3339)
 		a.mu.Unlock()
-		return nil, fmt.Errorf("CFST deferred until %s; cached candidates remain available for verification", next.Format(time.RFC3339))
+		return nil, &cfstDeferredError{Until:next}
 	}
 	selected, _ := selectSource(a.state, cfg, now)
+	if manual { selected = selectManualSource(a.state, cfg) }
 	if selected == "" {
 		a.mu.Unlock()
 		return nil, fmt.Errorf("no download source available")
@@ -134,6 +143,7 @@ func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Cand
 	selectedOrigin := sourceOrigin(selected)
 	prior := sourceRuntime(a.state, selectedOrigin)
 	recovery := prior.Failures > 0 || (prior.RateLimit.DetectedAt != "" && (prior.RateLimit.Consecutive > 0 || prior.RateLimit.Mode != "normal"))
+	if manual { recovery = false }
 	trigger := a.state.CurrentJob
 	if trigger == "" {
 		trigger = "run"
@@ -142,7 +152,7 @@ func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Cand
 		trigger += " · " + a.state.CurrentDomain
 	}
 	a.state.LastRefresh = now.Format(time.RFC3339)
-	a.state.CFSTSchedule = CFSTScheduleRuntime{Source: selectedOrigin, LastAttempt: a.state.LastRefresh, Trigger: trigger, Reason: reason}
+	a.state.CFSTSchedule = CFSTScheduleRuntime{Source: selectedOrigin, LastAttempt: a.state.LastRefresh, Trigger: trigger, Reason: reason, Manual: manual}
 	a.state.CFSTSchedule.NextAllowedAt = cfstNextAllowed(a.state, cfg).Format(time.RFC3339)
 	a.mu.Unlock()
 	if err := a.persistStateStrict(); err != nil {
@@ -152,7 +162,7 @@ func (a *App) runCFSTFor(ctx context.Context, cfg Config, reason string) ([]Cand
 		a.mu.Unlock()
 		return nil, fmt.Errorf("persist CFST admission: %w", err)
 	}
-	a.appendLog("CFST admitted: %s · source=%s", trigger, selectedOrigin)
+	a.appendLog("CFST admitted: %s · source=%s · manual=%t", trigger, selectedOrigin, manual)
 	cfstCtx, cancel := context.WithTimeout(ctx, cfstRunTimeout(cfg))
 	defer cancel()
 	selectedCfg := cfg

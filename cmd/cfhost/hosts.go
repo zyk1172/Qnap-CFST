@@ -136,6 +136,21 @@ func hostsBindingStatus(path string) (string, error) {
 }
 
 func (a *App) stageApplyMappings(cfg Config, mappings map[string]string) (hostsStage, error) {
+	stage, err := a.stageHostsUpdate(cfg, func(current string) (string, error) {
+		rendered, err := renderHosts(current, mappings)
+		if err != nil { return "", err }
+		before, err := canonicalUnmanaged(current)
+		if err != nil { return "", err }
+		after, err := canonicalUnmanaged(rendered)
+		if err != nil { return "", err }
+		if before != after { return "", errors.New("unmanaged Hosts content changed") }
+		return rendered, nil
+	})
+	if err == nil && stage.Changed { a.appendLog("hosts applied: %d mappings", len(mappings)) }
+	return stage, err
+}
+
+func (a *App) stageHostsUpdate(cfg Config, render func(string) (string, error)) (hostsStage, error) {
 	if _, err := hostsBindingStatus(cfg.HostsPath); err != nil { return hostsStage{}, err }
 	hostsPath := cfg.HostsPath
 	info, err := os.Lstat(hostsPath)
@@ -143,13 +158,8 @@ func (a *App) stageApplyMappings(cfg Config, mappings map[string]string) (hostsS
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() { return hostsStage{}, errors.New("Hosts path must be a regular file") }
 	current, err := os.ReadFile(hostsPath)
 	if err != nil { return hostsStage{}, fmt.Errorf("read hosts: %w", err) }
-	rendered, err := renderHosts(string(current), mappings)
+	rendered, err := render(string(current))
 	if err != nil { return hostsStage{}, err }
-	beforeUnmanaged, err := canonicalUnmanaged(string(current))
-	if err != nil { return hostsStage{}, err }
-	afterUnmanaged, err := canonicalUnmanaged(rendered)
-	if err != nil { return hostsStage{}, err }
-	if beforeUnmanaged != afterUnmanaged { return hostsStage{}, errors.New("unmanaged Hosts content changed") }
 	if rendered == string(current) {
 		a.appendLog("hosts unchanged")
 		return hostsStage{Changed:false, Rollback:func() error{return nil}}, nil
@@ -177,7 +187,6 @@ func (a *App) stageApplyMappings(cfg Config, mappings map[string]string) (hostsS
 		return hostsStage{}, errors.New("Hosts write verification failed")
 	}
 	a.pruneHostsBackups(cfg.Hosts.BackupRetention)
-	a.appendLog("hosts applied: %d mappings", len(mappings))
 	return hostsStage{Changed:true, Backup:backup, Rollback:restore}, nil
 }
 

@@ -23,7 +23,7 @@ function renderCandidates() {
   const best = list[0]
 
   return `
-    ${pageHeader('候选 IP', '查看 CFST 测速结果、延迟、丢包和下载速度，并手动触发新一轮测速。', `<button class="btn" data-job="run">${icon('bolt')}申请 CFST 测速</button>`)}
+    ${pageHeader('候选 IP', '查看候选结果；手动测速跳过内部预算，自动任务继续遵守间隔和冷却。', `<button class="btn" data-job="run">${icon('bolt')}手动强制测速</button>`)}
     <div class="grid cols-4">
       ${statCard('候选数量', list.length, store.config.cfst.ipv6 ? '当前 IPv6 池' : '当前 IPv4 池', 'network', 'info', true)}
       ${statCard('最低延迟', list.length ? Math.min(...list.map(candidate => Number(candidate.delayMs) || Infinity)).toFixed(1) : '—', list.length ? 'ms' : '尚无数据', 'activity', 'success', false)}
@@ -104,7 +104,7 @@ function renderOperations() {
     ${pageHeader('任务与历史', '手动运行维护任务，查看调度、同步和最近执行记录。')}
     <div class="grid cols-4">
       ${operationCard('repair', '智能 Repair', '验证当前映射，仅在需要时使用候选或完整测速。', 'repair')}
-      ${operationCard('optimize', '手动完整优化', '遵守测速冷却，重新测速并选择各域名的可用 IP。', 'optimize')}
+      ${operationCard('optimize', '手动完整优化', '跳过内部预算，重新测速并选择各域名的可用 IP。', 'optimize')}
       ${operationCard('apply', '应用 Hosts', '将当前已验证映射写入宿主机受管 Marker。', 'host')}
       ${operationCard('sync', '同步 GitHub', '原子发布 hosts-map.tsv 与 status.json。', 'sync')}
     </div>
@@ -148,9 +148,10 @@ function renderOperations() {
 // A run can succeed while individual domains stay unresolved, so the result
 // column must not read as a clean success in that case.
 function historyRow(item) {
+  const waitingUntil = budgetWaitUntil(item.error)
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
-  const verdict = !item.success
+  const verdict = waitingUntil ? { cls: 'warning', label: '等待预算' } : !item.success
     ? { cls: 'danger', label: '失败' }
     : unresolved
       ? { cls: 'warning', label: '部分完成' }

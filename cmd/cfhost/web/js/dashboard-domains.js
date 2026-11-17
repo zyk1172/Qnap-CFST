@@ -29,6 +29,7 @@ function unresolvedNotice() {
 }
 
 function renderDashboard() {
+  const waitingUntil = budgetWaitUntil(store.state.lastError)
   const counts = statusCounts()
   const candidate = candidateStats()
   const history = [...(store.state.history || [])].reverse().slice(0, 5)
@@ -41,10 +42,11 @@ function renderDashboard() {
   return `
     ${pageHeader('概览', '查看 Cloudflare 优选、域名健康、自动修复与同步状态。', actions)}
     ${store.state.lastError ? `
-      <div class="alert">${icon('warning')}<div><strong>最近任务失败</strong><span>${esc(store.state.lastError)}</span></div></div>
+      <div class="alert ${waitingUntil ? 'warning' : ''}">${icon(waitingUntil ? 'clock' : 'warning')}<div><strong>${waitingUntil ? '等待自动测速间隔' : '最近任务失败'}</strong><span>${waitingUntil ? `自动任务最早 ${esc(fmtTime(waitingUntil))}；手动操作可跳过预算立即执行。` : esc(store.state.lastError)}</span></div></div>
     ` : ''}
     ${hostsMaintenanceBlocked() ? `<div class="alert warning">${icon('warning')}<div><strong>Hosts 异常，自动维护已暂停</strong><span>保留当前文件和映射，暂停站点探测与自动测速。恢复文件绑定后将自动恢复；也可手动 Repair 立即复查。</span><span>${esc(store.state.hostsMaintenance?.error || '文件绑定与 NAS 当前 Hosts 不一致')}</span>${store.state.hostsMaintenance?.nextCheck ? `<span>下次本地检查：${esc(fmtTime(store.state.hostsMaintenance.nextCheck))}</span>` : ''}</div></div>` : store.state.hostsBinding === 'unverified' ? `<div class="alert warning">${icon('warning')}<div><strong>宿主机 Hosts 绑定未验证</strong><span>请配置宿主机目录只读挂载及验证路径。</span></div></div>` : ''}
     ${unresolvedNotice()}
+    ${store.state.hostsClearedAt && !store.config.autoApply ? `<div class="alert warning">${icon('info')}<div><strong>CFHost Hosts 规则已清空</strong><span>自动应用已关闭。下方保留的内部映射尚未写入 Hosts；点击“应用 Hosts”可重新应用。</span></div></div>` : ''}
     <div class="grid cols-4">
       ${statCard('运行状态', store.state.running ? jobLabel(store.state.currentJob) : '空闲', store.state.running ? '任务执行中' : '等待下一次计划任务', 'activity', store.state.running ? '' : 'success', false)}
       ${statCard('受管域名', counts.total, counts.unverified ? `${counts.unverified} 个状态待确认` : `${counts.ok} 正常 · ${counts.failed} 待处理`, 'globe', 'info', true)}
@@ -69,6 +71,7 @@ function renderDashboard() {
             ${quickAction('repair', '智能 Repair', '验证并修复失效映射', 'repair')}
             ${quickAction('optimize', '手动完整优化', '全局重测并重新选择所有域名', 'optimize')}
             ${quickAction('apply', '应用 Hosts', '写入当前已验证映射', 'host')}
+            ${quickAction('clear', '全部清空', '仅清空 CFHost 添加的 Hosts 规则', 'trash')}
             ${quickAction('sync', '同步 GitHub', '发布 hosts-map 与状态', 'sync')}
             ${quickAction('settings', '打开设置', '调整测速与策略', 'settings', true)}
           </div>
@@ -144,12 +147,13 @@ function syncSummary() {
 }
 
 function historyTimelineItem(item) {
+  const waitingUntil = budgetWaitUntil(item.error)
   const success = !!item.success
   const unresolved = Number(item.unresolvedCount) || 0
   const names = item.unresolvedDomains || []
-  const variant = !success ? 'danger' : unresolved ? 'warning' : 'success'
+  const variant = waitingUntil ? 'warning' : !success ? 'danger' : unresolved ? 'warning' : 'success'
   const target = item.targetDomain ? `${esc(item.targetDomain)} · ` : ''
-  const summary = success
+  const summary = waitingUntil ? `等待预算至 ${esc(fmtTime(waitingUntil))}；手动可立即执行` : success
     ? `${target}${item.mappingsBefore} → ${item.mappingsAfter} 映射 · ${item.candidateCount} 候选`
     : `${target}${esc(item.error || '执行失败')}`
   const leftover = success && unresolved
@@ -428,7 +432,8 @@ function domainRowsHTML(domains, filtered) {
         </td>
         <td class="domain-actions-cell">
           <div class="table-actions domain-actions">
-            <button class="icon-button domain-action maintain" ${paused ? 'data-resume-domain' : 'data-maintain-domain'}="${realIndex}" aria-label="${paused ? '恢复维护' : domain.class === 'follow' ? '同步' : '维护'} ${esc(domain.host)}" title="${paused ? '恢复维护并清零连续失败计数' : domain.class === 'follow' ? '同步跟随域名当前 IP' : '维护域名并同步跟随映射'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(paused ? 'play' : domain.class === 'follow' ? 'sync' : 'repair')}</button>
+            ${paused ? `<button class="icon-button domain-action" data-resume-domain="${realIndex}" aria-label="恢复自动维护 ${esc(domain.host)}" title="恢复自动维护并清零连续失败计数" ${store.state?.running ? 'disabled' : ''}>${icon('play')}</button>` : ''}
+            <button class="icon-button domain-action maintain" data-maintain-domain="${realIndex}" aria-label="手动维护 ${esc(domain.host)}" title="${domain.class === 'follow' ? '同步跟随域名当前 IP' : '手动维护一次，跳过自动维护限制'}" ${!domain.enabled || store.state?.running ? 'disabled' : ''}>${maintaining ? icon('activity') : icon(domain.class === 'follow' ? 'sync' : 'repair')}</button>
             <button class="icon-button domain-action edit" data-edit-domain="${realIndex}" aria-label="编辑 ${esc(domain.host)}" title="编辑">${icon('edit')}</button>
             <button class="icon-button domain-action toggle" data-toggle-domain="${realIndex}" aria-label="${domain.enabled ? '停用' : '启用'} ${esc(domain.host)}" title="${domain.enabled ? '停用' : '启用'}">${icon(domain.enabled ? 'pause' : 'play')}</button>
             <button class="icon-button domain-action delete" data-delete-domain="${realIndex}" aria-label="删除 ${esc(domain.host)}" title="删除">${icon('trash')}</button>
