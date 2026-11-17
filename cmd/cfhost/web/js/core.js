@@ -212,6 +212,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       mappings: state.mappings,
       domainStatus: state.domainStatus,
       domainHealth: state.domainHealth,
+      candidateSweeps: state.candidateSweeps,
       maintenancePaused: state.maintenancePaused,
       httpProbe: state.httpProbe,
       trackerSamples: state.trackerSamples,
@@ -220,6 +221,10 @@ function pageRefreshSignature(page = store.page, state = store.state) {
   case 'candidates':
     snapshot = {
       candidates: state.candidates,
+      cfstRateLimit: state.cfstRateLimit,
+      cfstSchedule: state.cfstSchedule,
+      cfstSources: state.cfstSources,
+      candidateFreshness: (state.candidates || []).map(c => !!c.observedAt && Date.parse(c.observedAt) + Number(store.config?.repair?.candidateTTLMinutes || 1440) * 60000 > Date.now()),
       lastRefresh: state.lastRefresh,
     }
     break
@@ -231,6 +236,8 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       lastOptimize: state.lastOptimize,
       nextRefresh: state.nextRefresh,
       cfstRateLimit: state.cfstRateLimit,
+      cfstSchedule: state.cfstSchedule,
+      cfstSources: state.cfstSources,
       history: state.history,
       sync: state.sync,
     }

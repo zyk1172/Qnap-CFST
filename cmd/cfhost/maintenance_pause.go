@@ -81,14 +81,18 @@ func (a *App) handleDomainResume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "domain maintenance is not paused", http.StatusConflict)
 		return
 	}
+	oldSweep,hadSweep:=a.state.CandidateSweeps[d.Host]
 	oldHealth := a.state.DomainHealth[d.Host]
 	oldStatus, hadStatus := a.state.DomainStatus[d.Host]
 	oldKeepalive, hadKeepalive := a.state.TrackerKeepalive[d.Host]
 	h := oldHealth
 	h.FailureStreak = 0
+	h.NextCheck=""
+	h.FailureClass=""
 	a.state.DomainHealth[d.Host] = h
 	a.state.DomainStatus[d.Host] = "maintenance resumed · awaiting next repair"
 	delete(a.state.TrackerKeepalive, d.Host)
+	delete(a.state.CandidateSweeps,d.Host)
 	// Reserve the job slot until persistence completes so a scheduler or another
 	// resume cannot race with rollback on a disk-write failure.
 	a.state.Running = true
@@ -96,6 +100,7 @@ func (a *App) handleDomainResume(w http.ResponseWriter, r *http.Request) {
 	err := a.persistStateStrict()
 	a.mu.Lock()
 	if err != nil {
+		if hadSweep {a.state.CandidateSweeps[d.Host]=oldSweep}
 		a.state.DomainHealth[d.Host] = oldHealth
 		if hadStatus {
 			a.state.DomainStatus[d.Host] = oldStatus

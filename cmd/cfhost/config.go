@@ -19,6 +19,7 @@ type CFSTConfig struct {
 	MaxLossRate              float64 `json:"maxLossRate"`
 	MinSpeedMB               float64 `json:"minSpeedMB"`
 	DownloadURL              string  `json:"downloadUrl"`
+	DownloadURLs []string `json:"downloadUrls"`
 	IPv6                     bool    `json:"ipv6"`
 	RunTimeoutMinutes        int     `json:"runTimeoutMinutes"`
 	AdaptiveRateLimit        bool    `json:"adaptiveRateLimit"`
@@ -151,7 +152,8 @@ func defaultConfig() Config {
 			MaxDelayMS:        350,
 			MaxLossRate:       0.2,
 			MinSpeedMB:        0.1,
-			DownloadURL:              "https://cf.xiu2.xyz/url",
+			DownloadURL:              upstreamDownloadURL,
+			DownloadURLs: []string{cloudflareDownloadURL},
 			RunTimeoutMinutes:        30,
 			AdaptiveRateLimit:        true,
 			DegradedDownloadMB:       5,
@@ -229,6 +231,7 @@ func defaultConfig() Config {
 }
 
 func normalizeConfig(c *Config) error {
+	if err:=normalizeSources(&c.CFST);err!=nil{return err}
 	if c.Listen == "" { c.Listen = ":8080" }
 	if c.RepairIntervalMinutes < 1 { c.RepairIntervalMinutes = 15 }
 	if c.VerifyTimeoutSeconds < 1 { c.VerifyTimeoutSeconds = 8 }

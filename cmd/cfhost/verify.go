@@ -19,6 +19,7 @@ func rankCandidates(in []Candidate) []Candidate {
 func rankCandidatesForClass(in []Candidate, class string) []Candidate {
 	out := append([]Candidate(nil), in...)
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].mappingFallback != out[j].mappingFallback { return !out[i].mappingFallback }
 		if class == "normal" {
 			if out[i].DelayMS != out[j].DelayMS { return out[i].DelayMS < out[j].DelayMS }
 			if out[i].LossRate != out[j].LossRate { return out[i].LossRate < out[j].LossRate }

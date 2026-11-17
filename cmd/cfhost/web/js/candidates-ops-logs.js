@@ -1,6 +1,17 @@
+function cfstCooldownMeta() {
+  const state = store.state.cfstRateLimit || {}
+  const sources = Object.values(store.state.cfstSources || {})
+  const blockedCount = sources.filter(source => source.rateLimit?.active && Date.parse(source.rateLimit.until) > Date.now()).length
+  const blocked = sources.length ? blockedCount === sources.length : !!state.active && Date.parse(state.until) > Date.now()
+  const recovered = !!state.detectedAt && !blocked && state.mode !== 'normal'
+  const next = store.state.cfstSchedule?.nextAllowedAt
+  const waiting = Date.parse(next) > Date.now()
+  return { ...state, active: blocked, label: blocked ? '冷却中' : blockedCount ? '部分源冷却' : waiting ? '等待间隔' : recovered ? '待恢复验证' : '可申请', detail: blocked ? `全部源冷却，最早可申请 ${fmtTime(next || state.until)}` : blockedCount ? `${blockedCount}/${sources.length} 个源限流；最早测速 ${fmtTime(next)}` : waiting ? `最早可申请 ${fmtTime(next)}` : recovered ? '冷却已结束，等待小规模恢复探测' : '仍受全局测速间隔限制' }
+}
+
 function renderCandidates() {
   const list = [...(store.state.candidates || [])]
-  const rateLimit = store.state.cfstRateLimit || {}
+  const rateLimit = cfstCooldownMeta()
   const by = store.candidateSort
   list.sort((a, b) => {
     if (by === 'speed') return (Number(b.speedMB) || 0) - (Number(a.speedMB) || 0) || (Number(a.delayMs) || 0) - (Number(b.delayMs) || 0)
@@ -12,12 +23,12 @@ function renderCandidates() {
   const best = list[0]
 
   return `
-    ${pageHeader('候选 IP', '查看 CFST 测速结果、延迟、丢包和下载速度，并手动触发新一轮测速。', `<button class="btn" data-job="run">${icon('bolt')}强制 CFST 测速</button>`)}
+    ${pageHeader('候选 IP', '查看 CFST 测速结果、延迟、丢包和下载速度，并手动触发新一轮测速。', `<button class="btn" data-job="run">${icon('bolt')}申请 CFST 测速</button>`)}
     <div class="grid cols-4">
       ${statCard('候选数量', list.length, store.config.cfst.ipv6 ? '当前 IPv6 池' : '当前 IPv4 池', 'network', 'info', true)}
       ${statCard('最低延迟', list.length ? Math.min(...list.map(candidate => Number(candidate.delayMs) || Infinity)).toFixed(1) : '—', list.length ? 'ms' : '尚无数据', 'activity', 'success', false)}
       ${statCard('最高速度', list.length ? Math.max(...list.map(candidate => Number(candidate.speedMB) || 0)).toFixed(2) : '—', list.length ? 'MB/s' : '尚无数据', 'bolt', 'warning', false)}
-      ${statCard('测速模式', rateLimit.active ? '降级' : '正常', rateLimit.active ? `限流至 ${fmtTime(rateLimit.until)}` : '完整测速可用', rateLimit.active ? 'repair' : 'check', rateLimit.active ? 'warning' : 'success', false)}
+      ${statCard('测速模式', rateLimit.label, rateLimit.detail, rateLimit.active ? 'repair' : 'check', rateLimit.active ? 'warning' : 'success', false)}
     </div>
     <div class="grid cols-2 section">
       <section class="card">
@@ -42,16 +53,22 @@ function renderCandidates() {
           ${infoLine('最大丢包率', String(store.config.cfst.maxLossRate))}
           ${infoLine('最低下载速度', `${store.config.cfst.minSpeedMB} MB/s`)}
           ${infoLine('下载测速数量', String(store.config.cfst.downloadCount))}
-          ${infoLine('限流降级参数', `${store.config.cfst.degradedDownloadMB} MB/次 · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
-          ${infoLine('当前限流状态', rateLimit.active ? `HTTP ${rateLimit.statusCode || '—'} · 解封 ${fmtTime(rateLimit.until)}` : '未限流', rateLimit.active ? 'warning' : 'success')}
-          ${infoLine('最近候选刷新', fmtTime(store.state.lastRefresh))}
+          ${infoLine('冷却后恢复探测参数', `${store.config.cfst.degradedDownloadMB} MB/次 · ${store.config.cfst.degradedDownloadCount} 个 · ${store.config.cfst.degradedDownloadSeconds} 秒`)}
+          ${infoLine('当前限流状态', rateLimit.detail, rateLimit.active ? 'warning' : 'success')}
+          ${infoLine('最近测速尝试', fmtTime(store.state.lastRefresh))}
+          ${infoLine('下次允许测速', fmtTime(store.state.cfstSchedule?.nextAllowedAt))}
+          ${infoLine('最近触发入口', store.state.cfstSchedule?.trigger || '—')}
+          ${infoLine('最近测速源', store.state.cfstSchedule?.source || '—')}
+          ${Object.values(store.state.cfstSources || {}).map(source => infoLine(source.origin, source.rateLimit?.active ? `冷却至 ${fmtTime(source.rateLimit.until)}` : source.lastError ? `最近未取得带宽结果 · 最早重试 ${fmtTime(source.retryAt)}` : '可参与轮换')).join('')}
+          ${infoLine('最近触发原因', store.state.cfstSchedule?.reason || '—')}
+          ${infoLine('最近限流', fmtTime(rateLimit.detectedAt))}
           ${best ? infoLine('当前排序第一', `${best.ip} · ${Number(best.delayMs || 0).toFixed(1)} ms`, 'success') : ''}
         </div>
       </section>
     </div>
     <section class="card section">
       <div class="card-head">
-        <div><h2 class="card-title">全部候选</h2><div class="card-subtitle">数据来自最近一次 CFST 运行；测速地址限流期间可能来自小文件降级探测，速度仅供粗略筛选</div></div>
+        <div><h2 class="card-title">全部候选</h2><div class="card-subtitle">过期记录不会直接参与选择；未测带宽的候选仅供需要域名验证的延迟策略使用</div></div>
         <div class="segmented">
           <button data-candidate-sort="latency" class="${by === 'latency' ? 'is-active' : ''}">延迟</button>
           <button data-candidate-sort="speed" class="${by === 'speed' ? 'is-active' : ''}">速度</button>
@@ -60,10 +77,10 @@ function renderCandidates() {
       </div>
       <div class="card-body">
         <div class="table-wrap">
-          <table class="data-table"><thead><tr><th>#</th><th>IP</th><th>丢包率</th><th>延迟</th><th>下载速度</th><th>地区</th><th>采样时间</th></tr></thead>
+          <table class="data-table"><thead><tr><th>#</th><th>IP</th><th>丢包率</th><th>延迟</th><th>下载速度</th><th>地区</th><th>测速源</th><th>采样时间</th></tr></thead>
           <tbody>${list.length ? list.map((candidate, index) => `
-            <tr><td>${index + 1}</td><td class="mono"><strong>${esc(candidate.ip)}</strong></td><td>${Number(candidate.lossRate || 0).toFixed(3)}</td><td>${Number(candidate.delayMs || 0).toFixed(1)} ms</td><td>${candidate.latencyOnly ? '未测速 · 需域名验证' : `<strong>${Number(candidate.speedMB || 0).toFixed(2)}</strong> MB/s`}</td><td>${esc(candidate.colo || '—')}</td><td>${fmtTime(candidate.observedAt)}</td></tr>
-          `).join('') : '<tr><td colspan="7" class="table-empty">暂无候选数据</td></tr>'}</tbody></table>
+            <tr><td>${index + 1}</td><td class="mono"><strong>${esc(candidate.ip)}</strong></td><td>${Number(candidate.lossRate || 0).toFixed(3)}</td><td>${Number(candidate.delayMs || 0).toFixed(1)} ms</td><td>${candidate.latencyOnly ? '未测速 · 需域名验证' : `<strong>${Number(candidate.speedMB || 0).toFixed(2)}</strong> MB/s`}</td><td>${esc(candidate.colo || '—')}</td><td>${esc(candidate.source || '历史记录')}</td><td>${fmtTime(candidate.observedAt)}${!candidate.observedAt || Date.now() - Date.parse(candidate.observedAt) > store.config.repair.candidateTTLMinutes * 60000 ? ' · 已过期' : ''}</td></tr>
+          `).join('') : '<tr><td colspan="8" class="table-empty">暂无候选数据</td></tr>'}</tbody></table>
         </div>
       </div>
     </section>
@@ -77,7 +94,7 @@ function renderOperations() {
     ${pageHeader('任务与历史', '手动运行维护任务，查看调度、同步和最近执行记录。')}
     <div class="grid cols-4">
       ${operationCard('repair', '智能 Repair', '验证当前映射，仅在需要时使用候选或完整测速。', 'repair')}
-      ${operationCard('optimize', '手动完整优化', '显式全局操作：强制测速并重新选择每个域名的最优可用 IP。', 'optimize')}
+      ${operationCard('optimize', '手动完整优化', '遵守测速冷却，重新测速并选择各域名的可用 IP。', 'optimize')}
       ${operationCard('apply', '应用 Hosts', '将当前已验证映射写入宿主机受管 Marker。', 'host')}
       ${operationCard('sync', '同步 GitHub', '原子发布 hosts-map.tsv 与 status.json。', 'sync')}
     </div>
@@ -88,7 +105,7 @@ function renderOperations() {
           ${infoLine('Smart Repair', store.config.autoRepair ? `启用 · ${store.config.repairIntervalMinutes} 分钟` : '关闭', store.config.autoRepair ? 'success' : '')}
           ${infoLine('周期 Full Optimize', store.config.optimize.scheduledFull ? `启用 · ${store.config.optimize.intervalMinutes} 分钟` : '关闭 · 自动维护仅 Repair', store.config.optimize.scheduledFull ? 'warning' : 'success')}
           ${infoLine('下次允许 Refresh', fmtTime(store.state.nextRefresh))}
-          ${infoLine('测速服务限流', store.state.cfstRateLimit?.active ? `降级至 ${fmtTime(store.state.cfstRateLimit.until)} · HTTP ${store.state.cfstRateLimit.statusCode || '—'}` : '未限流', store.state.cfstRateLimit?.active ? 'warning' : 'success')}
+          ${infoLine('测速服务限流', cfstCooldownMeta().detail, cfstCooldownMeta().active ? 'warning' : 'success')}
           ${infoLine('最近 Optimize', fmtTime(store.state.lastOptimize))}
           ${infoLine('最近任务', fmtTime(store.state.lastRun))}
         </div>
