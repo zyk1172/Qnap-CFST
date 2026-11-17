@@ -15,6 +15,23 @@ type resolutionSnapshot struct {
 	TrackerKeepalive map[string]TrackerKeepaliveRuntime
 	NextRefresh      string
 	LastOptimize     string
+	ResolutionAttempt ResolutionAttempt
+}
+
+// Validation evidence is separate from the mappings actually applied to Hosts.
+type ResolutionAttempt struct {
+	CheckedAt string `json:"checkedAt,omitempty"`
+	Applied bool `json:"applied"`
+	Error string `json:"error,omitempty"`
+	DomainStatus map[string]string `json:"domainStatus,omitempty"`
+}
+
+// Every maintenance exit reconciles downloader recovery only after committing
+// the mappings. This includes retained-current and single-domain success.
+func (a *App) commitMaintenanceResolution(ctx context.Context, cfg Config, samples map[string]TrackerSample, before, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth, nextRefresh string, optimized bool) error {
+	if err := a.commitResolution(ctx, cfg, mappings, statuses, health, nextRefresh, optimized); err != nil { return err }
+	a.reconcileTransmissionTrackerKeepaliveAfterRepair(ctx, cfg, samples, before, mappings)
+	return nil
 }
 
 func (a *App) snapshotResolution() resolutionSnapshot {
@@ -31,6 +48,7 @@ func (a *App) snapshotResolution() resolutionSnapshot {
 		TrackerKeepalive: copyTrackerKeepalive(a.state.TrackerKeepalive),
 		NextRefresh:      a.state.NextRefresh,
 		LastOptimize:     a.state.LastOptimize,
+		ResolutionAttempt: a.state.ResolutionAttempt,
 	}
 }
 
@@ -42,6 +60,7 @@ func (a *App) restoreResolution(s resolutionSnapshot) {
 	a.state.TrackerKeepalive = s.TrackerKeepalive
 	a.state.NextRefresh = s.NextRefresh
 	a.state.LastOptimize = s.LastOptimize
+	a.state.ResolutionAttempt = s.ResolutionAttempt
 	a.mu.Unlock()
 }
 
@@ -114,6 +133,11 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		stage, err = a.stageApplyMappings(cfg, mappings)
 		if err != nil {
 			a.restoreResolution(old)
+			a.retainFailedApplyObservations(old, cfg, mappings, statuses, health, nextRefresh, err)
+			a.blockHostsMaintenance(err, time.Now())
+			if saveErr := a.persistStateStrict(); saveErr != nil {
+				return fmt.Errorf("%v; failed to persist maintenance pause and observations: %w", err, saveErr)
+			}
 			return err
 		}
 	}
@@ -125,6 +149,9 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		}
 		return fmt.Errorf("job context expired before state commit; Hosts restored: %w", err)
 	}
+	a.mu.Lock()
+	a.state.ResolutionAttempt = ResolutionAttempt{CheckedAt: time.Now().Format(time.RFC3339), Applied: true}
+	a.mu.Unlock()
 	if err := a.persistStateStrict(); err != nil {
 		rollbackErr := stage.Rollback()
 		a.restoreResolution(old)
@@ -141,4 +168,24 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		cancel()
 	}
 	return nil
+}
+
+func (a *App) retainFailedApplyObservations(old resolutionSnapshot, cfg Config, mappings map[string]string, statuses map[string]string, health map[string]DomainHealth, nextRefresh string, applyErr error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state.ResolutionAttempt = ResolutionAttempt{CheckedAt: time.Now().Format(time.RFC3339), Error: applyErr.Error(), DomainStatus: copyStatuses(statuses)}
+	for host, h := range health {
+		previous := old.DomainHealth[host]
+		// A successful probe of an unapplied replacement must not mark the old
+		// mapping healthy or clear its downloader rejection. Failures and checks
+		// of unchanged mappings remain valid observations even if apply fails.
+		if mappings[host] == old.Mappings[host] || (h.LastFailure != "" && h.LastFailure != previous.LastFailure) {
+			a.state.DomainHealth[host] = h
+		}
+	}
+	for _, d := range cfg.Domains {
+		if !d.Enabled || maintenancePaused(d, a.state.DomainHealth) { continue }
+		a.state.DomainStatus[d.Host] = "unresolved · Hosts apply failed · " + statuses[d.Host]
+	}
+	a.state.NextRefresh = nextRefresh
 }

@@ -91,6 +91,8 @@ type RuntimeState struct {
 	NextRefresh         string                  `json:"nextRefresh"`
 	LastOptimize        string                  `json:"lastOptimize"`
 	LastOptimizeAttempt string                  `json:"lastOptimizeAttempt"`
+	HostsMaintenance    HostsMaintenanceRuntime `json:"hostsMaintenance"`
+	ResolutionAttempt   ResolutionAttempt       `json:"resolutionAttempt"`
 	MigrationAt         string                  `json:"migrationAt"`
 	MigrationStatus     string                  `json:"migrationStatus"`
 	Candidates          []Candidate             `json:"candidates"`
@@ -194,12 +196,23 @@ func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveR
 func (a *App) scheduler() {
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
-		cfg:=a.snapshotConfig()
-		a.mu.RLock()
-		kind := nextScheduledJob(now, cfg, a.state)
-		a.mu.RUnlock()
+		kind := a.scheduledJob(now)
 		if kind != "" { a.startJob(kind) }
 	}
+}
+
+func (a *App) scheduledJob(now time.Time) string {
+	a.mu.RLock()
+	running := a.state.Running
+	a.mu.RUnlock()
+	if running { return "" }
+	cfg := a.snapshotConfig()
+	// A broken Hosts target cannot be repaired by probing more sites. Check
+	// locally with backoff, without consuming a job or network budget.
+	if err := a.preflightMaintenanceHosts(cfg, now, false); err != nil { return "" }
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return nextScheduledJob(now, cfg, a.state)
 }
 
 func (a *App) startJob(kind string) bool {

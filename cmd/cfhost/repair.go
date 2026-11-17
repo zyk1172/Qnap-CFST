@@ -84,6 +84,7 @@ func (a *App) loadSamples(ctx context.Context,cfg Config) map[string]TrackerSamp
 }
 
 func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	now:=time.Now()
 	a.setJobProgress("读取样本", "读取 Tracker 样本与下载器状态", 1, 7, 0, 0)
 	samples:=a.loadSamples(ctx,a.retryDueConfig(cfg,now))
@@ -213,7 +214,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		if paused := len(pausedMaintenanceDomains(cfg, health)); paused > 0 { detail=fmt.Sprintf("其余域名检查完成 · %d 个域名维护已暂停",paused) }
 		if followUnresolved>0 { detail=fmt.Sprintf("%d 个跟随域名未解析",followUnresolved) }
 		a.setJobProgress("应用结果", fmt.Sprintf("%s · 提交 %d 个域名映射", detail, len(mappings)), 7, 7, 0, 0)
-		if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",false);err!=nil{return err}
+			if err:=a.commitMaintenanceResolution(ctx,cfg,samples,current,mappings,statuses,health,"",false);err!=nil{return err}
 		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · %s · %d 个映射", detail, len(mappings)))
 		if followUnresolved==0 { a.appendLog("repair: active independent domains healthy; paused domains skipped; followers synchronized; candidate verification and CFST refresh skipped") }
 		return nil
@@ -296,8 +297,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 	}
 	if err:=ctx.Err(); err!=nil{return fmt.Errorf("repair aborted before commit: %w",err)}
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 7, 7, 0, 0)
-	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,next,false);err!=nil{return err}
-	a.reconcileTransmissionTrackerKeepaliveAfterRepair(ctx,cfg,samples,current,mappings)
+	if err:=a.commitMaintenanceResolution(ctx,cfg,samples,current,mappings,statuses,health,next,false);err!=nil{return err}
 	if refreshErr!=nil{return refreshErr}
 	a.completeJobProgress("完成", fmt.Sprintf("Repair 完成 · %d 个映射", len(mappings)))
 	return nil

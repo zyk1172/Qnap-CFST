@@ -44,6 +44,30 @@ test('HTTP probe and rate limit changes invalidate their visible pages', () => {
   assert.notEqual(pageRefreshSignature('operations'), operations)
 })
 
+test('Hosts pause invalidates pages and never presents old mappings as healthy', () => {
+  const f = fixture()
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/dashboard-domains.js'), 'utf8'), f.context)
+  f.store.config.domains = [{ host: 'old.example', enabled: true, class: 'latency', mode: 'http' }]
+  f.store.state.mappings = { 'old.example': '104.16.0.1' }
+  const dashboard = f.pageRefreshSignature('dashboard')
+  const domains = f.pageRefreshSignature('domains')
+  f.store.state.hostsMaintenance = { blocked: true, error: 'binding differs', nextCheck: '2026-11-16T16:00:00Z' }
+  assert.notEqual(f.pageRefreshSignature('dashboard'), dashboard)
+  assert.notEqual(f.pageRefreshSignature('domains'), domains)
+  const counts = vm.runInContext('statusCounts()', f.context)
+  assert.equal(counts.ok, 0)
+  assert.equal(counts.unverified, 1)
+  assert.match(vm.runInContext('renderHealthRows()', f.context), /状态待确认/)
+  assert.doesNotMatch(vm.runInContext('renderHealthRows()', f.context), /chip success/)
+  vm.runInContext(readFileSync(join(__dirname, 'web/js/candidates-ops-logs.js'), 'utf8'), f.context)
+  f.store.state.candidateReserve = { status: 'ready', usableCount: 0, minimumCount: 10 }
+  assert.match(vm.runInContext('candidateReserveInfo()', f.context), /候选自动补充已暂停/)
+  f.store.state.hostsMaintenance = { blocked: false }
+  assert.equal(vm.runInContext('statusCounts().ok', f.context), 1)
+  f.store.state.hostsBinding = 'diverged'
+  assert.equal(vm.runInContext('statusCounts().ok', f.context), 0)
+})
+
 test('paused logs ignore new live log lines', () => {
   const { store, pageRefreshSignature } = fixture()
   store.logPaused = true

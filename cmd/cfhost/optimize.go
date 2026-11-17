@@ -7,6 +7,7 @@ import (
 )
 
 func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return err }
 	attempt:=time.Now()
 	a.setJobProgress("准备完整优化", "记录优化状态", 1, 5, 0, 0)
 	a.mu.Lock(); a.state.LastOptimizeAttempt=attempt.Format(time.RFC3339); a.mu.Unlock()
@@ -146,7 +147,7 @@ func (a *App) runFullOptimize(ctx context.Context, cfg Config) error {
 	for _,d:=range cfg.Domains {h:=health[d.Host];if d.Enabled && !isFollowDomain(d) && h.FailureStreak>0 && !maintenancePaused(d,health) {h.FailureClass=domainFailureClass(statuses[d.Host]);health[d.Host]=h}}
 	applyFollowMappings(cfg,mappings,statuses,health)
 	a.setJobProgress("应用结果", fmt.Sprintf("提交 %d 个域名映射", len(mappings)), 5, 5, 0, 0)
-	if err:=a.commitResolution(ctx,cfg,mappings,statuses,health,"",true);err!=nil{return err}
+	if err:=a.commitMaintenanceResolution(ctx,cfg,samples,current,mappings,statuses,health,"",true);err!=nil{return err}
 	a.completeJobProgress("完成", fmt.Sprintf("完整优化完成 · %d 个映射", len(mappings)))
 	a.appendLog("full optimize completed: %d mappings",len(mappings))
 	return nil
