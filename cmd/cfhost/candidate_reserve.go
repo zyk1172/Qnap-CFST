@@ -28,16 +28,20 @@ func nextScheduledJob(now time.Time, cfg Config, s RuntimeState) string {
 	if trackerKeepaliveCheckDue(now, keepalive) {
 		return "repair"
 	}
-	if optimizeDue(now, s.LastOptimize, s.LastOptimizeAttempt, s.LastRefresh, cfg.Optimize) {
-		return "optimize"
+	if (cfg.AutoRepair || (cfg.Optimize.ScheduledFull&&s.CandidateRefresh.ReadyOptimize)) && len(s.CandidateRefresh.ReadyTargets)>0 { return "repair" }
+	if (cfg.AutoRepair || (cfg.Optimize.ScheduledFull&&s.AutomaticRepair.Optimize)) && (len(s.AutomaticRepair.Pending) > 0 || s.AutomaticRepair.Recheck) {
+		at, err := time.Parse(time.RFC3339Nano, s.AutomaticRepair.NextCheck)
+		if err != nil || !now.Before(at) { return "repair" }
 	}
-	if !cfg.AutoRepair {
-		return ""
-	}
-	last, _ := time.Parse(time.RFC3339, s.LastRun)
-	if last.IsZero() || now.Sub(last) >= time.Duration(cfg.RepairIntervalMinutes)*time.Minute {
+	clock:=s.AutomaticRepair.LastSweep;if clock==""{clock=s.LastRun}
+	last, _ := time.Parse(time.RFC3339Nano, clock)
+	if cfg.AutoRepair&&(last.IsZero() || now.Sub(last) >= time.Duration(cfg.RepairIntervalMinutes)*time.Minute) {
 		return "repair"
 	}
+	if !s.AutomaticRepair.Optimize && !s.CandidateRefresh.Optimize && !s.CandidateRefresh.ReadyOptimize && optimizeDue(now, s.LastOptimize, s.LastOptimizeAttempt, s.LastRefresh, cfg.Optimize) {
+		return "optimize"
+	}
+	if !cfg.AutoRepair {return ""}
 	if candidateReserveStatus(s, cfg, now).Status == "ready" {
 		return "reserve"
 	}

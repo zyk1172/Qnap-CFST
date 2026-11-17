@@ -225,6 +225,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
     break
   case 'candidates':
     snapshot = {
+      candidateRefresh: state.candidateRefresh,
       candidates: state.candidates,
       cfstRateLimit: state.cfstRateLimit,
       cfstSchedule: state.cfstSchedule,
@@ -237,6 +238,8 @@ function pageRefreshSignature(page = store.page, state = store.state) {
     break
   case 'operations':
     snapshot = {
+      automaticRepair: state.automaticRepair,
+      candidateRefresh: state.candidateRefresh,
       hostsBinding: state.hostsBinding,
       hostsMaintenance: state.hostsMaintenance,
       running: state.running,

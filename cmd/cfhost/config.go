@@ -30,6 +30,10 @@ type CFSTConfig struct {
 }
 
 type RepairConfig struct {
+	TimeSliceSeconds        int `json:"timeSliceSeconds"`
+	DomainSliceSeconds      int `json:"domainSliceSeconds"`
+	Concurrency             int `json:"concurrency"`
+	ContinueAfterSeconds    int `json:"continueAfterSeconds"`
 	CandidateTTLMinutes      int `json:"candidateTTLMinutes"`
 	CandidateMinCount        int `json:"candidateMinCount"`
 	CandidateRefreshMinutes  int `json:"candidateRefreshMinutes"`
@@ -164,6 +168,10 @@ func defaultConfig() Config {
 			RateLimitFallbackMinutes: 15,
 		},
 		Repair: RepairConfig{
+			TimeSliceSeconds:        120,
+			DomainSliceSeconds:      30,
+			Concurrency:             3,
+			ContinueAfterSeconds:    30,
 			CandidateTTLMinutes:      1440,
 			CandidateMinCount:        10,
 			CandidateRefreshMinutes: 360,
@@ -252,6 +260,14 @@ func normalizeConfig(c *Config) error {
 	if c.CFST.DegradedDownloadSeconds < 1 { c.CFST.DegradedDownloadSeconds = 2 }
 	if c.CFST.RateLimitFallbackMinutes < 1 { c.CFST.RateLimitFallbackMinutes = 15 }
 
+	if c.Repair.TimeSliceSeconds == 0 { c.Repair.TimeSliceSeconds = 120 }
+	if c.Repair.DomainSliceSeconds == 0 { c.Repair.DomainSliceSeconds = 30 }
+	if c.Repair.Concurrency == 0 { c.Repair.Concurrency = 3 }
+	if c.Repair.ContinueAfterSeconds == 0 { c.Repair.ContinueAfterSeconds = 30 }
+	if c.Repair.TimeSliceSeconds < 10 || c.Repair.TimeSliceSeconds > 600 { return errors.New("timeSliceSeconds must be between 10 and 600") }
+	if c.Repair.DomainSliceSeconds < 3 || c.Repair.DomainSliceSeconds > 300 { return errors.New("domainSliceSeconds must be between 3 and 300") }
+	if c.Repair.Concurrency < 1 || c.Repair.Concurrency > 8 { return errors.New("concurrency must be between 1 and 8") }
+	if c.Repair.ContinueAfterSeconds < 5 || c.Repair.ContinueAfterSeconds > 300 { return errors.New("continueAfterSeconds must be between 5 and 300") }
 	if c.Repair.CandidateTTLMinutes < 1 { c.Repair.CandidateTTLMinutes = 1440 }
 	if c.Repair.CandidateMinCount < 0 || c.Repair.CandidateMinCount > 200 { return errors.New("candidateMinCount must be between 0 and 200") }
 	if c.Repair.CandidateRefreshMinutes < 1 { c.Repair.CandidateRefreshMinutes = 360 }

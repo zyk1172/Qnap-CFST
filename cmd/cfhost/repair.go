@@ -218,7 +218,7 @@ func (a *App) runSmartRepair(ctx context.Context,cfg Config) error {
 		a.setJobProgress("应用结果", fmt.Sprintf("%s · 提交 %d 个域名映射", detail, len(mappings)), 7, 7, 0, 0)
 			if err:=a.commitMaintenanceResolution(ctx,cfg,samples,current,mappings,statuses,health,"",false);err!=nil{return err}
 		a.completeJobProgress("完成", fmt.Sprintf("Repair 检查完成 · %s · %d 个映射", detail, len(mappings)))
-		if followUnresolved==0 { a.appendLog("repair: active independent domains healthy; paused domains skipped; followers synchronized; candidate verification and CFST refresh skipped") }
+		if followUnresolved==0 && deferred==0 { a.appendLog("repair: checked independent domains healthy; paused domains skipped; followers synchronized; candidate verification and CFST refresh skipped") } else { a.appendLog("repair: checks completed; retry-deferred=%d unresolved-followers=%d; no candidate verification or CFST refresh",deferred,followUnresolved) }
 		return nil
 	}
 

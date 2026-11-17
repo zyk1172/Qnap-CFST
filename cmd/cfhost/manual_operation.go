@@ -55,6 +55,7 @@ func (a *App) resetManualSweeps(ctx context.Context, cfg Config) {
 	if !isManualOperation(ctx) {
 		return
 	}
+	hosts:=map[string]bool{};for _,d:=range cfg.Domains{hosts[d.Host]=true};a.cancelAutomaticWork(hosts)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, d := range cfg.Domains {

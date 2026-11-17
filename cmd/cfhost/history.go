@@ -40,6 +40,9 @@ func unresolvedDomainsWithStatus(cfg Config, mappings map[string]string, statuse
 }
 
 type RunRecord struct {
+	Stages            map[string]int64 `json:"stages,omitempty"`
+	DeferredCount     int `json:"deferredCount,omitempty"`
+	Queued            bool `json:"queued,omitempty"`
 	Kind              string   `json:"kind"`
 	TargetDomain      string   `json:"targetDomain,omitempty"`
 	StartedAt         string   `json:"startedAt"`
