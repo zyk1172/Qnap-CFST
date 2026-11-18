@@ -17,6 +17,7 @@ func TestWebAssetsEmbedded(t *testing.T) {
 		"web/js/dashboard-domains.js",
 		"web/js/candidates-ops-logs.js",
 		"web/js/settings.js",
+		"web/js/guide.js",
 		"web/js/interactions.js",
 		"web/js/events.js",
 		"web/assets/cfhost-logo.svg",
@@ -49,6 +50,7 @@ func TestRoutesServeWebUI(t *testing.T) {
 		{"/", "text/html", "CFHOST"},
 		{"/css/theme.css", "text/css", "--primary: #8d51f9"},
 		{"/js/core.js", "javascript", "PAGE_META"},
+		{"/js/guide.js", "javascript", "renderGuide"},
 		{"/assets/cfhost-logo.svg", "image/svg+xml", "<svg"},
 	}
 	for _, tc := range cases {

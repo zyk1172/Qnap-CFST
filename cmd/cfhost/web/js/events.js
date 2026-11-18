@@ -275,6 +275,7 @@ async function boot() {
     renderPage(false, true)
     updateShellStatus()
     $('#app').setAttribute('aria-hidden', 'false')
+    if (store.page === 'guide') focusGuideSection()
     setTimeout(() => $('#boot-screen').classList.add('is-hidden'), 100)
     store.polling = setInterval(() => refreshStatus({ quiet: false }), 3000)
     showMaintenancePauseNotice()
