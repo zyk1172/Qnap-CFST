@@ -22,6 +22,7 @@ jobs:
           node --check cmd/cfhost/web/js/dashboard-domains.js
           node --check cmd/cfhost/web/js/candidates-ops-logs.js
           node --check cmd/cfhost/web/js/settings.js
+          node --check cmd/cfhost/web/js/guide.js
           node --check cmd/cfhost/web/js/interactions.js
           node --check cmd/cfhost/web/js/events.js
       - name: Web UI regression tests
@@ -42,3 +43,12 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o "$RUNNER_TEMP/cfhost-arm64" ./cmd/cfhost
       - name: Build AMD64 image
         run: docker build --platform linux/amd64 -t cfhost:test .
+      - name: Verify packaged license files
+        run: |
+          docker run --rm --entrypoint sh cfhost:test -ec '
+            test -s /app/licenses/LICENSE
+            test -s /app/licenses/THIRD_PARTY_NOTICES.md
+            test -s /app/licenses/Go/LICENSE
+            test -s /app/licenses/modules/github.com/VividCortex/ewma/LICENSE
+            test -s /app/licenses/modules/golang.org/x/sys/LICENSE
+          '

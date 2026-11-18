@@ -19,7 +19,10 @@ const NAV_GROUPS = [
   },
   {
     label: '系统',
-    items: [{ id: 'settings', label: '设置', icon: 'settings', hint: '测速、验证、Hosts 与同步' }],
+    items: [
+      { id: 'settings', label: '设置', icon: 'settings', hint: '测速、验证、Hosts 与同步' },
+      { id: 'guide', label: '使用教程', icon: 'book', hint: '部署、故障排查、隐私与版权声明' },
+    ],
   },
 ]
 
@@ -30,9 +33,11 @@ const PAGE_META = {
   operations: { title: '任务与历史', eyebrow: 'Operations' },
   logs: { title: '日志', eyebrow: 'Runtime Logs' },
   settings: { title: '设置', eyebrow: 'Configuration' },
+  guide: { title: '使用教程', eyebrow: 'CFHost Guide' },
 }
 
 const ICONS = {
+  book: '<path d="M12 6c-3-2-6-2-9-1v14c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1Zm0 0v14"/>',
   dashboard: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
   network: '<path d="M5 8.5a10 10 0 0 1 14 0M8 12a6 6 0 0 1 8 0M10.7 15.4a2 2 0 0 1 2.6 0"/><circle cx="12" cy="18" r=".8" fill="currentColor" stroke="none"/>',
@@ -281,11 +286,14 @@ function navigate(page) {
 }
 
 function routeChanged() {
-  store.page = currentPageFromHash()
+  const page = currentPageFromHash()
+  const sameGuide = page === 'guide' && store.page === page
+  store.page = page
   closeSidebar()
   closeAppearance()
   updateNavigation()
-  renderPage(true)
+  if (!sameGuide) renderPage(true)
+  if (page === 'guide' && focusGuideSection()) return
   $('#page-host')?.focus({ preventScroll: true })
   window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
@@ -421,6 +429,7 @@ function renderPage(animate = true, animateDashboardNumbers = animate) {
     operations: renderOperations,
     logs: renderLogs,
     settings: renderSettings,
+    guide: renderGuide,
   }
   $('#page-host').innerHTML = `<div class="page-route ${animate ? 'is-entering' : ''}">${renderers[store.page]()}</div>`
   hydrateIcons()
