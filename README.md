@@ -12,7 +12,7 @@
 
 CFHost 基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 的测速核心，为 NAS 场景增加 WebUI、Smart Repair、Full Optimize、Tracker 真实 announce、宿主机 Hosts 管理、运行历史和 GitHub 映射同步。
 
-**当前正式版本：CFHost 1.0.1**。本次并发、配置编辑、状态刷新与手机端优化见 [1.0.1 发布说明](docs/releases/1.0.1.md)，完整功能与支持边界见 [1.0 发布说明](docs/releases/1.0.0.md)。发布入口为 [CFHost 1.0.1](https://github.com/zyk1172/Qnap-CFST/releases/tag/cfhost-v1.0.1)。版本号属于 CFHost 服务层，上游 CloudflareSpeedTest 的自身版本号保持独立。
+**当前正式版本 CFHost 1.0.2**。自动维护分批续跑、候选刷新、Hosts 绑定保护和 UI 教程见 [1.0.2 发布说明](docs/releases/1.0.2.md)。固定镜像和部署包见 [CFHost 1.0.2](https://github.com/zyk1172/Qnap-CFST/releases/tag/cfhost-v1.0.2)。版本号属于 CFHost 服务层，上游 CloudflareSpeedTest 使用独立版本号。
 
 > **群晖和飞牛适配尚未在真实设备上运行过，也未实测其图形安装流程。** 本次确认的是 Linux amd64 Docker 环境中的配置、运行、Hosts 和持久化行为，以及 ARM64 二进制交叉编译；不代表所有 NAS 机型、DSM / fnOS 版本或 ARM64 设备都已验证。设备路径、权限、容器应用版本和重启后的系统 Hosts 行为需要按实际环境确认。
 
@@ -630,16 +630,16 @@ NAS 上对应 `CFHOST_DATA_DIR/github-token`，QNAP 默认示例：
 正式版多架构镜像（amd64 / arm64）：
 
 ```text
-ghcr.io/zyk1172/qnap-cfst:cfhost-v1.0.1
+ghcr.io/zyk1172/qnap-cfst:cfhost-v1.0.2
 ```
 
 固定 amd64 镜像：
 
 ```text
-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64-v1.0.1
+ghcr.io/zyk1172/qnap-cfst:cfhost-amd64-v1.0.2
 ```
 
-把部署 `.env` 中的 `CFHOST_IMAGE` 改为所需标签。默认 `cfhost`、`cfhost-amd64` 和兼容标签 `qnap-amd64` 会随主分支更新，不能用于锁定 1.0。
+把部署 `.env` 中的 `CFHOST_IMAGE` 改为所需标签。默认 `cfhost`、`cfhost-amd64` 和兼容标签 `qnap-amd64` 会随主分支更新。需要锁定版本时，请使用固定标签。
 
 先备份数据目录，然后在项目目录运行：
 

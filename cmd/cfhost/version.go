@@ -1,3 +1,3 @@
 package main
 
-const cfhostVersion = "1.0.1"
+const cfhostVersion = "1.0.2"
