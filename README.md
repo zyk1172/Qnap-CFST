@@ -108,7 +108,7 @@ Tracker 可选真实 announce
 | Tracker | 样本验证支持 HTTPS announce、40 位 v1 info-hash；不支持 UDP / 明文 HTTP Tracker 或纯 v2 样本。合法业务拒绝可表示候选可达，不能解决 passkey、账号、种子注册、站点风控等问题。 |
 | 下载器 | Transmission 与 qBittorrent 支持自动取样本；主动 reannounce 保活和完整运行时健康反馈针对 Transmission。自动发现本身只读；保活可能对连接失败的种子发 reannounce，请按站点规则使用。 |
 | Hosts 生效 | 默认只管理当前 NAS 的系统 Hosts。其他容器、局域网设备和使用独立 DNS / DoH 的应用不会自动继承；具体共享文件配置见 [部署说明](deploy/README.md#hosts-生效范围)。 |
-| 系统恢复 | NAS 重启、升级或网络变更可能重写系统 Hosts，应用也可能缓存解析。CFHost 不安装系统启动钩子；需检查文件，必要时重建容器并重新应用。 |
+| 系统恢复 | NAS 重启、升级或网络变更可能重写系统 Hosts，应用也可能缓存解析。QNAP 目录挂载部署在开启自动应用后可从持久化备份恢复受管映射；旧单文件绑定失效仍需重建容器。 |
 | 平台范围 | Docker / Compose 下的 Linux amd64、arm64；不是群晖 SPK、QNAP QPKG 或飞牛原生应用安装包。32 位 ARM、无容器套件机型、旧 Compose 与所有 NAS 固件版本不保证兼容。 |
 | 局域网与凭据 | 面向可信局域网，没有内置登录、多用户或 TLS 接入。密码输入框遮罩不等于加密存储；配置 / API / 备份及样本文件可能包含密码或 passkey。 |
 | 数据与同步 | 配置与状态依赖 `/data` 持久化，不提供多实例协调。GitHub 同步只发布映射和状态，不会自动应用到远端设备；同步失败不撤销已成功的本地 Hosts 写入。 |
@@ -197,34 +197,7 @@ legacy-hosts-map.tsv
 
 ## 3. Container Station Compose
 
-在 QNAP **Container Station → 应用程序 → 创建** 中粘贴：
-
-```yaml
-services:
-  cfhost:
-    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64}
-    platform: linux/amd64
-    container_name: cfhost
-    hostname: cfhost
-    restart: unless-stopped
-
-    ports:
-      - "${CFHOST_PORT:-9876}:8080"
-
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      DATA_DIR: /data
-      CFST_BIN: /app/cfst
-      CFST_IP_FILE: /app/ip.txt
-      CFST_IPV6_FILE: /app/ipv6.txt
-      HOSTS_PATH: /host/etc/hosts
-
-    volumes:
-      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
-      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
-
-    stop_grace_period: 15s
-```
+在 QNAP **Container Station → 应用程序 → 创建** 中使用 [最新 QNAP Compose](deploy/qnap/compose-amd64.yaml) 的完整内容。
 
 默认无需额外填写环境变量。
 
@@ -234,7 +207,8 @@ services:
 CFHOST_IMAGE=ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 CFHOST_PORT=9876
 CFHOST_DATA_DIR=/share/Container/cfhost/data
-CFHOST_HOSTS_FILE=/etc/hosts
+CFHOST_HOSTS_DIR=/etc
+CFHOST_DOCKER_TARGETS=0
 TZ=Asia/Shanghai
 ```
 
@@ -280,11 +254,14 @@ http://QNAP-IP:9876
 
 # 为什么这样挂载 Hosts
 
-Compose 使用：
+QNAP Compose 使用父目录挂载：
 
 ```yaml
-- /etc/hosts:/host/etc/hosts:rw
+- /etc:/host/etc:rw
+- /etc:/host/etc-check:ro
 ```
+
+其他 NAS 的单文件挂载仍可使用。目录挂载扩展了写权限；请阅读 QNAP 部署安全提示。
 
 容器内：
 
@@ -312,6 +289,16 @@ CFHost 会：
 6. 失败则自动恢复旧内容。
 
 ---
+
+## Hosts 重启恢复与容器目标
+
+- QNAP Compose 使用宿主机 Hosts 父目录读写挂载，独立只读校验路径保持不变。这样系统替换 Hosts 文件后可以按当前路径读取新文件。**整个宿主机 /etc 可被 CFHost 写入，权限扩大，必须信任镜像和 WebUI 访问者。** 旧单文件部署仍可用，但文件替换时仍可能需要重建 CFHost。
+- 开启自动应用后，已成功应用的受管映射随 state.json 持久化，并镜像到 /data/hosts-last-applied.json；宿主机完整旧文件仍按原机制保存 hosts-backup-*。启动及每 30 秒检查当前 Hosts，恢复受管区块，不用旧的整份 Hosts 覆盖 NAS 系统记录，不重新测速或请求 Tracker。原地写入当前 inode，系统自身替换文件不受 CFHost 控制。
+- 首次升级应在宿主机仍有与 state.json 一致的映射时启动，或手动应用一次以建立恢复备份；手动清空、关闭自动应用后不会自动恢复旧映射。
+- 容器目标功能默认关闭。取消 Compose 中 Docker socket 挂载的注释，设置 CFHOST_DOCKER_TARGETS=1 并重建 CFHost（保留 /data）。**Docker socket 提供极高的宿主机权限，CFHost 没有内置认证，绝对不要公开 WebUI 或允许不可信用户访问。**
+- 在 WebUI 设置 → Hosts 与 Tracker → 容器 Hosts 管理中勾选目标并保存。目标须使用 Docker 独立 Hosts，支持 root exec、sh、cat、cmp、stat、base64、mktemp；已显式挂载 Hosts 或其父目录的容器拒绝修改。无需挂载宿主机 Hosts；旧挂载需要先在目标容器配置中移除并按原配置重建一次。
+- 成功提交映射后即时尝试同步所选容器；周期检查负责启动、重启、重建及漂移恢复。每个容器独立报告结果，失败不撤销宿主机已提交结果。长任务期间检查延后。只有明确变化才写入；不重启目标容器。应用 DNS 缓存和既有连接不保证即时切换。
+- 取消勾选停止管理，保留既有受管区块；如需删除，请先清空（同时会清除宿主机及其他已选目标并关闭自动应用）。停止的已选容器清空将在其启动后重试。
 
 # Tracker 真实 announce
 

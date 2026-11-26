@@ -36,30 +36,7 @@ platform: linux/amd64
 
 ## QNAP Container Station
 
-在 Container Station 的“应用程序 / Compose”中建立项目，使用：
-
-```yaml
-services:
-  cfhost:
-    image: ${CFHOST_IMAGE:-ghcr.io/zyk1172/qnap-cfst:cfhost-amd64}
-    platform: linux/amd64
-    container_name: cfhost
-    hostname: cfhost
-    restart: unless-stopped
-    ports:
-      - "${CFHOST_PORT:-9876}:8080"
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      DATA_DIR: /data
-      CFST_BIN: /app/cfst
-      CFST_IP_FILE: /app/ip.txt
-      CFST_IPV6_FILE: /app/ipv6.txt
-      HOSTS_PATH: /host/etc/hosts
-    volumes:
-      - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
-      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
-    stop_grace_period: 15s
-```
+在 Container Station 的“应用程序 / Compose”中建立项目，使用 [compose-amd64.yaml](compose-amd64.yaml) 的完整内容。
 
 然后访问：
 
@@ -96,15 +73,16 @@ Compose 已内置默认值，即使 Container Station 不加载 `.env` 也可以
 CFHOST_IMAGE=ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 CFHOST_PORT=9876
 CFHOST_DATA_DIR=/share/Container/cfhost/data
-CFHOST_HOSTS_FILE=/etc/hosts
+CFHOST_HOSTS_DIR=/etc
+CFHOST_DOCKER_TARGETS=0
 TZ=Asia/Shanghai
 ```
 
 不要把 `/data` 改成临时容器目录，否则重建容器后配置、状态、候选缓存和历史记录都会消失。
 
-### /etc/hosts:/host/etc/hosts:rw
+### /etc:/host/etc:rw
 
-这里挂载的是 **QNAP 宿主机真正的 /etc/hosts**，不是容器自己的 `/etc/hosts`。
+这里挂载的是 **QNAP 宿主机 Hosts 父目录**，不是容器自己的 `/etc`。同时将同一父目录只读挂载至 `/host/etc-check` 供校验。
 
 容器内部：
 
@@ -123,6 +101,16 @@ CFHost 始终通过这个路径进行受管 Marker 写入。
 Docker 会自己管理容器的 `/etc/hosts`，直接覆盖容器路径容易和 Docker 的 hosts 管理机制冲突。
 
 CFHost 对宿主机文件采用原地写入方式，保持 inode，不使用 rename 替换。
+
+## Hosts 重启恢复与容器目标
+
+- QNAP Compose 使用宿主机 Hosts 父目录读写挂载，独立只读校验路径保持不变。这样系统替换 Hosts 文件后可以按当前路径读取新文件。**整个宿主机 /etc 可被 CFHost 写入，权限扩大，必须信任镜像和 WebUI 访问者。** 旧单文件部署仍可用，但文件替换时仍可能需要重建 CFHost。
+- 开启自动应用后，已成功应用的受管映射随 state.json 持久化，并镜像到 /data/hosts-last-applied.json；宿主机完整旧文件仍按原机制保存 hosts-backup-*。启动及每 30 秒检查当前 Hosts，恢复受管区块，不用旧的整份 Hosts 覆盖 NAS 系统记录，不重新测速或请求 Tracker。原地写入当前 inode，系统自身替换文件不受 CFHost 控制。
+- 首次升级应在宿主机仍有与 state.json 一致的映射时启动，或手动应用一次以建立恢复备份；手动清空、关闭自动应用后不会自动恢复旧映射。
+- 容器目标功能默认关闭。取消 Compose 中 Docker socket 挂载的注释，设置 CFHOST_DOCKER_TARGETS=1 并重建 CFHost（保留 /data）。**Docker socket 提供极高的宿主机权限，CFHost 没有内置认证，绝对不要公开 WebUI 或允许不可信用户访问。**
+- 在 WebUI 设置 → Hosts 与 Tracker → 容器 Hosts 管理中勾选目标并保存。目标须使用 Docker 独立 Hosts，支持 root exec、sh、cat、cmp、stat、base64、mktemp；已显式挂载 Hosts 或其父目录的容器拒绝修改。无需挂载宿主机 Hosts；旧挂载需要先在目标容器配置中移除并按原配置重建一次。
+- 成功提交映射后即时尝试同步所选容器；周期检查负责启动、重启、重建及漂移恢复。每个容器独立报告结果，失败不撤销宿主机已提交结果。长任务期间检查延后。只有明确变化才写入；不重启目标容器。应用 DNS 缓存和既有连接不保证即时切换。
+- 取消勾选停止管理，保留既有受管区块；如需删除，请先清空（同时会清除宿主机及其他已选目标并关闭自动应用）。停止的已选容器清空将在其启动后重试。
 
 ## 环境变量
 
