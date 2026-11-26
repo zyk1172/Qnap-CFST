@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"maps"
 	"os"
@@ -88,14 +87,14 @@ func (a *App) recoverHosts() {
 	if backup == nil { a.refreshContainerInventory(); return }
 	a.mirrorHostsBackup()
 	mappings := recoveryMappings(cfg, backup)
-	desired, err := renderHosts(string(current), mappings)
-	if err != nil { a.appendLog("Hosts recovery blocked: %v", err); return }
-	if !bytes.Equal(current, []byte(desired)) {
-		if _, err := a.stageApplyMappings(cfg, mappings); err != nil {
-			a.appendLog("Hosts recovery failed: %v", err); return
-		}
-		a.appendLog("Hosts recovered from persistent backup: %d mappings", len(mappings))
-	}
-	_ = a.preflightMaintenanceHosts(cfg, time.Now(), true)
+	// Check the exact descriptor on restore, including the unchanged path.
+	// Do not use the backup's inode: it belongs to a different file.
+	stage, err := a.stageHostsUpdate(cfg, func(current string) (string, error) {
+		// Recovery only touches CFHost's marker, preserving system records.
+		return renderContainerHosts(current, mappings)
+	})
+	if err != nil { a.appendLog("Hosts recovery failed: %v", err); return }
+	if stage.Changed { a.appendLog("Hosts recovered from persistent backup: %d mappings; live inode preserved", len(mappings)) }
+	if err := a.preflightMaintenanceHosts(cfg, time.Now(), true); err != nil { return }
 	a.syncContainerHosts(cfg, mappings)
 }

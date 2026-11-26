@@ -80,12 +80,19 @@ func (a *App) retryContainerCleanup() {
 	for _, name := range cfg.Hosts.ContainerCleanup { pending[name] = true }
 	// Bound each pass; a large queue cannot monopolize the maintenance slot.
 	attempts := 0
-	for i := range list {
+	// Rotate through the queue so permanently failing containers cannot
+	// starve later entries.
+	sort.Slice(list,func(i,j int)bool{return list[i].Name<list[j].Name})
+	start := 0
+	if len(list)>0 { start = a.containerCleanupCursor % len(list) }
+	for offset := range list {
+		i := (start+offset)%len(list)
 		name := list[i].Name
 		if !pending[name] { continue }
 		list[i].Status = "cleanup pending"
 		if list[i].State != "running" || attempts >= 4 { continue }
 		attempts++
+		a.containerCleanupCursor = (i+1)%len(list)
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		err := updateContainerHosts(ctx, list[i].ID, nil)
 		cancel()

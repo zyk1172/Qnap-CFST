@@ -19,6 +19,7 @@ type App struct {
 	persistMu sync.Mutex
 	configMu  sync.Mutex
 	containerHostsMu sync.Mutex
+	containerCleanupCursor int
 	cfstMu    sync.Mutex
 	config    Config
 	state     RuntimeState
