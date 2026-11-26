@@ -93,6 +93,7 @@ type RuntimeState struct {
 	NextRefresh         string                  `json:"nextRefresh"`
 	LastOptimize        string                  `json:"lastOptimize"`
 	LastOptimizeAttempt string                  `json:"lastOptimizeAttempt"`
+	HostsBackup *HostsRecoveryBackup `json:"hostsBackup,omitempty"`
 	HostsMaintenance    HostsMaintenanceRuntime `json:"hostsMaintenance"`
 	ResolutionAttempt   ResolutionAttempt       `json:"resolutionAttempt"`
 	HostsClearedAt      string                  `json:"hostsClearedAt,omitempty"`
@@ -198,8 +199,10 @@ func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveR
 }
 
 func (a *App) scheduler() {
+	a.recoverHosts()
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
+		a.recoverHosts()
 		a.startCandidateRefresh(now)
 		kind := a.scheduledJob(now)
 		if kind == "reserve" {

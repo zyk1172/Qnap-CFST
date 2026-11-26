@@ -187,11 +187,24 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	mappings := copyMappings(a.state.Mappings)
 	a.mu.RUnlock()
-	if err := a.applyMappings(cfg, mappings); err != nil {
+	old := a.snapshotResolution()
+	stage, err := a.stageApplyMappings(cfg, mappings)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a.mu.Lock(); a.state.HostsClearedAt = ""; a.mu.Unlock()
+	a.mu.Lock()
+	a.state.HostsClearedAt = ""
+	a.state.HostsBackup = newHostsBackup(mappings)
+	a.mu.Unlock()
+	if err := a.persistStateStrict(); err != nil {
+		rollbackErr := stage.Rollback()
+		a.restoreResolution(old)
+		if rollbackErr != nil { a.appendLog("manual Hosts rollback failed: %v", rollbackErr) }
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.mirrorHostsBackup()
 	response := map[string]string{"status": "applied"}
 	if cfg.Sync.Enabled {
 		if err := a.publishSync(r.Context(), cfg, false); err != nil {

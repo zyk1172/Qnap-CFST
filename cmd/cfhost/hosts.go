@@ -168,14 +168,14 @@ func (a *App) stageHostsUpdate(cfg Config, render func(string) (string, error)) 
 	backup := filepath.Join(a.dataDir, "hosts-backup-"+time.Now().Format("20060102-150405.000000000"))
 	if err := os.WriteFile(backup, current, info.Mode().Perm()); err != nil { return hostsStage{}, fmt.Errorf("backup hosts: %w", err) }
 	restore := func() error {
-		if err := writeHostsInPlace(hostsPath, current); err != nil { return err }
+		if err := writeHostsInPlaceExpected(hostsPath, current, info); err != nil { return err }
 		got, err := os.ReadFile(hostsPath)
 		if err != nil { return err }
 		if !bytes.Equal(got, current) { return errors.New("Hosts rollback verification failed") }
 		return nil
 	}
 	if _, err := hostsBindingStatus(hostsPath); err != nil { return hostsStage{}, err }
-	if err := writeHostsInPlace(hostsPath, []byte(rendered)); err != nil {
+	if err := writeHostsInPlaceExpected(hostsPath, []byte(rendered), info); err != nil {
 		_ = restore()
 		return hostsStage{}, fmt.Errorf("write hosts: %w", err)
 	}
@@ -188,6 +188,26 @@ func (a *App) stageHostsUpdate(cfg Config, render func(string) (string, error)) 
 	}
 	a.pruneHostsBackups(cfg.Hosts.BackupRetention)
 	return hostsStage{Changed:true, Backup:backup, Rollback:restore}, nil
+}
+
+func writeHostsInPlaceExpected(path string, content []byte, expected os.FileInfo) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil { return err }
+	defer f.Close()
+	actual, err := f.Stat()
+	if err != nil { return err }
+	named, err := os.Lstat(path)
+	if err != nil { return err }
+	if !actual.Mode().IsRegular() || !named.Mode().IsRegular() || !os.SameFile(expected, actual) || !os.SameFile(actual, named) {
+		return errors.New("Hosts inode changed before write")
+	}
+	if err := f.Truncate(0); err != nil { return err }
+	if _, err := f.Write(content); err != nil { return err }
+	if err := f.Sync(); err != nil { return err }
+	named, err = os.Lstat(path)
+	if err != nil { return err }
+	if !os.SameFile(actual, named) { return errors.New("Hosts inode changed during write") }
+	return f.Close()
 }
 
 func writeHostsInPlace(path string, content []byte) error {
