@@ -27,6 +27,17 @@ async function handleClick(event) {
     return
   }
 
+  const clearTarget = event.target.closest('[data-clear-container-host]')
+  if (clearTarget) {
+    if (store.dirty || store.configSaving) { toast('请先保存或放弃设置', '避免清理操作覆盖未保存的配置。', 'error'); return }
+    const name = clearTarget.dataset.clearContainerHost
+    if (!await confirmAction('清理容器 Hosts', '仅删除 ' + name + ' 的 CFHost 受管区块，同时关闭该容器同步。停止的容器将在启动后重试。', '清理', true)) return
+    await api('/api/hosts/container/clear', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})})
+    await loadAll()
+    renderPage(false, false)
+    toast('已提交清理任务', name + '：等待清理结果。', 'success')
+    return
+  }
   const action = event.target.closest('[data-action]')?.dataset.action
   if (action === 'open-sidebar') openSidebar()
   else if (action === 'close-sidebar') closeSidebar()

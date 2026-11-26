@@ -96,7 +96,7 @@ function renderSettings() {
           ${switchRow('autoApply', '自动应用与恢复 Hosts', '成功提交后写入宿主机及已选容器；启动和定时检查恢复受管区块。', config.autoApply)}
           <div class="section">
             <h3>容器 Hosts 管理</h3>
-            <p class="hint">勾选目标并保存。取消勾选停止管理，不清除旧规则；需要删除时先清空。Docker socket 权限很高，仅在可信网络启用。</p>
+            <p class="hint">勾选目标并保存。取消勾选并保存后自动清理该容器的 CFHost 规则；停机或失败时保留清理任务并重试。单独清理也会关闭该容器的同步。Docker socket 权限很高，仅在可信网络启用。</p>
             ${store.state?.containerHostsError ? `<div class="alert info">${esc(store.state.containerHostsError)}</div>` : ''}
             ${containerHostsChoices(config)}
           </div>
@@ -235,12 +235,14 @@ function animateNumbers() {
 
 function containerHostsChoices(config) {
   const selected = config.hosts.containerTargets || []
+  const pending = store.state?.containerCleanupPending || []
   const targets = new Map((store.state?.containerHosts || []).map(item => [item.name, item]))
-  for (const name of selected) if (!targets.has(name)) targets.set(name, {name, state:'missing', status:'等待容器'})
+  for (const name of [...selected, ...pending]) if (!targets.has(name)) targets.set(name, {name, state:'missing', status:'等待容器'})
   if (!targets.size) return emptyState('未发现容器；启用 Docker 控制后等待列表刷新。')
   return [...targets.values()].sort((a,b) => a.name.localeCompare(b.name)).map(item => `
     <div class="switch-row">
-      <div class="switch-copy"><strong>${esc(item.name)}</strong><small>${esc(item.state)} · ${esc(item.status || '未同步')}</small></div>
+      <div class="switch-copy"><strong>${esc(item.name)}</strong><small>${esc(item.state)} · ${esc(pending.includes(item.name) ? '等待清理 · ' + (item.status || '等待重试') : item.status || '未同步')}</small></div>
+      <button class="btn secondary small" data-clear-container-host="${esc(item.name)}">清理规则</button>
       <label class="switch"><input type="checkbox" data-container-host-target="${esc(item.name)}" ${selected.includes(item.name) ? 'checked' : ''}><span></span></label>
     </div>`).join('')
 }

@@ -23,3 +23,22 @@ func TestExplicitContainerHostsMountRejected(t *testing.T) {
 	}
 	if hasExplicitHostsMount([]inspectedContainerMount{{Destination:"/config"}}) { t.Fatal("rejected unrelated mount") }
 }
+
+func TestContainerCleanupQueue(t *testing.T) {
+	old := HostsConfig{ContainerTargets:[]string{"Jellyfin","Transmission"}, ContainerCleanup:[]string{"Plex","Immich"}}
+	got := reconcileContainerCleanup(old, []string{"Transmission","Plex"})
+	if strings.Join(got,",")!="Immich,Jellyfin" { t.Fatalf("queue: %v",got) }
+	cfg:=Config{Hosts:old}
+	removeContainerTarget(&cfg,"Jellyfin")
+	if strings.Join(cfg.Hosts.ContainerTargets,",")!="Transmission" || strings.Join(cfg.Hosts.ContainerCleanup,",")!="Immich,Jellyfin,Plex" { t.Fatalf("single clear: %+v",cfg.Hosts) }
+	removeContainerTarget(&cfg,"Jellyfin")
+	if strings.Join(cfg.Hosts.ContainerCleanup,",")!="Immich,Jellyfin,Plex" { t.Fatalf("not idempotent: %v",cfg.Hosts.ContainerCleanup) }
+}
+
+func TestContainerCleanupOnlyCFHostMarker(t *testing.T) {
+	original := "127.0.0.1 localhost\r\n# another tool\n192.0.2.4 other.test\n# CF-YX-LATENCY-BEGIN\n192.0.2.5 legacy.test\n# CF-YX-LATENCY-END\n"
+	current:=original+hostsBegin+"\n192.0.2.6 managed.test\n"+hostsEnd+"\n"
+	got,err:=renderContainerHosts(current,nil)
+	if err!=nil || got!=original { t.Fatalf("cleanup changed unmanaged bytes: %q %v",got,err) }
+	if _,err:=renderContainerHosts(original+hostsBegin+"\n",nil); err==nil { t.Fatal("malformed marker accepted") }
+}

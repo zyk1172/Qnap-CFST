@@ -18,6 +18,7 @@ type App struct {
 	mu        sync.RWMutex
 	persistMu sync.Mutex
 	configMu  sync.Mutex
+	containerHostsMu sync.Mutex
 	cfstMu    sync.Mutex
 	config    Config
 	state     RuntimeState
@@ -201,9 +202,11 @@ func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveR
 }
 
 func (a *App) scheduler() {
+	a.retryContainerCleanup()
 	a.recoverHosts()
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
+		a.retryContainerCleanup()
 		a.recoverHosts()
 		a.startCandidateRefresh(now)
 		kind := a.scheduledJob(now)

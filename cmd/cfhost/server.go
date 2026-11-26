@@ -25,6 +25,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/domain-resume", a.handleDomainResume)
 	mux.HandleFunc("/api/apply", a.handleApply)
 	mux.HandleFunc("/api/hosts/clear", a.handleClearHosts)
+	mux.HandleFunc("/api/hosts/container/clear", a.handleClearContainerHosts)
 	mux.HandleFunc("/api/sync", a.handleSync)
 	mux.HandleFunc("/api/tracker-samples/discover", a.handleTrackerSampleDiscovery)
 	mux.HandleFunc("/api/tracker-runtime", a.handleTrackerRuntime)
@@ -84,9 +85,10 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		RuntimeState
 		CandidateReserve CandidateReserveStatus `json:"candidateReserve"`
   HostsBinding string `json:"hostsBinding"`
+		ContainerCleanupPending []string `json:"containerCleanupPending"`
 		MaintenanceFailureLimit int `json:"maintenanceFailureLimit"`
 		MaintenancePaused []MaintenancePause `json:"maintenancePaused"`
-	}{view, candidateReserveStatus(a.state, a.config, time.Now()), binding, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
+	}{view, candidateReserveStatus(a.state, a.config, time.Now()), binding, a.config.Hosts.ContainerCleanup, maintenanceFailureLimit, pausedMaintenanceDomains(a.config, a.state.DomainHealth)})
 	a.mu.RUnlock()
 	if err != nil {
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)
@@ -107,6 +109,8 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// Cleanup is server-owned, never accept a stale browser copy.
+		c.Hosts.ContainerCleanup = nil
 		if err := normalizeConfig(&c); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -115,6 +119,9 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// concurrent requests.
 		a.configMu.Lock()
 		defer a.configMu.Unlock()
+		a.containerHostsMu.Lock()
+		defer a.containerHostsMu.Unlock()
+		c.Hosts.ContainerCleanup = reconcileContainerCleanup(a.snapshotConfig().Hosts, c.Hosts.ContainerTargets)
 		if err := saveConfig(a.dataDir, c); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -126,6 +133,7 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		a.refreshTrackerSampleInventory(c)
 		a.appendLog("configuration saved")
 		writeResponse(w, c)
+		if len(c.Hosts.ContainerCleanup) > 0 { go a.retryContainerCleanup() }
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

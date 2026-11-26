@@ -70,6 +70,8 @@ func (a *App) refreshContainerInventory() {
 }
 
 func (a *App) syncContainerHosts(cfg Config, mappings map[string]string) {
+	a.containerHostsMu.Lock()
+	defer a.containerHostsMu.Unlock()
 	if !dockerHostsEnabled() || len(cfg.Hosts.ContainerTargets) == 0 { a.refreshContainerInventory(); return }
 	// Read current config too: a user who disabled a target during an ongoing
 	// network job must not receive a late write from its old configuration.

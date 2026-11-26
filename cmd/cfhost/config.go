@@ -66,6 +66,7 @@ type OptimizeConfig struct {
 
 type HostsConfig struct {
 	ContainerTargets []string `json:"containerTargets"`
+	ContainerCleanup []string `json:"containerCleanup,omitempty"`
 
 	BackupRetention    int    `json:"backupRetention"`
 	LegacyStateMapPath string `json:"legacyStateMapPath"`
@@ -300,6 +301,10 @@ func normalizeConfig(c *Config) error {
 	seenTargets := map[string]bool{}
 	for _, name := range c.Hosts.ContainerTargets {
 		if !validContainerName(name) || seenTargets[name] { return fmt.Errorf("invalid or duplicate container target: %q", name) }
+		seenTargets[name] = true
+	}
+	for _, name := range c.Hosts.ContainerCleanup {
+		if !validContainerName(name) || seenTargets[name] { return fmt.Errorf("invalid or overlapping cleanup target: %q", name) }
 		seenTargets[name] = true
 	}
 	if c.Hosts.ContainerTargets == nil { c.Hosts.ContainerTargets = []string{} }

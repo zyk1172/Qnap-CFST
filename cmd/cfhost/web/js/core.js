@@ -268,7 +268,7 @@ function pageRefreshSignature(page = store.page, state = store.state) {
     }
     break
   case 'settings':
-    snapshot = {containerHosts: state.containerHosts, containerHostsError: state.containerHostsError}
+    snapshot = {containerHosts: state.containerHosts, containerHostsError: state.containerHostsError, containerCleanupPending: state.containerCleanupPending}
     break
   default:
     snapshot = null
