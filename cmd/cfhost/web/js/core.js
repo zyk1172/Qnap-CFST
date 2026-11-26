@@ -267,6 +267,9 @@ function pageRefreshSignature(page = store.page, state = store.state) {
       logs: store.logPaused ? store.frozenLogs : state.logs,
     }
     break
+  case 'settings':
+    snapshot = {containerHosts: state.containerHosts, containerHostsError: state.containerHostsError}
+    break
   default:
     snapshot = null
   }

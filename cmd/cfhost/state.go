@@ -170,7 +170,10 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 		}
 		return fmt.Errorf("state write failed; Hosts restored: %w", err)
 	}
-	if cfg.AutoApply { a.mirrorHostsBackup() }
+	if cfg.AutoApply {
+		a.mirrorHostsBackup()
+		a.syncContainerHosts(cfg, mappings)
+	}
 	if cfg.AutoApply && cfg.Sync.Enabled {
 		syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := a.publishSync(syncCtx, cfg, false); err != nil {

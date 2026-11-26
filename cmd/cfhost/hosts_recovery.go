@@ -61,8 +61,12 @@ func (a *App) recoverHosts() {
 	backup, cleared := a.state.HostsBackup, a.state.HostsClearedAt != ""
 	previous := copyMappings(a.state.Mappings)
 	a.mu.RUnlock()
-	if !cfg.AutoApply || cleared { return }
-	if _, err := hostsBindingStatus(cfg.HostsPath); err != nil { return }
+	if cleared && backup != nil && len(backup.Mappings) == 0 {
+		a.syncContainerHosts(cfg, map[string]string{})
+		return
+	}
+	if !cfg.AutoApply || cleared { a.refreshContainerInventory(); return }
+	if _, err := hostsBindingStatus(cfg.HostsPath); err != nil { a.refreshContainerInventory(); return }
 	current, err := os.ReadFile(cfg.HostsPath)
 	if err != nil { return }
 	// Upgrade only from mappings that actually exist in Hosts. An unapplied
@@ -81,7 +85,7 @@ func (a *App) recoverHosts() {
 			}
 		}
 	}
-	if backup == nil { return }
+	if backup == nil { a.refreshContainerInventory(); return }
 	a.mirrorHostsBackup()
 	mappings := recoveryMappings(cfg, backup)
 	desired, err := renderHosts(string(current), mappings)
@@ -93,4 +97,5 @@ func (a *App) recoverHosts() {
 		a.appendLog("Hosts recovered from persistent backup: %d mappings", len(mappings))
 	}
 	_ = a.preflightMaintenanceHosts(cfg, time.Now(), true)
+	a.syncContainerHosts(cfg, mappings)
 }

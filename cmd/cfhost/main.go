@@ -93,6 +93,8 @@ type RuntimeState struct {
 	NextRefresh         string                  `json:"nextRefresh"`
 	LastOptimize        string                  `json:"lastOptimize"`
 	LastOptimizeAttempt string                  `json:"lastOptimizeAttempt"`
+	ContainerHosts []ContainerHostsStatus `json:"containerHosts,omitempty"`
+	ContainerHostsError string `json:"containerHostsError,omitempty"`
 	HostsBackup *HostsRecoveryBackup `json:"hostsBackup,omitempty"`
 	HostsMaintenance    HostsMaintenanceRuntime `json:"hostsMaintenance"`
 	ResolutionAttempt   ResolutionAttempt       `json:"resolutionAttempt"`

@@ -205,6 +205,7 @@ func (a *App) handleApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mirrorHostsBackup()
+	a.syncContainerHosts(cfg, mappings)
 	response := map[string]string{"status": "applied"}
 	if cfg.Sync.Enabled {
 		if err := a.publishSync(r.Context(), cfg, false); err != nil {

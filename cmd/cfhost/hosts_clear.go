@@ -116,6 +116,7 @@ func (a *App) clearManagedHosts() (removed int, err error) {
 		return 0, restoreConfig(err)
 	}
 	a.mirrorHostsBackup()
+	a.syncContainerHosts(original, map[string]string{})
 	a.appendLog("CFHost Hosts rules cleared: %d; automatic apply disabled; domain configuration and candidates retained", removed)
 	return removed, nil
 }

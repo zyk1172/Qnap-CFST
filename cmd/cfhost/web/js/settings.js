@@ -93,7 +93,13 @@ function renderSettings() {
             ${textField('tracker.userAgent', 'Tracker User-Agent', config.tracker.userAgent)}
             ${textField('tracker.peerIdPrefix', 'Peer ID 前缀', config.tracker.peerIdPrefix)}
           </div>
-          ${switchRow('autoApply', 'Repair 后自动应用 Hosts', '成功解析后自动写入宿主机 Hosts Marker。', config.autoApply)}
+          ${switchRow('autoApply', '自动应用与恢复 Hosts', '成功提交后写入宿主机及已选容器；启动和定时检查恢复受管区块。', config.autoApply)}
+          <div class="section">
+            <h3>容器 Hosts 管理</h3>
+            <p class="hint">勾选目标并保存。取消勾选停止管理，不清除旧规则；需要删除时先清空。Docker socket 权限很高，仅在可信网络启用。</p>
+            ${store.state?.containerHostsError ? `<div class="alert info">${esc(store.state.containerHostsError)}</div>` : ''}
+            ${containerHostsChoices(config)}
+          </div>
           ${switchRow('tracker.realAnnounce', 'Tracker 真实 announce', '通过候选 IP 连接 Tracker。收到 HTTP 200 + 合法 bencode 后，一般 Tracker 业务错误仍算候选可达；但 Could not connect to tracker / Failed to connect to tracker 等明确上游连接失败的错误仍判失败并继续换候选。', config.tracker.realAnnounce)}
           ${switchRow('tracker.autoDiscover', '自动从下载器发现 Tracker 测试种子', 'Repair / Full Optimize 前自动读取已完成种子；不会暂停、重启、reannounce 或修改下载器任务。', config.tracker.autoDiscover)}
 
@@ -225,4 +231,16 @@ function animateNumbers() {
     }
     requestAnimationFrame(tick)
   })
+}
+
+function containerHostsChoices(config) {
+  const selected = config.hosts.containerTargets || []
+  const targets = new Map((store.state?.containerHosts || []).map(item => [item.name, item]))
+  for (const name of selected) if (!targets.has(name)) targets.set(name, {name, state:'missing', status:'等待容器'})
+  if (!targets.size) return emptyState('未发现容器；启用 Docker 控制后等待列表刷新。')
+  return [...targets.values()].sort((a,b) => a.name.localeCompare(b.name)).map(item => `
+    <div class="switch-row">
+      <div class="switch-copy"><strong>${esc(item.name)}</strong><small>${esc(item.state)} · ${esc(item.status || '未同步')}</small></div>
+      <label class="switch"><input type="checkbox" data-container-host-target="${esc(item.name)}" ${selected.includes(item.name) ? 'checked' : ''}><span></span></label>
+    </div>`).join('')
 }
