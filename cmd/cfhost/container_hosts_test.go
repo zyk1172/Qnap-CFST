@@ -1,9 +1,53 @@
 package main
 
 import (
+	"encoding/base64"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestContainerHostsWritePreservesExternalEdit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("container write script requires Linux procfs")
+	}
+	cmp, err := exec.LookPath("cmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	hosts := filepath.Join(dir, "hosts")
+	original := "127.0.0.1 localhost\n"
+	desired := original + hostsBegin + "\n192.0.2.8 example.test\n" + hostsEnd + "\n"
+	if err := os.WriteFile(hosts, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a second writer immediately before post-write verification.
+	wrapper := `#!/bin/sh
+case "$2" in
+  */new) printf '# external edit\n' >> "$TEST_HOSTS" ;;
+esac
+exec "$REAL_CMP" "$@"
+`
+	if err := os.WriteFile(filepath.Join(dir, "cmp"), []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.ReplaceAll(containerHostsWriteScript, "/etc/hosts", `"$TEST_HOSTS"`)
+	command := exec.Command("sh", "-c", script)
+	command.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TEST_HOSTS="+hosts, "REAL_CMP="+cmp)
+	command.Stdin = strings.NewReader(base64.StdEncoding.EncodeToString([]byte(original)) + "\n" +
+		base64.StdEncoding.EncodeToString([]byte(desired)) + "\n")
+	if out, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("expected verification to fail after an external edit: %s", out)
+	}
+	got, err := os.ReadFile(hosts)
+	if want := desired + "# external edit\n"; err != nil || string(got) != want {
+		t.Fatalf("Hosts contents = %q, %v; want %q", got, err, want)
+	}
+}
 
 func TestContainerHostsRenderPreservesUnmanaged(t *testing.T) {
 	original := "127.0.0.1 localhost\r\n172.17.0.2 jellyfin\n# another tool\n"

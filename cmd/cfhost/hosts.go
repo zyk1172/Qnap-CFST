@@ -225,38 +225,67 @@ func verifyHostsSnapshot(path string, expected os.FileInfo, content []byte) erro
 // Any rollback uses the same inode, never the new pathname if QNAP replaced it.
 func writeHostsInPlaceExpected(path string, before, content []byte, expected os.FileInfo) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil { return err }
-	defer f.Close()
-	if err:=checkHostsIdentity(path,f,expected); err!=nil { return err }
-	got,err:=io.ReadAll(f)
-	if err!=nil { return err }
-	if !bytes.Equal(got,before) { return errors.New("Hosts contents changed before write") }
-	if err:=checkHostsIdentity(path,f,expected); err!=nil { return err }
-	write := func(b []byte) error {
-		if _,err:=f.Seek(0,io.SeekStart); err!=nil { return err }
-		if err:=f.Truncate(0); err!=nil { return err }
-		if n,err:=f.Write(b); err!=nil { return err } else if n!=len(b) { return io.ErrShortWrite }
-		if err:=f.Sync(); err!=nil { return err }
-		if _,err:=f.Seek(0,io.SeekStart); err!=nil { return err }
-		actual,err:=io.ReadAll(f)
-		if err!=nil { return err }
-		if !bytes.Equal(actual,b) { return errors.New("Hosts write verification failed") }
-		return nil
+	if err != nil {
+		return err
 	}
-	if err:=write(content); err!=nil {
-		if identityErr:=checkHostsIdentity(path,f,expected); identityErr!=nil {
-			return fmt.Errorf("%v; rollback refused: %w",err,identityErr)
-		}
-		if rollbackErr:=write(before); rollbackErr!=nil {
-			return fmt.Errorf("%v; rollback failed: %w",err,rollbackErr)
-		}
-		if identityErr:=checkHostsIdentity(path,f,expected); identityErr!=nil {
-			return fmt.Errorf("%v; rollback identity check failed: %w",err,identityErr)
+	defer f.Close()
+	if err := checkHostsIdentity(path, f, expected); err != nil {
+		return err
+	}
+	if err := verifyOpenHostsSnapshot(path, f, expected, before); err != nil {
+		return fmt.Errorf("before Hosts write: %w", err)
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	written, err := writeAndSyncHosts(f, content)
+	if err != nil {
+		if rollbackErr := restoreOpenHostsSnapshot(path, f, expected, content[:written], before); rollbackErr != nil {
+			return fmt.Errorf("%v; rollback refused or failed: %w", err, rollbackErr)
 		}
 		return err
 	}
-	if err:=checkHostsIdentity(path,f,expected); err!=nil { return err }
+	// A verification failure can mean another writer has already changed the
+	// file. Leave those bytes in place even when the inode is still the same.
+	if err := verifyOpenHostsSnapshot(path, f, expected, content); err != nil {
+		return fmt.Errorf("after Hosts write: %w", err)
+	}
 	return f.Close()
+}
+
+func verifyOpenHostsSnapshot(path string, f *os.File, expected os.FileInfo, content []byte) error {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	actual, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(actual, content) {
+		return errors.New("Hosts contents changed")
+	}
+	return checkHostsIdentity(path, f, expected)
+}
+
+func writeAndSyncHosts(f *os.File, content []byte) (int, error) {
+	n, err := f.WriteAt(content, 0)
+	if err != nil {
+		return n, err
+	}
+	return n, f.Sync()
+}
+
+func restoreOpenHostsSnapshot(path string, f *os.File, expected os.FileInfo, written, before []byte) error {
+	if err := verifyOpenHostsSnapshot(path, f, expected, written); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := writeAndSyncHosts(f, before); err != nil {
+		return err
+	}
+	return verifyOpenHostsSnapshot(path, f, expected, before)
 }
 
 func writeHostsInPlace(path string, content []byte) error {

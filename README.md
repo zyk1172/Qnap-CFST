@@ -207,6 +207,7 @@ legacy-hosts-map.tsv
 CFHOST_IMAGE=ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 CFHOST_PORT=9876
 CFHOST_DATA_DIR=/share/Container/cfhost/data
+CFHOST_HOSTS_FILE=/etc/hosts
 CFHOST_HOSTS_DIR=/etc
 CFHOST_DOCKER_TARGETS=0
 TZ=Asia/Shanghai
@@ -254,14 +255,14 @@ http://QNAP-IP:9876
 
 # 为什么这样挂载 Hosts
 
-QNAP Compose 使用父目录挂载：
+QNAP Compose 默认使用单文件读写挂载，并通过独立的只读目录核对文件是否已被系统替换。
 
 ```yaml
-- /etc:/host/etc:rw
+- /etc/hosts:/host/etc/hosts:rw
 - /etc:/host/etc-check:ro
 ```
 
-其他 NAS 的单文件挂载仍可使用。目录挂载扩展了写权限；请阅读 QNAP 部署安全提示。
+升级时可继续使用已有的 `CFHOST_HOSTS_FILE` 和 `CFHOST_HOSTS_DIR` 设置。
 
 容器内：
 
@@ -286,17 +287,17 @@ CFHost 会：
 3. 写入前备份。
 4. 原地 truncate + write，保持 inode。
 5. fsync 后重新读取验证。
-6. 失败则自动恢复旧内容。
+6. 只有文件身份和内容仍匹配本次写入时，才会在写入失败后尝试恢复旧内容。
 
 ---
 
 ## Hosts 重启恢复与容器目标
 
-- QNAP Compose 使用宿主机 Hosts 父目录读写挂载，独立只读校验路径保持不变。这样系统替换 Hosts 文件后可以按当前路径读取新文件。**整个宿主机 /etc 可被 CFHost 写入，权限扩大，必须信任镜像和 WebUI 访问者。** 旧单文件部署仍可用，但文件替换时仍可能需要重建 CFHost。
+- QNAP 默认单文件挂载在系统替换文件后可能需要重建 CFHost。要在文件替换后自动恢复，请按 [QNAP 部署说明](deploy/qnap/README-amd64.md#可选目录挂载) 手动启用父目录挂载。**默认目录模式可写整个宿主机 `/etc`，启用前须信任镜像和 WebUI 访问者。**
 - 开启自动应用后，已成功应用的受管映射随 state.json 持久化，并镜像到 /data/hosts-last-applied.json；宿主机完整旧文件仍按原机制保存 hosts-backup-*。启动及每 30 秒检查当前 Hosts，恢复受管区块，不用旧的整份 Hosts 覆盖 NAS 系统记录，不重新测速或请求 Tracker。原地写入当前 inode，恢复前后比较文件描述符、当前路径、独立校验挂载及内容；系统若在恢复期间替换文件则拒绝继续写入或将旧备份覆盖新文件。系统自身重启时替换的 inode 不受 CFHost 控制，恢复保持的是重启后的当前 inode。
 - 首次升级应在宿主机仍有与 state.json 一致的映射时启动，或手动应用一次以建立恢复备份；手动清空、关闭自动应用后不会自动恢复旧映射。
 - 容器目标功能默认关闭。取消 Compose 中 Docker socket 挂载的注释，设置 CFHOST_DOCKER_TARGETS=1 并重建 CFHost（保留 /data）。**Docker socket 提供极高的宿主机权限，CFHost 没有内置认证，绝对不要公开 WebUI 或允许不可信用户访问。**
-- 在 WebUI 设置 → Hosts 与 Tracker → 容器 Hosts 管理中勾选目标并保存。目标须使用 Docker 独立 Hosts，支持 root exec、sh、cat、cmp、stat、base64、mktemp；已显式挂载 Hosts 或其父目录的容器拒绝修改。无需挂载宿主机 Hosts；旧挂载需要先在目标容器配置中移除并按原配置重建一次。
+- 在 WebUI 设置 → Hosts 与 Tracker → 容器 Hosts 管理中勾选目标并保存。目标须使用 Docker 独立 Hosts，支持 root exec、sh、cat、cmp、stat、base64、mktemp 和 `/proc/self/fd`；已显式挂载 Hosts 或其父目录的容器拒绝修改。无需挂载宿主机 Hosts；旧挂载需要先在目标容器配置中移除并按原配置重建一次。
 - 成功提交映射后即时尝试同步所选容器；周期检查负责启动、重启、重建及漂移恢复。每个容器独立报告结果，失败不撤销宿主机已提交结果。长任务期间检查延后。只有明确变化才写入；不重启目标容器。应用 DNS 缓存和既有连接不保证即时切换。
 - 取消勾选并保存会持久化单容器清理任务，只清除该容器 CFHOST MANAGED 区块；设置中的「清理规则」按钮也可单独清理并关闭其同步。不会修改宿主机或其他容器。停止、缺失或写入失败的目标将在启动和周期检查时重试，重新勾选取消待清理任务。清理任务按容器名称追踪。
 

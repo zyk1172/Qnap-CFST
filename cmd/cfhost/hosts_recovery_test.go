@@ -90,3 +90,43 @@ func TestHostsRollbackPreservesCurrentInode(t *testing.T) {
 	got,_:=os.ReadFile(path)
 	if !os.SameFile(info,after)||string(got)!=string(before) {t.Fatalf("rollback: %q",got)}
 }
+
+func TestHostsWriteFailureRollbackChecksWrittenBytes(t *testing.T) {
+	before := []byte("127.0.0.1 localhost\n")
+	written := []byte("127.0.0.1 localhost\n# >>> CFHOST")
+	external := []byte("127.0.0.1 updated-nas\n")
+	for _, tc := range []struct {
+		name      string
+		current   []byte
+		want      []byte
+		wantError bool
+	}{
+		{name: "partial write", current: written, want: before},
+		{name: "external edit", current: external, want: external, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "hosts")
+			t.Setenv("HOSTS_VERIFY_PATH", path)
+			if err := os.WriteFile(path, tc.current, 0600); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.OpenFile(path, os.O_RDWR, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = restoreOpenHostsSnapshot(path, f, info, written, before)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("rollback error = %v, want error: %t", err, tc.wantError)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != string(tc.want) {
+				t.Fatalf("Hosts contents after rollback = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}

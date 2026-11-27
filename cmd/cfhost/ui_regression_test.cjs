@@ -117,6 +117,45 @@ test('canceling clear or unsaved settings never changes Hosts', async () => {
   assert.equal(requests, 0)
 })
 
+test('container clear removes only its target from saved settings and preserves in-flight edits', async () => {
+  const f = fixture()
+  const started = deferred()
+  const pending = deferred()
+  const calls = []
+  f.store.config.hosts = { containerTargets: ['test-target', 'other-target'] }
+  f.store.configDraft.hosts = { containerTargets: ['test-target', 'other-target'] }
+  f.context.confirmAction = async () => true
+  f.context.toast = () => {}
+  f.context.updateSaveBar = () => {}
+  f.context.api = async (path, options) => {
+    calls.push(path)
+    if (path === '/api/hosts/container/clear') {
+      assert.equal(options.method, 'POST')
+      assert.equal(JSON.parse(options.body).name, 'test-target')
+      started.resolve()
+      return pending.promise
+    }
+    assert.equal(path, '/api/status')
+    return { containerCleanupPending: ['test-target'] }
+  }
+  const clearing = f.handleClick({ target: {
+    closest: selector => selector === '[data-clear-container-host]' ? { dataset: { clearContainerHost: 'test-target' } } : null,
+  } })
+  await started.promise
+  assert.equal(f.store.configSaving, true)
+  f.listeners.input({ target: { dataset: { configPath: 'cfst.threads', configType: 'number' }, value: '321' } })
+  f.listeners.change({ target: { dataset: { containerHostTarget: 'another-target' }, checked: true } })
+  await assert.rejects(f.persistConfig(f.store.configDraft), /配置正在保存/)
+  pending.resolve({ status: 'pending' })
+  await clearing
+  assert.deepEqual(calls, ['/api/hosts/container/clear', '/api/status'])
+  assert.deepEqual([...f.store.config.hosts.containerTargets], ['other-target'])
+  assert.deepEqual([...f.store.configDraft.hosts.containerTargets], ['another-target', 'other-target'])
+  assert.equal(f.store.configDraft.cfst.threads, 321)
+  assert.equal(f.store.dirty, true)
+  assert.equal(f.store.configSaving, false)
+})
+
 test('budget deferrals are waiting states while real failures remain errors', () => {
   const f = fixture()
   f.context.jobLabel = value => value

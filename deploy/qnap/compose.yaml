@@ -10,12 +10,15 @@ services:
       DATA_DIR: /data
       HOSTS_PATH: /host/etc/hosts
       HOSTS_VERIFY_PATH: /host/etc-check/hosts
-      CFHOST_HOST_DIRECTORY: "1"
+      # Uncomment only when opting in to the directory bind below.
+      # CFHOST_HOST_DIRECTORY: "1"
       # Explicit opt-in; enable only on a trusted private network.
       CFHOST_DOCKER_TARGETS: "${CFHOST_DOCKER_TARGETS:-0}"
     volumes:
       - ${CFHOST_DATA_DIR:-/share/Container/cfhost/data}:/data
-      - ${CFHOST_HOSTS_DIR:-/etc}:/host/etc:rw
+      - ${CFHOST_HOSTS_FILE:-/etc/hosts}:/host/etc/hosts:rw
+      # Directory mode replaces the file bind above. See README-amd64.md.
+      # - ${CFHOST_HOSTS_DIR:-/etc}:/host/etc:rw
       # For container targets, uncomment the socket and set CFHOST_DOCKER_TARGETS=1.
       # - /var/run/docker.sock:/var/run/docker.sock
       - ${CFHOST_HOSTS_DIR:-/etc}:/host/etc-check:ro

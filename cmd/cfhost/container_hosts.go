@@ -150,20 +150,20 @@ func updateContainerHosts(ctx context.Context, id string, mappings map[string]st
 }
 
 const containerHostsWriteScript = `set -eu
-test -f /etc/hosts && test ! -L /etc/hosts
+test -f /etc/hosts
+test ! -L /etc/hosts
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
 IFS= read -r old
 IFS= read -r new
 printf '%s' "$old" | base64 -d > "$d/old"
 printf '%s' "$new" | base64 -d > "$d/new"
-inode=$(stat -Lc '%d:%i' /etc/hosts)
-cmp -s "$d/old" /etc/hosts
+exec 3<> /etc/hosts
+hosts_fd=/proc/self/fd/3
+inode=$(stat -Lc '%d:%i' "$hosts_fd")
+cmp -s "$d/old" "$hosts_fd"
 test "$inode" = "$(stat -Lc '%d:%i' /etc/hosts)"
-if cat "$d/new" > /etc/hosts && test "$inode" = "$(stat -Lc '%d:%i' /etc/hosts)" && cmp -s "$d/new" /etc/hosts; then
-  exit 0
-fi
-if test "$inode" = "$(stat -Lc '%d:%i' /etc/hosts)"; then
-  cat "$d/old" > /etc/hosts || true
-fi
-exit 1`
+cat "$d/new" > "$hosts_fd"
+# A mismatch can be an external edit. Preserve the current bytes for retry.
+cmp -s "$d/new" "$hosts_fd"
+test "$inode" = "$(stat -Lc '%d:%i' /etc/hosts)"`
