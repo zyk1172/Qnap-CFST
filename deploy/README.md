@@ -22,6 +22,42 @@ SSH 下可用 `uname -m` 检查：`x86_64` 对应 `amd64`，`aarch64` / `arm64` 
 
 新平台配置使用 Compose 的长格式绑定挂载。Hosts 源文件必须存在，`create_host_path: false` 会阻止路径拼错时自动创建目录。如果容器应用报该字段不支持，请更新容器应用或使用支持此字段的 Docker Compose v2。
 
+## 从镜像创建或升级容器
+
+优先导入上表对应的新版 Compose。通过 NAS 图形界面手动创建容器时，按下表填写。方向为 **NAS 路径 → 容器路径**。
+
+| 设置 | NAS 路径或端口 | 容器路径或端口 | 模式 |
+| --- | --- | --- | --- |
+| 持久化数据 | 原数据目录，QNAP 示例 `/share/Container/cfhost/data` | `/data` | 读写 |
+| Hosts 写入 | `/etc/hosts` | `/host/etc/hosts` | 读写 |
+| **Hosts 校验** | **`/etc`** | **`/host/etc-check`** | **只读** |
+| WebUI | `9876` 或原端口 | `8080` | TCP |
+
+设置容器环境变量 `HOSTS_PATH=/host/etc/hosts` 和 `HOSTS_VERIFY_PATH=/host/etc-check/hosts`。使用自定义 Hosts 文件时保留原写入源，并让只读校验路径指向同一份文件。Compose 中这两个挂载源分别由 `CFHOST_HOSTS_FILE` 和 `CFHOST_HOSTS_DIR` 控制，校验路径默认读取该目录下的 `hosts`。
+
+以下命令适用于 QNAP x86_64 首次安装。其他 NAS 可改用多架构标签 `cfhost`，并替换数据目录。
+
+```sh
+mkdir -p /share/Container/cfhost/data
+docker run -d --name cfhost --restart unless-stopped \
+  -p 9876:8080 \
+  -e HOSTS_PATH=/host/etc/hosts \
+  -e HOSTS_VERIFY_PATH=/host/etc-check/hosts \
+  --mount type=bind,src=/share/Container/cfhost/data,dst=/data \
+  --mount type=bind,src=/etc/hosts,dst=/host/etc/hosts \
+  --mount type=bind,src=/etc,dst=/host/etc-check,readonly \
+  ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
+```
+
+升级现有容器时，保留原数据目录和所需自定义配置，用新版 Compose 或上表参数重建容器。单独执行 `docker pull` 或重启旧容器不会添加新挂载。重建后，在 WebUI 核对 Hosts 绑定状态。
+
+滚动标签 `cfhost` 和 `cfhost-amd64` 另有两个可选功能。
+
+| 功能 | 手动创建时的额外配置 |
+| --- | --- |
+| 系统替换 Hosts 文件后自动恢复 | 将单文件读写挂载替换为 `/etc → /host/etc` 读写挂载，保留 `/etc → /host/etc-check` 只读挂载。设置 `CFHOST_HOST_DIRECTORY=1`，并在 WebUI 开启自动应用。该模式允许 CFHost 写入整个宿主机 `/etc`。 |
+| 同步其他容器的 Hosts | 添加 `/var/run/docker.sock → /var/run/docker.sock`，设置 `CFHOST_DOCKER_TARGETS=1`，重建后在 WebUI 选择目标。Docker socket 具有宿主机管理权限。启用前须限制 WebUI 访问。 |
+
 ## 路径、端口和权限
 
 | 参数 | 含义 | 默认值 |
@@ -30,6 +66,7 @@ SSH 下可用 `uname -m` 检查：`x86_64` 对应 `amd64`，`aarch64` / `arm64` 
 | `CFHOST_PORT` | NAS 上的 WebUI 端口 | `9876` |
 | `CFHOST_DATA_DIR` | NAS 上持久化配置、状态、历史和备份的目录 | 见各平台配置 |
 | `CFHOST_HOSTS_FILE` | NAS 上待管理的 Hosts 文件 | `/etc/hosts` |
+| `CFHOST_HOSTS_DIR` | 绑定到 `/host/etc-check` 的只读校验目录 | `/etc` |
 | `TZ` | 时区 | `Asia/Shanghai` |
 
 复制平台目录的 `.env.example` 为 `.env` 后修改。CLI 命令均显式传入 `--env-file .env`。图形界面上传 YAML 时，还需把 `.env` 放在项目工作目录；若界面不读取 `.env`，直接把 YAML 中的 `${变量:-默认值}` 替换为实际值。
