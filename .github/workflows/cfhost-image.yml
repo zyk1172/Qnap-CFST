@@ -30,12 +30,17 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
         id: meta
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ghcr.io/zyk1172/qnap-cfst
           flavor: latest=false
           tags: |
             type=raw,value=cfhost
             type=ref,event=tag
+          labels: |
+            org.opencontainers.image.description=CFHost for NAS. Bind /etc to /host/etc-check read-only and set HOSTS_VERIFY_PATH=/host/etc-check/hosts. Find all mounts and optional Docker socket setup at https://github.com/zyk1172/Qnap-CFST/blob/master/deploy/README.md
+            org.opencontainers.image.documentation=https://github.com/zyk1172/Qnap-CFST/blob/master/deploy/README.md#从镜像创建或升级容器
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -43,3 +48,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}

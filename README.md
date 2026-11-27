@@ -149,6 +149,8 @@ CFHost 使用 Linux 容器运行，预构建的 `cfhost` 镜像支持 `linux/amd
 ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 ```
 
+**首次安装或从旧镜像升级时，请用新版 Compose 创建或重建容器。** 默认部署需要把 NAS 的 `/etc` 只读挂载到 `/host/etc-check`，并设置 `HOSTS_VERIFY_PATH=/host/etc-check/hosts`。如果在 Container Station 里手动创建容器，可直接照填[镜像启动参数](deploy/README.md#从镜像创建或升级容器)。该说明也列出了开启 Hosts 目录恢复或容器同步时需要替换或新增的挂载。
+
 镜像固定为：
 
 ```text

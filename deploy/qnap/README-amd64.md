@@ -38,6 +38,8 @@ platform: linux/amd64
 
 在 Container Station 的“应用程序 / Compose”中建立项目，使用 [compose-amd64.yaml](compose-amd64.yaml) 的完整内容。
 
+在 Container Station 中从镜像手动创建容器时，请按[镜像启动参数](../README.md#从镜像创建或升级容器)填写环境变量、端口和挂载。默认部署须添加 `/etc → /host/etc-check` 只读挂载，并设置 `HOSTS_VERIFY_PATH=/host/etc-check/hosts`。
+
 然后访问：
 
 ```text
@@ -199,15 +201,13 @@ ports:
 
 ## 更新镜像
 
-重新拉取：
+先核对旧容器的数据目录、Hosts 挂载和自定义端口，再重新拉取镜像。
 
 ```bash
 docker pull ghcr.io/zyk1172/qnap-cfst:cfhost-amd64
 ```
 
-然后重新创建 Compose 应用即可。
-
-`/data` 和宿主机 `/etc/hosts` 都是 bind mount，所以重建容器不会丢配置。
+使用新版 [Compose](compose-amd64.yaml) 重建应用，并沿用原 `/data` 的宿主机目录。手动创建的容器也需要重建并补齐 [启动参数](../README.md#从镜像创建或升级容器)。单独拉取镜像或重启旧容器不会添加校验挂载或启用可选挂载。
 
 
 ## Tracker 测试种子自动发现
