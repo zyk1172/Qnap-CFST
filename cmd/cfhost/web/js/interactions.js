@@ -433,6 +433,36 @@ async function clearHosts() {
   finally { store.configSaving = false }
 }
 
+async function clearContainerHosts(name) {
+  if (store.configSaving || store.dirty) {
+    toast('请先保存或放弃设置', '处理未保存的设置后再清理容器 Hosts。', 'error')
+    return
+  }
+  if (!await confirmAction('清理容器 Hosts', `仅删除 ${name} 的 CFHost 受管区块，同时关闭该容器同步。停止的容器将在启动后重试。`, '清理', true)) return
+  if (store.configSaving || store.dirty) return
+
+  const selected = store.config.hosts.containerTargets || []
+  store.configSaving = true
+  try {
+    await api('/api/hosts/container/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    // Merge the confirmed removal into the draft without resetting other edits.
+    if (selected.includes(name)) {
+      store.config.hosts.containerTargets = selected.filter(target => target !== name)
+      store.configDraft.hosts.containerTargets = store.configDraft.hosts.containerTargets.filter(target => target !== name)
+    }
+    store.dirty = !deepEqual(store.configDraft, store.config)
+    await refreshStatus({ quiet: true })
+    renderPage(false, false)
+    toast('已提交清理任务', `${name}：等待清理结果。`, 'success')
+  } finally {
+    store.configSaving = false
+  }
+}
+
 async function syncGitHub() {
   try {
     await api('/api/sync', { method: 'POST' })

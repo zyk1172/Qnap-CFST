@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -156,38 +157,135 @@ func (a *App) stageHostsUpdate(cfg Config, render func(string) (string, error)) 
 	info, err := os.Lstat(hostsPath)
 	if err != nil { return hostsStage{}, fmt.Errorf("read hosts metadata: %w", err) }
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() { return hostsStage{}, errors.New("Hosts path must be a regular file") }
-	current, err := os.ReadFile(hostsPath)
+	current, err := readHostsSnapshot(hostsPath, info)
 	if err != nil { return hostsStage{}, fmt.Errorf("read hosts: %w", err) }
 	rendered, err := render(string(current))
 	if err != nil { return hostsStage{}, err }
 	if rendered == string(current) {
-		a.appendLog("hosts unchanged")
+		if err := verifyHostsSnapshot(hostsPath, info, current); err != nil { return hostsStage{}, err }
 		return hostsStage{Changed:false, Rollback:func() error{return nil}}, nil
 	}
 
 	backup := filepath.Join(a.dataDir, "hosts-backup-"+time.Now().Format("20060102-150405.000000000"))
 	if err := os.WriteFile(backup, current, info.Mode().Perm()); err != nil { return hostsStage{}, fmt.Errorf("backup hosts: %w", err) }
 	restore := func() error {
-		if err := writeHostsInPlace(hostsPath, current); err != nil { return err }
-		got, err := os.ReadFile(hostsPath)
-		if err != nil { return err }
-		if !bytes.Equal(got, current) { return errors.New("Hosts rollback verification failed") }
-		return nil
+		// Do not restore a stale snapshot over a newly replaced file or an
+		// external update that occurred after our successful write.
+		if err := writeHostsInPlaceExpected(hostsPath, []byte(rendered), current, info); err != nil { return err }
+		return verifyHostsSnapshot(hostsPath, info, current)
 	}
-	if _, err := hostsBindingStatus(hostsPath); err != nil { return hostsStage{}, err }
-	if err := writeHostsInPlace(hostsPath, []byte(rendered)); err != nil {
-		_ = restore()
+	if err := writeHostsInPlaceExpected(hostsPath, current, []byte(rendered), info); err != nil {
 		return hostsStage{}, fmt.Errorf("write hosts: %w", err)
 	}
-	if _, err := hostsBindingStatus(hostsPath); err != nil { _ = restore(); return hostsStage{}, err }
-	got, err := os.ReadFile(hostsPath)
-	if err != nil || !bytes.Equal(got, []byte(rendered)) {
-		_ = restore()
-		if err != nil { return hostsStage{}, fmt.Errorf("verify hosts write: %w", err) }
-		return hostsStage{}, errors.New("Hosts write verification failed")
+	if err := verifyHostsSnapshot(hostsPath, info, []byte(rendered)); err != nil {
+		if rollbackErr := restore(); rollbackErr != nil {
+			return hostsStage{}, fmt.Errorf("%v; rollback refused or failed: %w", err, rollbackErr)
+		}
+		return hostsStage{}, err
 	}
 	a.pruneHostsBackups(cfg.Hosts.BackupRetention)
 	return hostsStage{Changed:true, Backup:backup, Rollback:restore}, nil
+}
+
+// Compare the descriptor, the current pathname, and the independent host
+// directory binding. Checking two pathnames alone is insufficient: both may
+// point at a new inode after a NAS network or startup event.
+func checkHostsIdentity(path string, f *os.File, expected os.FileInfo) error {
+	actual, err := f.Stat()
+	if err != nil { return err }
+	named, err := os.Lstat(path)
+	if err != nil { return err }
+	if !actual.Mode().IsRegular() || !named.Mode().IsRegular() || !os.SameFile(expected, actual) || !os.SameFile(actual, named) {
+		return errors.New("Hosts inode changed; refusing to write or restore")
+	}
+	if _, err := hostsBindingStatus(path); err != nil { return err }
+	return nil
+}
+
+func readHostsSnapshot(path string, expected os.FileInfo) ([]byte,error) {
+	f,err:=os.Open(path)
+	if err!=nil { return nil,err }
+	defer f.Close()
+	if err:=checkHostsIdentity(path,f,expected); err!=nil { return nil,err }
+	b,err:=io.ReadAll(f)
+	if err!=nil { return nil,err }
+	if err:=checkHostsIdentity(path,f,expected); err!=nil { return nil,err }
+	return b,nil
+}
+
+func verifyHostsSnapshot(path string, expected os.FileInfo, content []byte) error {
+	got,err:=readHostsSnapshot(path,expected)
+	if err!=nil { return err }
+	if !bytes.Equal(got,content) { return errors.New("Hosts contents changed; refusing stale snapshot") }
+	return nil
+}
+
+// Never rename/unlink/create the live Hosts. Open once without O_TRUNC,
+// validate the snapshot, then truncate/write/fsync that same descriptor.
+// Any rollback uses the same inode, never the new pathname if QNAP replaced it.
+func writeHostsInPlaceExpected(path string, before, content []byte, expected os.FileInfo) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := checkHostsIdentity(path, f, expected); err != nil {
+		return err
+	}
+	if err := verifyOpenHostsSnapshot(path, f, expected, before); err != nil {
+		return fmt.Errorf("before Hosts write: %w", err)
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	written, err := writeAndSyncHosts(f, content)
+	if err != nil {
+		if rollbackErr := restoreOpenHostsSnapshot(path, f, expected, content[:written], before); rollbackErr != nil {
+			return fmt.Errorf("%v; rollback refused or failed: %w", err, rollbackErr)
+		}
+		return err
+	}
+	// A verification failure can mean another writer has already changed the
+	// file. Leave those bytes in place even when the inode is still the same.
+	if err := verifyOpenHostsSnapshot(path, f, expected, content); err != nil {
+		return fmt.Errorf("after Hosts write: %w", err)
+	}
+	return f.Close()
+}
+
+func verifyOpenHostsSnapshot(path string, f *os.File, expected os.FileInfo, content []byte) error {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	actual, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(actual, content) {
+		return errors.New("Hosts contents changed")
+	}
+	return checkHostsIdentity(path, f, expected)
+}
+
+func writeAndSyncHosts(f *os.File, content []byte) (int, error) {
+	n, err := f.WriteAt(content, 0)
+	if err != nil {
+		return n, err
+	}
+	return n, f.Sync()
+}
+
+func restoreOpenHostsSnapshot(path string, f *os.File, expected os.FileInfo, written, before []byte) error {
+	if err := verifyOpenHostsSnapshot(path, f, expected, written); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := writeAndSyncHosts(f, before); err != nil {
+		return err
+	}
+	return verifyOpenHostsSnapshot(path, f, expected, before)
 }
 
 func writeHostsInPlace(path string, content []byte) error {

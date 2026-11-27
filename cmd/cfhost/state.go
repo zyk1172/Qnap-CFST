@@ -17,6 +17,7 @@ type resolutionSnapshot struct {
 	LastOptimize     string
 	ResolutionAttempt ResolutionAttempt
 	HostsClearedAt string
+	HostsBackup *HostsRecoveryBackup
 }
 
 // Validation evidence is separate from the mappings actually applied to Hosts.
@@ -51,6 +52,7 @@ func (a *App) snapshotResolution() resolutionSnapshot {
 		LastOptimize:     a.state.LastOptimize,
 		ResolutionAttempt: a.state.ResolutionAttempt,
 		HostsClearedAt: a.state.HostsClearedAt,
+		HostsBackup: a.state.HostsBackup,
 	}
 }
 
@@ -64,6 +66,7 @@ func (a *App) restoreResolution(s resolutionSnapshot) {
 	a.state.LastOptimize = s.LastOptimize
 	a.state.ResolutionAttempt = s.ResolutionAttempt
 	a.state.HostsClearedAt = s.HostsClearedAt
+	a.state.HostsBackup = s.HostsBackup
 	a.mu.Unlock()
 }
 
@@ -154,7 +157,10 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 	}
 	a.mu.Lock()
 	a.state.ResolutionAttempt = ResolutionAttempt{CheckedAt: time.Now().Format(time.RFC3339), Applied: true}
-	if cfg.AutoApply { a.state.HostsClearedAt = "" }
+	if cfg.AutoApply {
+		a.state.HostsClearedAt = ""
+		a.state.HostsBackup = newHostsBackup(mappings)
+	}
 	a.mu.Unlock()
 	if err := a.persistStateStrict(); err != nil {
 		rollbackErr := stage.Rollback()
@@ -163,6 +169,10 @@ func (a *App) commitResolution(ctx context.Context, cfg Config, mappings map[str
 			return fmt.Errorf("state write failed: %v; Hosts rollback also failed: %v", err, rollbackErr)
 		}
 		return fmt.Errorf("state write failed; Hosts restored: %w", err)
+	}
+	if cfg.AutoApply {
+		a.mirrorHostsBackup()
+		a.syncContainerHosts(cfg, mappings)
 	}
 	if cfg.AutoApply && cfg.Sync.Enabled {
 		syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

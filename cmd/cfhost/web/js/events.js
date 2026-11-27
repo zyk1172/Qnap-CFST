@@ -27,6 +27,11 @@ async function handleClick(event) {
     return
   }
 
+  const clearTarget = event.target.closest('[data-clear-container-host]')
+  if (clearTarget) {
+    await clearContainerHosts(clearTarget.dataset.clearContainerHost)
+    return
+  }
   const action = event.target.closest('[data-action]')?.dataset.action
   if (action === 'open-sidebar') openSidebar()
   else if (action === 'close-sidebar') closeSidebar()
@@ -190,6 +195,16 @@ document.addEventListener('input', event => {
 })
 
 document.addEventListener('change', event => {
+  const target = event.target.dataset.containerHostTarget
+  if (target && store.configDraft) {
+    const selected = new Set(store.configDraft.hosts.containerTargets || [])
+    if (event.target.checked) selected.add(target)
+    else selected.delete(target)
+    store.configDraft.hosts.containerTargets = [...selected].sort()
+    store.dirty = !deepEqual(store.configDraft, store.config)
+    updateSaveBar()
+    return
+  }
   const path = event.target.dataset.configPath
   if (!path || !store.configDraft) return
   const type = event.target.dataset.configType

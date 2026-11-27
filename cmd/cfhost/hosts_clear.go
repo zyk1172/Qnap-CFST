@@ -81,6 +81,7 @@ func (a *App) clearManagedHosts() (removed int, err error) {
 	a.mu.Lock()
 	a.config = disabled
 	oldCleared := a.state.HostsClearedAt
+	oldBackup := a.state.HostsBackup
 	a.mu.Unlock()
 	restoreConfig := func(cause error) error {
 		if restoreErr := saveConfig(a.dataDir, original); restoreErr != nil {
@@ -101,17 +102,21 @@ func (a *App) clearManagedHosts() (removed int, err error) {
 	}
 	a.mu.Lock()
 	a.state.HostsClearedAt = time.Now().Format(time.RFC3339)
+	a.state.HostsBackup = newHostsBackup(map[string]string{})
 	a.mu.Unlock()
 	if err := a.persistStateStrict(); err != nil {
 		rollbackErr := stage.Rollback()
 		a.mu.Lock()
 		a.state.HostsClearedAt = oldCleared
+		a.state.HostsBackup = oldBackup
 		a.mu.Unlock()
 		if rollbackErr != nil {
 			err = fmt.Errorf("%v; Hosts rollback failed: %w", err, rollbackErr)
 		}
 		return 0, restoreConfig(err)
 	}
+	a.mirrorHostsBackup()
+	a.syncContainerHosts(original, map[string]string{})
 	a.appendLog("CFHost Hosts rules cleared: %d; automatic apply disabled; domain configuration and candidates retained", removed)
 	return removed, nil
 }

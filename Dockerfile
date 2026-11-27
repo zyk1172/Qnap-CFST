@@ -21,7 +21,7 @@ RUN set -eu; \
     done < /tmp/cfhost-license-modules
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata docker-cli
 WORKDIR /app
 COPY --from=build /out/cfst /app/cfst
 COPY --from=build /out/cfhost /app/cfhost

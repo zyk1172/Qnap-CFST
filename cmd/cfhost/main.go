@@ -18,6 +18,8 @@ type App struct {
 	mu        sync.RWMutex
 	persistMu sync.Mutex
 	configMu  sync.Mutex
+	containerHostsMu sync.Mutex
+	containerCleanupCursor int
 	cfstMu    sync.Mutex
 	config    Config
 	state     RuntimeState
@@ -93,6 +95,9 @@ type RuntimeState struct {
 	NextRefresh         string                  `json:"nextRefresh"`
 	LastOptimize        string                  `json:"lastOptimize"`
 	LastOptimizeAttempt string                  `json:"lastOptimizeAttempt"`
+	ContainerHosts []ContainerHostsStatus `json:"containerHosts,omitempty"`
+	ContainerHostsError string `json:"containerHostsError,omitempty"`
+	HostsBackup *HostsRecoveryBackup `json:"hostsBackup,omitempty"`
 	HostsMaintenance    HostsMaintenanceRuntime `json:"hostsMaintenance"`
 	ResolutionAttempt   ResolutionAttempt       `json:"resolutionAttempt"`
 	HostsClearedAt      string                  `json:"hostsClearedAt,omitempty"`
@@ -198,8 +203,12 @@ func trackerKeepaliveCheckDue(now time.Time, states map[string]TrackerKeepaliveR
 }
 
 func (a *App) scheduler() {
+	a.retryContainerCleanup()
+	a.recoverHosts()
 	ticker:=time.NewTicker(30*time.Second); defer ticker.Stop()
 	for now:=range ticker.C {
+		a.retryContainerCleanup()
+		a.recoverHosts()
 		a.startCandidateRefresh(now)
 		kind := a.scheduledJob(now)
 		if kind == "reserve" {

@@ -65,6 +65,9 @@ type OptimizeConfig struct {
 }
 
 type HostsConfig struct {
+	ContainerTargets []string `json:"containerTargets"`
+	ContainerCleanup []string `json:"containerCleanup,omitempty"`
+
 	BackupRetention    int    `json:"backupRetention"`
 	LegacyStateMapPath string `json:"legacyStateMapPath"`
 }
@@ -294,6 +297,18 @@ func normalizeConfig(c *Config) error {
 	if c.Optimize.IntervalMinutes < 1 { c.Optimize.IntervalMinutes = 1440 }
 	if c.Optimize.RetryMinutes < 1 { c.Optimize.RetryMinutes = 60 }
 
+	if len(c.Hosts.ContainerTargets) > 16 { return errors.New("at most 16 container Hosts targets") }
+	seenTargets := map[string]bool{}
+	for _, name := range c.Hosts.ContainerTargets {
+		if !validContainerName(name) || seenTargets[name] { return fmt.Errorf("invalid or duplicate container target: %q", name) }
+		seenTargets[name] = true
+	}
+	for _, name := range c.Hosts.ContainerCleanup {
+		if !validContainerName(name) || seenTargets[name] { return fmt.Errorf("invalid or overlapping cleanup target: %q", name) }
+		seenTargets[name] = true
+	}
+	if c.Hosts.ContainerTargets == nil { c.Hosts.ContainerTargets = []string{} }
+	if os.Getenv("CFHOST_HOST_DIRECTORY") == "1" && c.HostsPath != getenv("HOSTS_PATH", "/host/etc/hosts") { return errors.New("Hosts path is fixed in directory mount mode") }
 	if c.Hosts.BackupRetention < 1 { c.Hosts.BackupRetention = 10 }
 	if strings.TrimSpace(c.Hosts.LegacyStateMapPath) == "" { c.Hosts.LegacyStateMapPath = "/data/legacy-hosts-map.tsv" }
 
